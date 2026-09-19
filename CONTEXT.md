@@ -8,6 +8,10 @@ A personal finance web app for tracking spending from uploaded bank transactions
 A single financial record — either imported from a bank CSV or entered manually — with a posted date, a signed amount (negative = spent, positive = received), a description, and a Category.
 _Avoid_: Entry, record, purchase
 
+**Reference**:
+An optional, free-text identifier a user attaches to a manually-entered Transaction, pointing to an external document (e.g. an invoice or check number). Distinct from Description, which says what the Transaction was for.
+_Avoid_: Note, memo, ID
+
 **Category**:
 A label classifying a Transaction by type of spending (e.g. "Restaurants", "Groceries"), used to group spending on the Dashboard. Comes from a fixed system-defined list.
 _Avoid_: Tag, type, bucket

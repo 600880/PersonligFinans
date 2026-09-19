@@ -1,0 +1,6 @@
+@PersonligFinans.Api_HostAddress = http://localhost:5260
+
+GET {{PersonligFinans.Api_HostAddress}}/health
+Accept: application/json
+
+###
