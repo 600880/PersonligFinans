@@ -1,29 +1,42 @@
 import { describe, expect, it } from 'vitest'
-import { isTransactionFormValid, type TransactionFormValues } from './transactionForm'
+import {
+  isTransactionFormValid,
+  toCreateTransactionRequest,
+  type TransactionFormValues,
+} from './transactionForm'
 
 function validForm(overrides: Partial<TransactionFormValues> = {}): TransactionFormValues {
   return {
     date: '2026-09-19',
-    description: '',
+    description: 'Rema 1000',
     amountIn: '100',
     amountOut: '',
     reference: '',
-    category: 'Other',
+    categoryId: '13',
     ...overrides,
   }
 }
 
 describe('isTransactionFormValid', () => {
-  it('is valid when In alone has a non-negative amount', () => {
+  it('is valid when In alone has a positive amount', () => {
     expect(isTransactionFormValid(validForm({ amountIn: '100', amountOut: '' }))).toBe(true)
   })
 
-  it('is valid when Out alone has a non-negative amount', () => {
+  it('is valid when Out alone has a positive amount', () => {
     expect(isTransactionFormValid(validForm({ amountIn: '', amountOut: '50' }))).toBe(true)
   })
 
-  it('is valid when the amount is exactly zero', () => {
-    expect(isTransactionFormValid(validForm({ amountIn: '0', amountOut: '' }))).toBe(true)
+  it('is valid with two decimals', () => {
+    expect(isTransactionFormValid(validForm({ amountIn: '249.90' }))).toBe(true)
+  })
+
+  it('is invalid when the amount is zero', () => {
+    expect(isTransactionFormValid(validForm({ amountIn: '0' }))).toBe(false)
+    expect(isTransactionFormValid(validForm({ amountIn: '0.00' }))).toBe(false)
+  })
+
+  it('is invalid with more than two decimals', () => {
+    expect(isTransactionFormValid(validForm({ amountIn: '10.005' }))).toBe(false)
   })
 
   it('is invalid when neither In nor Out is filled', () => {
@@ -46,13 +59,41 @@ describe('isTransactionFormValid', () => {
     expect(isTransactionFormValid(validForm({ date: '' }))).toBe(false)
   })
 
-  it('is invalid when the category is missing', () => {
-    expect(isTransactionFormValid(validForm({ category: '' }))).toBe(false)
+  it('is invalid when no category is chosen', () => {
+    expect(isTransactionFormValid(validForm({ categoryId: '' }))).toBe(false)
   })
 
-  it('does not require Description or Reference', () => {
+  it('is invalid when the description is blank', () => {
+    expect(isTransactionFormValid(validForm({ description: '   ' }))).toBe(false)
+  })
+
+  it('does not require Reference', () => {
+    expect(isTransactionFormValid(validForm({ reference: '' }))).toBe(true)
+  })
+})
+
+describe('toCreateTransactionRequest', () => {
+  it('turns In into a positive Amount', () => {
+    expect(toCreateTransactionRequest(validForm({ amountIn: '1500' })).amount).toBe(1500)
+  })
+
+  it('turns Out into a negative Amount', () => {
     expect(
-      isTransactionFormValid(validForm({ description: '', reference: '' })),
-    ).toBe(true)
+      toCreateTransactionRequest(validForm({ amountIn: '', amountOut: '249.90' })).amount,
+    ).toBe(-249.9)
+  })
+
+  it('trims text, sends a blank Reference as null, and parses the category id', () => {
+    expect(
+      toCreateTransactionRequest(
+        validForm({ description: '  Rema 1000 ', reference: '  ', categoryId: '1' }),
+      ),
+    ).toEqual({
+      date: '2026-09-19',
+      description: 'Rema 1000',
+      amount: 100,
+      reference: null,
+      categoryId: 1,
+    })
   })
 })

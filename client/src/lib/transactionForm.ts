@@ -4,23 +4,49 @@ export interface TransactionFormValues {
   amountIn: string
   amountOut: string
   reference: string
-  category: string
+  categoryId: string
 }
 
-function isNonNegativeAmount(value: string): boolean {
-  if (value.trim() === '') return false
-  const parsed = Number(value)
-  return Number.isFinite(parsed) && parsed >= 0
+export interface CreateTransactionRequest {
+  date: string
+  description: string
+  amount: number
+  reference: string | null
+  categoryId: number
+}
+
+// A positive amount with at most two decimals, e.g. "100" or "249.90".
+const AMOUNT_PATTERN = /^\d+(\.\d{1,2})?$/
+
+function isPositiveAmount(value: string): boolean {
+  const trimmed = value.trim()
+  return AMOUNT_PATTERN.test(trimmed) && Number(trimmed) > 0
 }
 
 export function isTransactionFormValid(values: TransactionFormValues): boolean {
   if (values.date.trim() === '') return false
-  if (values.category.trim() === '') return false
+  if (values.description.trim() === '') return false
+  if (values.categoryId === '') return false
 
   const inFilled = values.amountIn.trim() !== ''
   const outFilled = values.amountOut.trim() !== ''
   if (inFilled === outFilled) return false // exactly one must be filled
 
   const amount = inFilled ? values.amountIn : values.amountOut
-  return isNonNegativeAmount(amount)
+  return isPositiveAmount(amount)
+}
+
+// In becomes a positive Amount, Out a negative one.
+export function toCreateTransactionRequest(values: TransactionFormValues): CreateTransactionRequest {
+  const isIn = values.amountIn.trim() !== ''
+  const magnitude = Number((isIn ? values.amountIn : values.amountOut).trim())
+  const reference = values.reference.trim()
+
+  return {
+    date: values.date,
+    description: values.description.trim(),
+    amount: isIn ? magnitude : -magnitude,
+    reference: reference === '' ? null : reference,
+    categoryId: Number(values.categoryId),
+  }
 }

@@ -1,8 +1,22 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { AddTransactionModal } from './components/AddTransactionModal'
+
+const CONFIRMATION_MS = 3000
 
 function App() {
   const [isModalOpen, setIsModalOpen] = useState(false)
+  const [showSavedMessage, setShowSavedMessage] = useState(false)
+
+  useEffect(() => {
+    if (!showSavedMessage) return
+    const timeout = setTimeout(() => setShowSavedMessage(false), CONFIRMATION_MS)
+    return () => clearTimeout(timeout)
+  }, [showSavedMessage])
+
+  function handleSaved() {
+    setIsModalOpen(false)
+    setShowSavedMessage(true)
+  }
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -12,7 +26,7 @@ function App() {
         </h1>
       </header>
 
-      <main className="flex justify-center px-6 py-10">
+      <main className="flex flex-col items-center gap-4 px-6 py-10">
         <button
           type="button"
           onClick={() => setIsModalOpen(true)}
@@ -20,10 +34,17 @@ function App() {
         >
           Add transaction
         </button>
+
+        <p role="status" className="h-5 text-sm text-emerald-700">
+          {showSavedMessage && 'Transaction saved'}
+        </p>
       </main>
 
       {isModalOpen && (
-        <AddTransactionModal onCancel={() => setIsModalOpen(false)} />
+        <AddTransactionModal
+          onCancel={() => setIsModalOpen(false)}
+          onSaved={handleSaved}
+        />
       )}
     </div>
   )

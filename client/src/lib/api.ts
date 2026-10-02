@@ -1,0 +1,48 @@
+import type { CreateTransactionRequest } from './transactionForm'
+
+export interface Category {
+  id: number
+  name: string
+}
+
+export type FieldErrors = Partial<Record<keyof CreateTransactionRequest, string>>
+
+export type CreateTransactionResult =
+  | { ok: true }
+  | { ok: false; fieldErrors: FieldErrors; message: string | null }
+
+export async function fetchCategories(): Promise<Category[]> {
+  const response = await fetch('/api/categories')
+  if (!response.ok) throw new Error(`Loading categories failed (${response.status})`)
+  return (await response.json()) as Category[]
+}
+
+export async function createTransaction(
+  request: CreateTransactionRequest,
+): Promise<CreateTransactionResult> {
+  let response: Response
+  try {
+    response = await fetch('/api/transactions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request),
+    })
+  } catch {
+    return { ok: false, fieldErrors: {}, message: 'Could not reach the server.' }
+  }
+
+  if (response.ok) return { ok: true }
+
+  if (response.status === 400) {
+    const problem = (await response.json().catch(() => null)) as {
+      errors?: Record<string, string[]>
+    } | null
+    const fieldErrors: FieldErrors = {}
+    for (const [field, messages] of Object.entries(problem?.errors ?? {})) {
+      fieldErrors[field as keyof FieldErrors] = messages[0]
+    }
+    if (Object.keys(fieldErrors).length > 0) return { ok: false, fieldErrors, message: null }
+  }
+
+  return { ok: false, fieldErrors: {}, message: `Saving failed (${response.status}).` }
+}
