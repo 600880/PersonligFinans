@@ -112,12 +112,12 @@ public class BankStatementEndpointsTests
             .ToListAsync();
         Assert.Equal(
             [
-                (new DateOnly(2026, 8, 3), -5356.00m),
-                (new DateOnly(2026, 8, 3), -296.60m),
-                (new DateOnly(2026, 8, 13), 22000.00m),
-                (new DateOnly(2026, 8, 19), 24500.00m),
-                (new DateOnly(2026, 8, 29), -1234.50m),
+                (new DateOnly(2026, 8, 3), "Strømselskap AS", -5356.00m),
+                (new DateOnly(2026, 8, 3), "Matbutikk Sentrum", -296.60m),
+                (new DateOnly(2026, 8, 13), "Overføring mellom egne kontoer", 22000.00m),
+                (new DateOnly(2026, 8, 19), "Lønn Fra: Testfirma AS", 24500.00m),
+                (new DateOnly(2026, 8, 29), "Matbutikk Sentrum", -1234.50m),
             ],
-            stored.Select(t => (t.PostedDate, t.Amount)));
+            stored.Select(t => (t.PostedDate, t.Description, t.Amount)));
     }
 }

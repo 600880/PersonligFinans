@@ -75,7 +75,7 @@ public class StatementParserTests
         Assert.Null(result.Error);
         Assert.Equal(
             [
-                new StatementRow(new DateOnly(2026, 8, 4), "Varer 02.08 Matbutikk Sentrum", -100.00m),
+                new StatementRow(new DateOnly(2026, 8, 4), "Matbutikk Sentrum", -100.00m),
                 new StatementRow(new DateOnly(2026, 8, 19), "Lønn Fra: Testfirma AS", 500.00m),
             ],
             result.Statement!.Rows);
@@ -106,15 +106,9 @@ public class StatementParserTests
         Assert.Null(result.Error);
         Assert.Equal(
             [
-                new StatementRow(
-                    new DateOnly(2026, 8, 3),
-                    "*1111 31.07 Nok 296.60 Matbutikk Sentrum Kurs: 1.0000",
-                    -296.60m),
-                new StatementRow(new DateOnly(2026, 8, 4), "Varer 02.08 Matbutikk Sentrum", -100.00m),
-                new StatementRow(
-                    new DateOnly(2026, 8, 31),
-                    "*1111 30.08 Eur 10.00 Kafé Paris Kurs: 11.7400",
-                    -117.40m),
+                new StatementRow(new DateOnly(2026, 8, 3), "Matbutikk Sentrum", -296.60m),
+                new StatementRow(new DateOnly(2026, 8, 4), "Matbutikk Sentrum", -100.00m),
+                new StatementRow(new DateOnly(2026, 8, 31), "Kafé Paris", -117.40m),
             ],
             result.Statement!.Rows);
     }
