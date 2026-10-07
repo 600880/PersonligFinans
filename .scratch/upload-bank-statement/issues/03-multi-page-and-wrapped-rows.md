@@ -6,8 +6,8 @@
 
 **Status:** ready-for-agent
 
-- [ ] Rows on every page are imported.
-- [ ] Page-carry lines ("Overført til neste side", "Overført fra forrige side"), repeated page headers (date, page number, name/address, repeated "Kontoutskrift …" header and column headings), footer/bank address lines, "Betalte omkostninger i år" and the legal notice about Valutaregisteret are ignored.
-- [ ] Continuation lines (e.g. a lone "1.0000" after "Kurs:") are joined to the preceding row rather than becoming a row or causing a parse failure.
-- [ ] The test-time PDF generator can produce a two-page statement with page-carry lines and a wrapped row, matching the real layout. An API integration test imports it and asserts the full row count and that reconciliation passes.
-- [ ] Parser unit tests cover ignored lines, continuation lines and rows split across pages.
+- [x] Rows on every page are imported.
+- [x] Page-carry lines ("Overført til neste side", "Overført fra forrige side"), repeated page headers (date, page number, name/address, repeated "Kontoutskrift …" header and column headings), footer/bank address lines, "Betalte omkostninger i år" and the legal notice about Valutaregisteret are ignored.
+- [x] Continuation lines (e.g. a lone "1.0000" after "Kurs:") are joined to the preceding row rather than becoming a row or causing a parse failure.
+- [x] The test-time PDF generator can produce a two-page statement with page-carry lines and a wrapped row, matching the real layout. An API integration test imports it and asserts the full row count and that reconciliation passes.
+- [x] Parser unit tests cover ignored lines, continuation lines and rows split across pages.

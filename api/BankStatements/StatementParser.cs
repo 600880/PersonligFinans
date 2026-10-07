@@ -44,7 +44,7 @@ public static partial class StatementParser
         decimal? closing = null;
         var rows = new List<StatementRow>();
 
-        foreach (var line in lines)
+        foreach (var line in JoinContinuationLines(lines))
         {
             if (line.Out is null && line.In is null)
                 continue;
@@ -53,7 +53,7 @@ public static partial class StatementParser
                 opening = SignedAmount(line);
             else if (line.Text.StartsWith("Saldo i Deres favør"))
                 closing = SignedAmount(line);
-            else if (line.Text.StartsWith("Betalte omkostninger"))
+            else if (line.Text.StartsWith("Betalte omkostninger") || IsPageCarry(line.Text))
                 continue;
             else if (line.Text.Length > 0 && ResolveBookedDate(line.BookedDate, periodEnd) is { } bookedDate)
                 rows.Add(new StatementRow(bookedDate, line.Text, SignedAmount(line)));
@@ -82,6 +82,28 @@ public static partial class StatementParser
                 rows),
             null);
     }
+
+    // The bank wraps long descriptions (e.g. a lone "1.0000" after "Kurs:"). A line with no amount
+    // directly below a row continues that row's description; any other line without an amount is
+    // page furniture (headers, footers, notices) and is skipped later.
+    private static List<StatementLine> JoinContinuationLines(IReadOnlyList<StatementLine> lines)
+    {
+        var joined = new List<StatementLine>();
+        foreach (var line in lines)
+        {
+            var previous = joined.LastOrDefault();
+            if (line.Out is null && line.In is null && line.Text.Length > 0
+                && previous is { BookedDate: not null } && (previous.Out ?? previous.In) is not null)
+                joined[^1] = previous with { Text = $"{previous.Text} {line.Text}" };
+            else
+                joined.Add(line);
+        }
+        return joined;
+    }
+
+    // The running balance carried from the bottom of one page to the top of the next.
+    private static bool IsPageCarry(string text) =>
+        text.StartsWith("Overført til neste side") || text.StartsWith("Overført fra forrige side");
 
     private static decimal SignedAmount(StatementLine line) =>
         line.Out is not null ? -ParseAmount(line.Out) : ParseAmount(line.In!);

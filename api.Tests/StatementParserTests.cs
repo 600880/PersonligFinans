@@ -48,6 +48,81 @@ public class StatementParserTests
     }
 
     [Fact]
+    public void Parse_TwoPageStatement_ReadsRowsFromBothPagesAndIgnoresPageFurniture()
+    {
+        var result = StatementParser.Parse(
+        [
+            new("Dato: 31.08.2026 Sidenr. 1 180993"),
+            new("Ola Nordmann Testveien 1, 0001 OSLO"),
+            new(Header),
+            new("Forklaring Rentedato Ut av konto Inn på konto Bokført Referanse"),
+            In("Saldo fra kontoutskrift 31.07.2026", "1.000,00"),
+            Out("Varer 02.08 Matbutikk Sentrum", "100,00", "0408"),
+            In("Overført til neste side", "900,00"),
+            new("KU000"),
+            new("Testbanken Postboks 1, 0001 OSLO"),
+            new("Dato: 31.08.2026 Sidenr. 2 180993"),
+            new("Ola Nordmann Testveien 1, 0001 OSLO"),
+            new(Header),
+            new("Forklaring Rentedato Ut av konto Inn på konto Bokført Referanse"),
+            In("Overført fra forrige side", "900,00"),
+            In("Lønn Fra: Testfirma AS", "500,00", "1908"),
+            In("Saldo i Deres favør", "1.400,00"),
+            new("Betalte omkostninger i år", Out: "0,00", In: "0,00"),
+            new("Vi gjør oppmerksom på at norske banker er pålagt å rapportere valutatransaksjoner og bruk av kort i utlandet"),
+            new("til Valutaregisteret."),
+            new("KU000"),
+            new("Testbanken Postboks 1, 0001 OSLO"),
+        ]);
+
+        Assert.Null(result.Error);
+        Assert.Equal(
+            [
+                new StatementRow(new DateOnly(2026, 8, 4), "Varer 02.08 Matbutikk Sentrum", -100.00m),
+                new StatementRow(new DateOnly(2026, 8, 19), "Lønn Fra: Testfirma AS", 500.00m),
+            ],
+            result.Statement!.Rows);
+    }
+
+    [Fact]
+    public void Parse_WrappedRows_JoinsContinuationLinesOntoPrecedingRow()
+    {
+        var result = StatementParser.Parse(
+        [
+            new(Header),
+            new("Forklaring Rentedato Ut av konto Inn på konto Bokført Referanse"),
+            In("Saldo fra kontoutskrift 31.07.2026", "1.000,00"),
+            Out("*1111 31.07 Nok 296.60 Matbutikk Sentrum Kurs:", "296,60", "0308"),
+            new("1.0000"),
+            Out("Varer 02.08 Matbutikk Sentrum", "100,00", "0408"),
+            Out("*1111 30.08 Eur 10.00 Kafé Paris Kurs:", "117,40", "3108"),
+            new("11.7400"),
+            In("Overført til neste side", "486,00"),
+            new("KU000"),
+            new("Dato: 31.08.2026 Sidenr. 2 180993"),
+            new(Header),
+            new("Forklaring Rentedato Ut av konto Inn på konto Bokført Referanse"),
+            In("Overført fra forrige side", "486,00"),
+            In("Saldo i Deres favør", "486,00"),
+        ]);
+
+        Assert.Null(result.Error);
+        Assert.Equal(
+            [
+                new StatementRow(
+                    new DateOnly(2026, 8, 3),
+                    "*1111 31.07 Nok 296.60 Matbutikk Sentrum Kurs: 1.0000",
+                    -296.60m),
+                new StatementRow(new DateOnly(2026, 8, 4), "Varer 02.08 Matbutikk Sentrum", -100.00m),
+                new StatementRow(
+                    new DateOnly(2026, 8, 31),
+                    "*1111 30.08 Eur 10.00 Kafé Paris Kurs: 11.7400",
+                    -117.40m),
+            ],
+            result.Statement!.Rows);
+    }
+
+    [Fact]
     public void Parse_RowsThatDoNotAddUpToClosingBalance_Fails()
     {
         var result = StatementParser.Parse(
