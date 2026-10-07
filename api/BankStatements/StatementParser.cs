@@ -56,7 +56,7 @@ public static partial class StatementParser
             else if (line.Text.StartsWith("Betalte omkostninger"))
                 continue;
             else if (line.Text.Length > 0 && ResolveBookedDate(line.BookedDate, periodEnd) is { } bookedDate)
-                rows.Add(new StatementRow(bookedDate, line.Text, SignedAmount(line)));
+                rows.Add(new StatementRow(bookedDate, DescriptionCleaner.Clean(line.Text),SignedAmount(line)));
             else
                 return StatementParseResult.Fail($"Could not read the statement line \"{line.Text}\".");
         }

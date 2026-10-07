@@ -62,9 +62,9 @@ public class BankStatementEndpointsTests
             .ToListAsync();
         Assert.Equal(
             [
-                (new DateOnly(2026, 8, 3), "Til: Strømselskap AS Betalt: 01.08.26", -5356.00m),
-                (new DateOnly(2026, 8, 3), "*1111 31.07 Nok 296.60 Matbutikk Sentrum Kurs: 1.0000", -296.60m),
-                (new DateOnly(2026, 8, 4), "*1111 03.08 Nok 50.00 Rema 1000", -50.00m),
+                (new DateOnly(2026, 8, 3), "Strømselskap AS", -5356.00m),
+                (new DateOnly(2026, 8, 3), "Matbutikk Sentrum", -296.60m),
+                (new DateOnly(2026, 8, 4), "Rema 1000", -50.00m),
                 (new DateOnly(2026, 8, 13), "Overføring mellom egne kontoer", 22000.00m),
                 (new DateOnly(2026, 8, 19), "Lønn Fra: Testfirma AS", 24500.00m),
             ],

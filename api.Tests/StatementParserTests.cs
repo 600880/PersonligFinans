@@ -37,12 +37,9 @@ public class StatementParserTests
         Assert.Equal(17347.40m, statement.ClosingBalance);
         Assert.Equal(
             [
-                new StatementRow(new DateOnly(2026, 8, 3), "Til: Strømselskap AS Betalt: 01.08.26", -5356.00m),
+                new StatementRow(new DateOnly(2026, 8, 3), "Strømselskap AS", -5356.00m),
                 new StatementRow(new DateOnly(2026, 8, 13), "Overføring mellom egne kontoer", 22000.00m),
-                new StatementRow(
-                    new DateOnly(2026, 8, 3),
-                    "*1111 31.07 Nok 296.60 Matbutikk Sentrum Kurs: 1.0000",
-                    -296.60m),
+                new StatementRow(new DateOnly(2026, 8, 3), "Matbutikk Sentrum", -296.60m),
             ],
             statement.Rows);
     }
@@ -92,6 +89,48 @@ public class StatementParserTests
 
         Assert.Null(result.Statement);
         Assert.Contains("Could not read", result.Error);
+    }
+
+    // Parses a statement with a single money-out row and returns that row's Description.
+    private static string DescriptionOf(string text) =>
+        StatementParser.Parse(
+        [
+            new(Header),
+            In("Saldo fra kontoutskrift 31.07.2026", "1.000,00"),
+            Out(text, "100,00", "0308"),
+            In("Saldo i Deres favør", "900,00"),
+        ]).Statement!.Rows.Single().Description;
+
+    [Theory]
+    [InlineData("*1111 31.07 Nok 296.60 Rema 1000 Sentrum Kurs: 1.0000", "Rema 1000 Sentrum")]
+    [InlineData("*1111 14.08 Eur 25.00 Some Shop Kurs: 11.6400", "Some Shop")]
+    [InlineData("*1111 03.08 Nok 50.00 Rema 1000", "Rema 1000")]
+    [InlineData("Til: Fjordkraft AS Betalt: 17.08.26", "Fjordkraft AS")]
+    [InlineData("Til: 9999.88.77777 Betalt: 13.08.26", "9999.88.77777")]
+    [InlineData("Varer 04.08 Rema Storgata Nedre Torget Oslo", "Rema Storgata Nedre Torget Oslo")]
+    [InlineData("Overføring mellom egne kontoer", "Overføring mellom egne kontoer")]
+    [InlineData("Lønn Fra: Testfirma AS", "Lønn Fra: Testfirma AS")]
+    public void Parse_RowDescription_IsCleaned(string text, string expected) =>
+        Assert.Equal(expected, DescriptionOf(text));
+
+    [Fact]
+    public void Parse_LongRowDescription_IsTruncatedToDescriptionMaxLength() =>
+        Assert.Equal(new string('x', 200), DescriptionOf(new string('x', 250)));
+
+    [Fact]
+    public void Parse_ForeignCurrencyCardRow_KeepsBookedNokAmount()
+    {
+        var result = StatementParser.Parse(
+        [
+            new(Header),
+            In("Saldo fra kontoutskrift 31.07.2026", "1.000,00"),
+            Out("*1111 14.08 Eur 25.00 Some Shop Kurs: 11.6400", "291,00", "1608"),
+            In("Saldo i Deres favør", "709,00"),
+        ]);
+
+        Assert.Equal(
+            [new StatementRow(new DateOnly(2026, 8, 16), "Some Shop", -291.00m)],
+            result.Statement!.Rows);
     }
 
     [Fact]
