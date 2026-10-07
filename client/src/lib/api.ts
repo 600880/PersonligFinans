@@ -71,5 +71,16 @@ export async function uploadBankStatement(file: File): Promise<UploadBankStateme
   }
 
   if (response.ok) return { ok: true, statement: (await response.json()) as ImportedBankStatement }
+
+  // 400 is a validation problem keyed on "file"; 409 is a problem whose detail explains the conflict.
+  if (response.status === 400 || response.status === 409) {
+    const problem = (await response.json().catch(() => null)) as {
+      detail?: string
+      errors?: { file?: string[] }
+    } | null
+    const message = problem?.errors?.file?.[0] ?? problem?.detail
+    if (message) return { ok: false, message }
+  }
+
   return { ok: false, message: `Upload failed (${response.status}).` }
 }

@@ -1,10 +1,15 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using PersonligFinans.Api.BankStatements;
 using PersonligFinans.Api.Data;
+using UglyToad.PdfPig.Content;
+using UglyToad.PdfPig.Core;
+using UglyToad.PdfPig.Fonts.Standard14Fonts;
+using UglyToad.PdfPig.Writer;
 
 namespace PersonligFinans.Api.Tests;
 
@@ -71,5 +76,153 @@ public class BankStatementEndpointsTests
             stored.Select(t => (t.PostedDate, t.Description, t.Amount)));
         Assert.All(stored, t => Assert.Null(t.CategoryId));
         Assert.All(stored, t => Assert.Null(t.Reference));
+    }
+
+    // A small statement that reconciles: 100,00 − 25,00 + 50,00 = 125,00.
+    private static byte[] ReconcilingStatement(string accountNumber, string closingBalance = "125,00") =>
+        StatementPdf.Create(
+            accountNumber,
+            period: "01.08.2026 - 31.08.2026",
+            openingBalance: "100,00",
+            rows:
+            [
+                new("*1111 03.08 Nok 25.00 Rema 1000", "0408", "25,00", null, "0408", "21", "12345678"),
+                new("Overføring mellom egne kontoer", "1308", null, "50,00", "1308", "100003", "100000002"),
+            ],
+            closingBalance);
+
+    private async Task<(int Statements, int Transactions)> StoredFor(string accountNumber)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var statements = await db.BankStatements.CountAsync(s => s.AccountNumber == accountNumber);
+        var transactions = await db.Transactions.CountAsync(t => t.BankStatement!.AccountNumber == accountNumber);
+        return (statements, transactions);
+    }
+
+    private static async Task<string[]> FileErrors(HttpResponseMessage response)
+    {
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var problem = await response.Content.ReadFromJsonAsync<ValidationProblemDetails>();
+        return problem!.Errors["file"];
+    }
+
+    private static byte[] PdfWithText(string text)
+    {
+        var builder = new PdfDocumentBuilder();
+        var font = builder.AddStandard14Font(Standard14Font.Helvetica);
+        builder.AddPage(PageSize.A4).AddText(text, 12, new PdfPoint(40, 800), font);
+        return builder.Build();
+    }
+
+    private async Task<HttpResponseMessage> UploadFile(byte[] content, string fileName, string contentType)
+    {
+        var file = new ByteArrayContent(content);
+        file.Headers.ContentType = new MediaTypeHeaderValue(contentType);
+        using var form = new MultipartFormDataContent { { file, "file", fileName } };
+        return await _client.PostAsync("/api/bank-statements", form);
+    }
+
+    [Fact]
+    public async Task Post_SameStatementTwice_ReturnsConflictAndAddsNoRows()
+    {
+        var pdf = ReconcilingStatement("2222.33.44444");
+        Assert.Equal(HttpStatusCode.Created, (await Upload(pdf)).StatusCode);
+
+        var response = await Upload(pdf);
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        var problem = await response.Content.ReadFromJsonAsync<ProblemDetails>();
+        Assert.Equal(
+            "Statement for 2222.33.44444, 01.08.2026–31.08.2026 has already been imported.",
+            problem!.Detail);
+        Assert.Equal((1, 2), await StoredFor("2222.33.44444"));
+    }
+
+    [Fact]
+    public async Task Post_SamePeriodForAnotherAccount_IsAccepted()
+    {
+        Assert.Equal(HttpStatusCode.Created, (await Upload(ReconcilingStatement("3333.44.55555"))).StatusCode);
+
+        var response = await Upload(ReconcilingStatement("3333.44.55556"));
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        Assert.Equal((1, 2), await StoredFor("3333.44.55556"));
+    }
+
+    [Fact]
+    public async Task Post_StatementThatDoesNotReconcile_IsRejectedAndNothingStored()
+    {
+        var response = await Upload(ReconcilingStatement("4444.55.66666", closingBalance: "130,00"));
+
+        Assert.Equal(
+            ["The statement's transactions don't add up: expected a closing balance of 125,00 but the statement says 130,00."],
+            await FileErrors(response));
+        Assert.Equal((0, 0), await StoredFor("4444.55.66666"));
+    }
+
+    [Fact]
+    public async Task Post_StatementWithUnreadableRow_IsRejectedAndNothingStored()
+    {
+        var pdf = StatementPdf.Create(
+            accountNumber: "5555.66.77777",
+            period: "01.08.2026 - 31.08.2026",
+            openingBalance: "1.000,00",
+            rows:
+            [
+                new("*1111 03.08 Nok 250.00 Rema 1000", "0408", "250,00", null, "0408", "21", "12345678"),
+                new("Varer 32.08 Ukjent butikk", "3208", "100,00", null, "3208", "21", "12345678"),
+            ],
+            closingBalance: "650,00");
+
+        var response = await Upload(pdf);
+
+        Assert.Equal(["Could not read the statement line \"Varer 32.08 Ukjent butikk\"."], await FileErrors(response));
+        Assert.Equal((0, 0), await StoredFor("5555.66.77777"));
+    }
+
+    [Fact]
+    public async Task Post_PdfThatIsNotABankStatement_IsRejected()
+    {
+        var response = await Upload(PdfWithText("Faktura 42 fra Snekker AS"));
+
+        Assert.Equal(["The file is not a Sparebanken Norge Bank Statement."], await FileErrors(response));
+    }
+
+    [Fact]
+    public async Task Post_FileThatIsNotAPdf_IsRejected()
+    {
+        var response = await UploadFile("Dato;Beløp\n03.08.2026;-250,00"u8.ToArray(), "kontoutskrift.csv", "text/csv");
+
+        Assert.Equal(["The file is not a PDF."], await FileErrors(response));
+    }
+
+    [Fact]
+    public async Task Post_DamagedPdf_IsRejected()
+    {
+        var response = await Upload("%PDF-1.7\nthis is not really a PDF"u8.ToArray());
+
+        Assert.Equal(["The PDF could not be read. It may be damaged."], await FileErrors(response));
+    }
+
+    [Fact]
+    public async Task Post_FileOverTenMegabytes_IsRejected()
+    {
+        var tooLarge = new byte[10 * 1024 * 1024 + 1];
+        "%PDF-1.7\n"u8.CopyTo(tooLarge);
+
+        var response = await Upload(tooLarge);
+
+        Assert.Equal(["The file is larger than 10 MB."], await FileErrors(response));
+    }
+
+    [Fact]
+    public async Task Post_WithoutAFile_IsRejected()
+    {
+        using var form = new MultipartFormDataContent { { new StringContent("hello"), "note" } };
+
+        var response = await _client.PostAsync("/api/bank-statements", form);
+
+        Assert.Equal(["Choose a PDF file to upload."], await FileErrors(response));
     }
 }
