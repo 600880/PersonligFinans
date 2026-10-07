@@ -1,0 +1,110 @@
+using System.Globalization;
+using System.Text.RegularExpressions;
+
+namespace PersonligFinans.Api.BankStatements;
+
+// One visual line of a Bank Statement, split by column position: Text is the "Forklaring" column,
+// Out / In the "Ut av konto" / "Inn på konto" amounts and BookedDate the "Bokført" DDMM value.
+// Direction and dates come from layout, never from wording.
+public record StatementLine(string Text, string? Out = null, string? In = null, string? BookedDate = null);
+
+public record StatementRow(DateOnly BookedDate, string Description, decimal Amount);
+
+public record ParsedStatement(
+    string AccountNumber,
+    DateOnly PeriodStart,
+    DateOnly PeriodEnd,
+    decimal OpeningBalance,
+    decimal ClosingBalance,
+    IReadOnlyList<StatementRow> Rows);
+
+public record StatementParseResult(ParsedStatement? Statement, string? Error)
+{
+    public static StatementParseResult Fail(string error) => new(null, error);
+}
+
+// Parses a Sparebanken Norge account statement (kontoutskrift).
+public static partial class StatementParser
+{
+    private static readonly CultureInfo Norwegian = CultureInfo.GetCultureInfo("nb-NO");
+
+    [GeneratedRegex(@"Kontoutskrift nr\. \d+ for konto (?<account>\d{4}\.\d{2}\.\d{5}) i perioden (?<start>\d{2}\.\d{2}\.\d{4}) - (?<end>\d{2}\.\d{2}\.\d{4})")]
+    private static partial Regex HeaderPattern();
+
+    public static StatementParseResult Parse(IReadOnlyList<StatementLine> lines)
+    {
+        var header = lines.Select(l => HeaderPattern().Match(l.Text)).FirstOrDefault(m => m.Success);
+        if (header is null)
+            return StatementParseResult.Fail("The file is not a Sparebanken Norge Bank Statement.");
+
+        var periodStart = ParseDate(header.Groups["start"].Value);
+        var periodEnd = ParseDate(header.Groups["end"].Value);
+
+        decimal? opening = null;
+        decimal? closing = null;
+        var rows = new List<StatementRow>();
+
+        foreach (var line in lines)
+        {
+            if (line.Out is null && line.In is null)
+                continue;
+
+            if (line.Text.StartsWith("Saldo fra kontoutskrift"))
+                opening = SignedAmount(line);
+            else if (line.Text.StartsWith("Saldo i Deres favør"))
+                closing = SignedAmount(line);
+            else if (line.Text.StartsWith("Betalte omkostninger"))
+                continue;
+            else if (line.Text.Length > 0 && ResolveBookedDate(line.BookedDate, periodEnd) is { } bookedDate)
+                rows.Add(new StatementRow(bookedDate, line.Text, SignedAmount(line)));
+            else
+                return StatementParseResult.Fail($"Could not read the statement line \"{line.Text}\".");
+        }
+
+        if (opening is null)
+            return StatementParseResult.Fail("The statement has no opening balance.");
+        if (closing is null)
+            return StatementParseResult.Fail("The statement has no closing balance.");
+
+        var expectedClosing = opening.Value + rows.Sum(r => r.Amount);
+        if (expectedClosing != closing.Value)
+            return StatementParseResult.Fail(
+                $"The statement's transactions don't add up: expected a closing balance of " +
+                $"{expectedClosing.ToString("N2", Norwegian)} but the statement says {closing.Value.ToString("N2", Norwegian)}.");
+
+        return new StatementParseResult(
+            new ParsedStatement(
+                header.Groups["account"].Value,
+                periodStart,
+                periodEnd,
+                opening.Value,
+                closing.Value,
+                rows),
+            null);
+    }
+
+    private static decimal SignedAmount(StatementLine line) =>
+        line.Out is not null ? -ParseAmount(line.Out) : ParseAmount(line.In!);
+
+    // Norwegian format: "24.500,00".
+    private static decimal ParseAmount(string amount) =>
+        decimal.Parse(amount.Replace(".", "").Replace(',', '.'), CultureInfo.InvariantCulture);
+
+    private static DateOnly ParseDate(string date) =>
+        DateOnly.ParseExact(date, "dd.MM.yyyy", CultureInfo.InvariantCulture);
+
+    // Booked dates are printed as DDMM; the year comes from the statement period.
+    // Null when missing or not a real date.
+    private static DateOnly? ResolveBookedDate(string? ddmm, DateOnly periodEnd)
+    {
+        if (ddmm is not { Length: 4 } || !ddmm.All(char.IsAsciiDigit))
+            return null;
+
+        var day = int.Parse(ddmm[..2]);
+        var month = int.Parse(ddmm[2..]);
+        var year = month > periodEnd.Month ? periodEnd.Year - 1 : periodEnd.Year;
+        if (month is < 1 or > 12 || day < 1 || day > DateTime.DaysInMonth(year, month))
+            return null;
+        return new DateOnly(year, month, day);
+    }
+}

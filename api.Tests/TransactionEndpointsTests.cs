@@ -67,6 +67,7 @@ public class TransactionEndpointsTests
         Assert.Equal(1500m, stored.Amount);
         Assert.Equal("INV-42", stored.Reference);
         Assert.Equal(OtherCategoryId, stored.CategoryId);
+        Assert.Null(stored.BankStatementId);
     }
 
     [Fact]

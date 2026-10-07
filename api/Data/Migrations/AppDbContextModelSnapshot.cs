@@ -22,6 +22,53 @@ namespace PersonligFinans.Api.Data.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("PersonligFinans.Api.Data.BankStatement", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("AccountNumber")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("account_number");
+
+                    b.Property<decimal>("ClosingBalance")
+                        .HasPrecision(12, 2)
+                        .HasColumnType("numeric(12,2)")
+                        .HasColumnName("closing_balance");
+
+                    b.Property<DateTimeOffset>("ImportedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("imported_at");
+
+                    b.Property<decimal>("OpeningBalance")
+                        .HasPrecision(12, 2)
+                        .HasColumnType("numeric(12,2)")
+                        .HasColumnName("opening_balance");
+
+                    b.Property<DateOnly>("PeriodEnd")
+                        .HasColumnType("date")
+                        .HasColumnName("period_end");
+
+                    b.Property<DateOnly>("PeriodStart")
+                        .HasColumnType("date")
+                        .HasColumnName("period_start");
+
+                    b.HasKey("Id")
+                        .HasName("pk_bank_statements");
+
+                    b.HasIndex("AccountNumber", "PeriodStart", "PeriodEnd")
+                        .IsUnique()
+                        .HasDatabaseName("ix_bank_statements_account_number_period_start_period_end");
+
+                    b.ToTable("bank_statements", (string)null);
+                });
+
             modelBuilder.Entity("PersonligFinans.Api.Data.Category", b =>
                 {
                     b.Property<int>("Id")
@@ -128,6 +175,10 @@ namespace PersonligFinans.Api.Data.Migrations
                         .HasColumnType("numeric(12,2)")
                         .HasColumnName("amount");
 
+                    b.Property<int?>("BankStatementId")
+                        .HasColumnType("integer")
+                        .HasColumnName("bank_statement_id");
+
                     b.Property<int?>("CategoryId")
                         .HasColumnType("integer")
                         .HasColumnName("category_id");
@@ -150,6 +201,9 @@ namespace PersonligFinans.Api.Data.Migrations
                     b.HasKey("Id")
                         .HasName("pk_transactions");
 
+                    b.HasIndex("BankStatementId")
+                        .HasDatabaseName("ix_transactions_bank_statement_id");
+
                     b.HasIndex("CategoryId")
                         .HasDatabaseName("ix_transactions_category_id");
 
@@ -161,13 +215,26 @@ namespace PersonligFinans.Api.Data.Migrations
 
             modelBuilder.Entity("PersonligFinans.Api.Data.Transaction", b =>
                 {
+                    b.HasOne("PersonligFinans.Api.Data.BankStatement", "BankStatement")
+                        .WithMany("Transactions")
+                        .HasForeignKey("BankStatementId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .HasConstraintName("fk_transactions_bank_statements_bank_statement_id");
+
                     b.HasOne("PersonligFinans.Api.Data.Category", "Category")
                         .WithMany()
                         .HasForeignKey("CategoryId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .HasConstraintName("fk_transactions_categories_category_id");
 
+                    b.Navigation("BankStatement");
+
                     b.Navigation("Category");
+                });
+
+            modelBuilder.Entity("PersonligFinans.Api.Data.BankStatement", b =>
+                {
+                    b.Navigation("Transactions");
                 });
 #pragma warning restore 612, 618
         }

@@ -6,9 +6,11 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 {
     public const int DescriptionMaxLength = 200;
     public const int ReferenceMaxLength = 100;
+    public const int AccountNumberMaxLength = 20;
 
     public DbSet<Category> Categories => Set<Category>();
     public DbSet<Transaction> Transactions => Set<Transaction>();
+    public DbSet<BankStatement> BankStatements => Set<BankStatement>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -29,6 +31,19 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 .WithMany()
                 .HasForeignKey(t => t.CategoryId)
                 .OnDelete(DeleteBehavior.Restrict);
+            transaction.HasOne(t => t.BankStatement)
+                .WithMany(s => s.Transactions)
+                .HasForeignKey(t => t.BankStatementId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<BankStatement>(statement =>
+        {
+            statement.Property(s => s.AccountNumber).HasMaxLength(AccountNumberMaxLength);
+            statement.Property(s => s.OpeningBalance).HasPrecision(12, 2);
+            statement.Property(s => s.ClosingBalance).HasPrecision(12, 2);
+            // A Bank Statement is imported at most once.
+            statement.HasIndex(s => new { s.AccountNumber, s.PeriodStart, s.PeriodEnd }).IsUnique();
         });
     }
 }

@@ -10,18 +10,24 @@ const categories = [
 ]
 
 type PostHandler = (body: unknown) => Response
+type UploadHandler = (body: FormData) => Response | Promise<Response>
 
 let handlePost: PostHandler
+let handleUpload: UploadHandler
 const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
   if (url === '/api/categories') return Response.json(categories)
   if (url === '/api/transactions' && init?.method === 'POST') {
     return handlePost(JSON.parse(init.body as string))
+  }
+  if (url === '/api/bank-statements' && init?.method === 'POST') {
+    return handleUpload(init.body as FormData)
   }
   return new Response(null, { status: 404 })
 })
 
 beforeEach(() => {
   handlePost = () => Response.json({ id: 1 }, { status: 201 })
+  handleUpload = () => Response.json(importedStatement, { status: 201 })
   vi.stubGlobal('fetch', fetchMock)
 })
 
@@ -29,6 +35,16 @@ afterEach(() => {
   fetchMock.mockClear()
   vi.unstubAllGlobals()
 })
+
+const importedStatement = {
+  id: 7,
+  accountNumber: '1111.22.33333',
+  periodStart: '2026-08-01',
+  periodEnd: '2026-08-31',
+  transactionCount: 38,
+}
+
+const statementPdf = new File(['%PDF-1.7'], 'kontoutskrift.pdf', { type: 'application/pdf' })
 
 async function openModal() {
   const user = userEvent.setup()
@@ -141,5 +157,50 @@ describe('App', () => {
 
     await user.click(screen.getByRole('button', { name: /add transaction/i }))
     expect(screen.getByLabelText(/description/i)).toHaveValue('')
+  })
+
+  it('shows Upload transactions to the left of Add transaction', () => {
+    render(<App />)
+
+    const buttons = screen.getAllByRole('button').map((button) => button.textContent)
+    expect(buttons).toEqual(['Upload transactions', 'Add transaction'])
+  })
+
+  it('uploads the chosen PDF and shows how many transactions were imported', async () => {
+    let uploaded: FormData | undefined
+    handleUpload = (body) => {
+      uploaded = body
+      return Response.json(importedStatement, { status: 201 })
+    }
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.upload(screen.getByLabelText(/bank statement pdf/i), statementPdf)
+
+    expect(uploaded?.get('file')).toBe(statementPdf)
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      'Imported 38 transactions from statement 01.08.2026–31.08.2026',
+    )
+  })
+
+  it('only accepts PDF files', () => {
+    render(<App />)
+
+    expect(screen.getByLabelText(/bank statement pdf/i)).toHaveAttribute('accept', 'application/pdf')
+  })
+
+  it('disables the upload button while the upload is in progress', async () => {
+    let respond: (response: Response) => void = () => {}
+    handleUpload = () => new Promise((resolve) => (respond = resolve))
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.upload(screen.getByLabelText(/bank statement pdf/i), statementPdf)
+
+    const button = screen.getByRole('button', { name: /uploading/i })
+    expect(button).toBeDisabled()
+
+    respond(Response.json(importedStatement, { status: 201 }))
+    expect(await screen.findByRole('button', { name: /upload transactions/i })).toBeEnabled()
   })
 })

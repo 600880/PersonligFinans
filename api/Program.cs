@@ -1,3 +1,4 @@
+using PersonligFinans.Api.BankStatements;
 using PersonligFinans.Api.Data;
 using PersonligFinans.Api.Transactions;
 
@@ -18,6 +19,7 @@ app.UseStaticFiles();
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 app.MapTransactionEndpoints();
+app.MapBankStatementEndpoints();
 app.MapFallback("/api/{**path}", () => Results.NotFound());
 app.MapFallbackToFile("index.html");
 

@@ -46,3 +46,30 @@ export async function createTransaction(
 
   return { ok: false, fieldErrors: {}, message: `Saving failed (${response.status}).` }
 }
+
+export interface ImportedBankStatement {
+  id: number
+  accountNumber: string
+  periodStart: string
+  periodEnd: string
+  transactionCount: number
+}
+
+export type UploadBankStatementResult =
+  | { ok: true; statement: ImportedBankStatement }
+  | { ok: false; message: string }
+
+export async function uploadBankStatement(file: File): Promise<UploadBankStatementResult> {
+  const body = new FormData()
+  body.append('file', file)
+
+  let response: Response
+  try {
+    response = await fetch('/api/bank-statements', { method: 'POST', body })
+  } catch {
+    return { ok: false, message: 'Could not reach the server.' }
+  }
+
+  if (response.ok) return { ok: true, statement: (await response.json()) as ImportedBankStatement }
+  return { ok: false, message: `Upload failed (${response.status}).` }
+}

@@ -14,4 +14,8 @@ public class Transaction
     // Null means Uncategorized.
     public int? CategoryId { get; set; }
     public Category? Category { get; set; }
+
+    // Null for manually-entered Transactions.
+    public int? BankStatementId { get; set; }
+    public BankStatement? BankStatement { get; set; }
 }

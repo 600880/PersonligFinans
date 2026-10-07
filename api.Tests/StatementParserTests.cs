@@ -1,0 +1,105 @@
+using PersonligFinans.Api.BankStatements;
+
+namespace PersonligFinans.Api.Tests;
+
+public class StatementParserTests
+{
+    private const string Header =
+        "Kontoutskrift nr. 8 for konto 1234.56.78901 i perioden 01.08.2026 - 31.08.2026 Testbank Brukskonto.";
+
+    private static StatementLine Out(string text, string amount, string booked) =>
+        new(text, Out: amount, BookedDate: booked);
+
+    private static StatementLine In(string text, string amount, string? booked = null) =>
+        new(text, In: amount, BookedDate: booked);
+
+    [Fact]
+    public void Parse_OnePageStatement_ReadsHeaderBalancesAndSignedRows()
+    {
+        var result = StatementParser.Parse(
+        [
+            new(Header),
+            new("Forklaring Rentedato Ut av konto Inn på konto Bokført Referanse"),
+            In("Saldo fra kontoutskrift 31.07.2026", "1.000,00"),
+            Out("Til: Strømselskap AS Betalt: 01.08.26", "5.356,00", "0308"),
+            In("Overføring mellom egne kontoer", "22.000,00", "1308"),
+            Out("*1111 31.07 Nok 296.60 Matbutikk Sentrum Kurs: 1.0000", "296,60", "0308"),
+            In("Saldo i Deres favør", "17.347,40"),
+            new("Betalte omkostninger i år", Out: "0,00", In: "0,00"),
+        ]);
+
+        Assert.Null(result.Error);
+        var statement = result.Statement!;
+        Assert.Equal("1234.56.78901", statement.AccountNumber);
+        Assert.Equal(new DateOnly(2026, 8, 1), statement.PeriodStart);
+        Assert.Equal(new DateOnly(2026, 8, 31), statement.PeriodEnd);
+        Assert.Equal(1000.00m, statement.OpeningBalance);
+        Assert.Equal(17347.40m, statement.ClosingBalance);
+        Assert.Equal(
+            [
+                new StatementRow(new DateOnly(2026, 8, 3), "Til: Strømselskap AS Betalt: 01.08.26", -5356.00m),
+                new StatementRow(new DateOnly(2026, 8, 13), "Overføring mellom egne kontoer", 22000.00m),
+                new StatementRow(
+                    new DateOnly(2026, 8, 3),
+                    "*1111 31.07 Nok 296.60 Matbutikk Sentrum Kurs: 1.0000",
+                    -296.60m),
+            ],
+            statement.Rows);
+    }
+
+    [Fact]
+    public void Parse_RowsThatDoNotAddUpToClosingBalance_Fails()
+    {
+        var result = StatementParser.Parse(
+        [
+            new(Header),
+            In("Saldo fra kontoutskrift 31.07.2026", "1.000,00"),
+            Out("Til: Strømselskap AS Betalt: 01.08.26", "100,00", "0308"),
+            In("Saldo i Deres favør", "1.000,00"),
+        ]);
+
+        Assert.Null(result.Statement);
+        Assert.Contains("don't add up", result.Error);
+    }
+
+    [Fact]
+    public void Parse_BookingFromPreviousYear_GetsPreviousYear()
+    {
+        var result = StatementParser.Parse(
+        [
+            new("Kontoutskrift nr. 1 for konto 1234.56.78901 i perioden 31.12.2026 - 31.01.2027 Testbank Brukskonto."),
+            In("Saldo fra kontoutskrift 30.12.2026", "1.000,00"),
+            Out("Varer 30.12 Matbutikk Sentrum", "100,00", "3112"),
+            Out("Varer 02.01 Matbutikk Sentrum", "50,00", "0201"),
+            In("Saldo i Deres favør", "850,00"),
+        ]);
+
+        Assert.Equal(
+            [new DateOnly(2026, 12, 31), new DateOnly(2027, 1, 2)],
+            result.Statement!.Rows.Select(r => r.BookedDate));
+    }
+
+    [Fact]
+    public void Parse_ImpossibleBookedDate_Fails()
+    {
+        var result = StatementParser.Parse(
+        [
+            new(Header),
+            In("Saldo fra kontoutskrift 31.07.2026", "1.000,00"),
+            Out("Varer 02.08 Matbutikk", "50,00", "3102"),
+            In("Saldo i Deres favør", "950,00"),
+        ]);
+
+        Assert.Null(result.Statement);
+        Assert.Contains("Could not read", result.Error);
+    }
+
+    [Fact]
+    public void Parse_LinesWithoutStatementHeader_Fails()
+    {
+        var result = StatementParser.Parse([new("Faktura nr. 42"), In("Å betale", "100,00")]);
+
+        Assert.Null(result.Statement);
+        Assert.Contains("not a Sparebanken Norge Bank Statement", result.Error);
+    }
+}
