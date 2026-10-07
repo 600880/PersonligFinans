@@ -10,6 +10,7 @@ function App() {
   const [showSavedMessage, setShowSavedMessage] = useState(false)
   const [isUploading, setIsUploading] = useState(false)
   const [importMessage, setImportMessage] = useState<string | null>(null)
+  const [uploadError, setUploadError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -21,6 +22,7 @@ function App() {
   function handleSaved() {
     setIsModalOpen(false)
     setImportMessage(null)
+    setUploadError(null)
     setShowSavedMessage(true)
   }
 
@@ -29,6 +31,7 @@ function App() {
     setIsUploading(true)
     setShowSavedMessage(false)
     setImportMessage(null)
+    setUploadError(null)
 
     const result = await uploadBankStatement(file).finally(() => setIsUploading(false))
     if (result.ok) {
@@ -37,6 +40,8 @@ function App() {
         `Imported ${transactionCount} transactions from statement ` +
           `${formatNorwegianDate(periodStart)}–${formatNorwegianDate(periodEnd)}`,
       )
+    } else {
+      setUploadError(result.message)
     }
   }
 
@@ -78,9 +83,15 @@ function App() {
           </button>
         </div>
 
-        <p role="status" className="h-5 text-sm text-emerald-700">
-          {showSavedMessage ? 'Transaction saved' : importMessage}
-        </p>
+        {uploadError ? (
+          <p role="alert" className="min-h-5 text-sm text-red-700">
+            {uploadError}
+          </p>
+        ) : (
+          <p role="status" className="h-5 text-sm text-emerald-700">
+            {showSavedMessage ? 'Transaction saved' : importMessage}
+          </p>
+        )}
       </main>
 
       {isModalOpen && (

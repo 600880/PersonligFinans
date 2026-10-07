@@ -203,4 +203,70 @@ describe('App', () => {
     respond(Response.json(importedStatement, { status: 201 }))
     expect(await screen.findByRole('button', { name: /upload transactions/i })).toBeEnabled()
   })
+
+  it('shows why the server rejected the statement and re-enables the button', async () => {
+    handleUpload = () =>
+      Response.json(
+        { errors: { file: ['The file is not a Sparebanken Norge Bank Statement.'] } },
+        { status: 400 },
+      )
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.upload(screen.getByLabelText(/bank statement pdf/i), statementPdf)
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'The file is not a Sparebanken Norge Bank Statement.',
+    )
+    expect(screen.getByRole('button', { name: /upload transactions/i })).toBeEnabled()
+  })
+
+  it('says when the statement has already been imported', async () => {
+    handleUpload = () =>
+      Response.json(
+        {
+          title: 'Conflict',
+          status: 409,
+          detail: 'Statement for 1111.22.33333, 01.08.2026–31.08.2026 has already been imported.',
+        },
+        { status: 409 },
+      )
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.upload(screen.getByLabelText(/bank statement pdf/i), statementPdf)
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Statement for 1111.22.33333, 01.08.2026–31.08.2026 has already been imported.',
+    )
+  })
+
+  it('shows a general error when the server cannot be reached', async () => {
+    handleUpload = () => {
+      throw new TypeError('Failed to fetch')
+    }
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.upload(screen.getByLabelText(/bank statement pdf/i), statementPdf)
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Could not reach the server.')
+    expect(screen.getByRole('button', { name: /upload transactions/i })).toBeEnabled()
+  })
+
+  it('clears an upload error once a later upload succeeds', async () => {
+    handleUpload = () => new Response(null, { status: 500 })
+    const user = userEvent.setup()
+    render(<App />)
+    await user.upload(screen.getByLabelText(/bank statement pdf/i), statementPdf)
+    expect(await screen.findByRole('alert')).toHaveTextContent('Upload failed (500).')
+
+    handleUpload = () => Response.json(importedStatement, { status: 201 })
+    await user.upload(screen.getByLabelText(/bank statement pdf/i), statementPdf)
+
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      'Imported 38 transactions from statement 01.08.2026–31.08.2026',
+    )
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
 })
