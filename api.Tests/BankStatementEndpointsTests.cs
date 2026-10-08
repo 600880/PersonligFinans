@@ -22,6 +22,7 @@ public class BankStatementEndpointsTests
 
     private const int GroceriesId = 1;
     private const int RestaurantsId = 2;
+    private const int TransfersId = 12;
 
     // The tests share one database and rules match every imported Transaction, so the tests that
     // add rules put a token of their own in each keyword and description.
@@ -42,7 +43,7 @@ public class BankStatementEndpointsTests
     }
 
     [Fact]
-    public async Task Post_OnePageStatement_StoresUncategorizedTransactionsLinkedToStatement()
+    public async Task Post_OnePageStatement_StoresTransactionsLinkedToStatement()
     {
         var pdf = StatementPdf.Create(
             accountNumber: "1111.22.33333",
@@ -82,7 +83,8 @@ public class BankStatementEndpointsTests
                 (new DateOnly(2026, 8, 19), "Lønn Fra: Testfirma AS", 24500.00m),
             ],
             stored.Select(t => (t.PostedDate, t.Description, t.Amount)));
-        Assert.All(stored, t => Assert.Null(t.CategoryId));
+        // Seeded rules categorize the merchants they know; the rest stay Uncategorized.
+        Assert.Equal([null, null, GroceriesId, TransfersId, null], stored.Select(t => t.CategoryId));
         Assert.All(stored, t => Assert.Null(t.Reference));
     }
 
@@ -348,7 +350,7 @@ public class BankStatementEndpointsTests
         await AddRule($"{_token} butikk", GroceriesId);
 
         var response = await Upload(StatementWithPurchasesFrom(
-            $"{_token} Butikk Sentrum", $"{_token} Kafé", $"{_token} Kino", $"{_token} Butikk Torget"));
+            $"{_token} Butikk Sentrum", $"{_token} Kafé", $"{_token} Frisør", $"{_token} Butikk Torget"));
 
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         var created = await response.Content.ReadFromJsonAsync<BankStatementResponse>();
