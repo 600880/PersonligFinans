@@ -24,15 +24,29 @@ export function RulesPage() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
   useEffect(() => {
-    void fetchCategories().then(setCategories)
-    void fetchRules().then(setRules)
+    let ignore = false
+    Promise.all([fetchCategories(), fetchRules()])
+      .then(([loadedCategories, loadedRules]) => {
+        if (ignore) return
+        setCategories(loadedCategories)
+        setRules(loadedRules)
+      })
+      .catch(() => {
+        if (!ignore) setErrorMessage('Could not load the rules.')
+      })
+    return () => {
+      ignore = true
+    }
   }, [])
 
   const categoryName = (id: number) => categories.find((c) => c.id === id)?.name ?? ''
 
   async function handleAdd(event: FormEvent) {
     event.preventDefault()
+    if (isSaving) return
+
     setIsSaving(true)
+    setFieldErrors({})
     setStatusMessage(null)
     setErrorMessage(null)
 
@@ -47,7 +61,6 @@ export function RulesPage() {
       )
       setKeyword('')
       setCategoryId('')
-      setFieldErrors({})
       setStatusMessage(changedMessage('Rule added.', result.transactionsChanged))
     } else {
       setFieldErrors(result.fieldErrors)

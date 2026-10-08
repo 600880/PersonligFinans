@@ -179,6 +179,24 @@ public class CategorizationRuleEndpointsTests
     }
 
     [Fact]
+    public async Task Post_NoKeyword_IsRejected()
+    {
+        var errors = await AddRuleExpectingValidationErrors(null, GroceriesId);
+
+        Assert.Equal(["keyword"], errors.Keys);
+        Assert.Equal(["Keyword is required."], errors["keyword"]);
+    }
+
+    [Fact]
+    public async Task Post_NoCategory_IsRejected()
+    {
+        var errors = await AddRuleExpectingValidationErrors($"{_token} butikk", null);
+
+        Assert.Equal(["categoryId"], errors.Keys);
+        Assert.Equal(["Category is required."], errors["categoryId"]);
+    }
+
+    [Fact]
     public async Task Post_KeywordShorterThanTwoCharactersAfterTrimming_IsRejected()
     {
         var errors = await AddRuleExpectingValidationErrors(" x ", GroceriesId);

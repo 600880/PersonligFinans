@@ -14,7 +14,7 @@ type UploadHandler = (body: FormData) => Response | Promise<Response>
 
 let handlePost: PostHandler
 let handleUpload: UploadHandler
-let rules: { id: number; keyword: string; categoryId: number }[]
+let rules: { id: number; keyword: string; categoryId: number }[] | Response
 let handleAddRule: PostHandler
 const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
   if (url === '/api/categories') return Response.json(categories)
@@ -27,7 +27,9 @@ const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
   if (url === '/api/categorization-rules' && init?.method === 'POST') {
     return handleAddRule(JSON.parse(init.body as string))
   }
-  if (url === '/api/categorization-rules') return Response.json(rules)
+  if (url === '/api/categorization-rules') {
+    return rules instanceof Response ? rules : Response.json(rules)
+  }
   return new Response(null, { status: 404 })
 })
 
@@ -359,5 +361,33 @@ describe('Rules page', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Could not reach the server.')
     expect(screen.getByLabelText('Keyword')).toHaveValue('rema')
+  })
+
+  it('says when the rules could not be loaded', async () => {
+    rules = new Response(null, { status: 500 })
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(screen.getByRole('button', { name: 'Rules' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Could not load the rules.')
+  })
+
+  it('clears an earlier field error when the next attempt fails for another reason', async () => {
+    handleAddRule = () =>
+      Response.json({ errors: { keyword: ["A rule for 'Kiwi' already exists."] } }, { status: 400 })
+    const user = await openRulesPage()
+    await user.type(screen.getByLabelText('Keyword'), 'kiwi')
+    await user.selectOptions(screen.getByLabelText('Category'), 'Groceries')
+    await user.click(screen.getByRole('button', { name: 'Add rule' }))
+    await screen.findByText("A rule for 'Kiwi' already exists.")
+
+    handleAddRule = () => {
+      throw new TypeError('Failed to fetch')
+    }
+    await user.click(screen.getByRole('button', { name: 'Add rule' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Could not reach the server.')
+    expect(screen.queryByText("A rule for 'Kiwi' already exists.")).not.toBeInTheDocument()
   })
 })
