@@ -38,7 +38,7 @@ public class CategorizationRuleEndpointsTests
         var response = await AddRule($"{_token} butikk", GroceriesId);
 
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
-        var created = await response.Content.ReadFromJsonAsync<CreatedCategorizationRuleResponse>();
+        var created = await response.Content.ReadFromJsonAsync<SavedCategorizationRuleResponse>();
         Assert.Equal($"{_token} butikk", created!.Keyword);
         Assert.Equal(GroceriesId, created.CategoryId);
         Assert.Equal(0, created.TransactionsChanged);
@@ -95,7 +95,7 @@ public class CategorizationRuleEndpointsTests
     {
         var response = await AddRule(keyword, categoryId);
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
-        return (await response.Content.ReadFromJsonAsync<CreatedCategorizationRuleResponse>())!.TransactionsChanged;
+        return (await response.Content.ReadFromJsonAsync<SavedCategorizationRuleResponse>())!.TransactionsChanged;
     }
 
     [Fact]
@@ -234,17 +234,17 @@ public class CategorizationRuleEndpointsTests
     {
         var response = await AddRule(keyword, categoryId);
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
-        return (await response.Content.ReadFromJsonAsync<CreatedCategorizationRuleResponse>())!.Id;
+        return (await response.Content.ReadFromJsonAsync<SavedCategorizationRuleResponse>())!.Id;
     }
 
     private async Task<HttpResponseMessage> EditRule(int id, string? keyword, int? categoryId) =>
         await _client.PutAsJsonAsync($"/api/categorization-rules/{id}", new { keyword, categoryId });
 
-    private async Task<CreatedCategorizationRuleResponse> EditedRule(int id, string keyword, int categoryId)
+    private async Task<SavedCategorizationRuleResponse> EditedRule(int id, string keyword, int categoryId)
     {
         var response = await EditRule(id, keyword, categoryId);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        return (await response.Content.ReadFromJsonAsync<CreatedCategorizationRuleResponse>())!;
+        return (await response.Content.ReadFromJsonAsync<SavedCategorizationRuleResponse>())!;
     }
 
     [Fact]
@@ -255,7 +255,7 @@ public class CategorizationRuleEndpointsTests
 
         var edited = await EditedRule(ruleId, $"{_token} butikk", RestaurantsId);
 
-        Assert.Equal(new CreatedCategorizationRuleResponse(ruleId, $"{_token} butikk", RestaurantsId, 2), edited);
+        Assert.Equal(new SavedCategorizationRuleResponse(ruleId, $"{_token} butikk", RestaurantsId, 2), edited);
         Assert.Equal([RestaurantsId, RestaurantsId, null], await CategoriesOf(ids));
         var rules = await _client.GetFromJsonAsync<List<CategorizationRuleResponse>>("/api/categorization-rules");
         Assert.Contains(new CategorizationRuleResponse(ruleId, $"{_token} butikk", RestaurantsId), rules!);
@@ -283,7 +283,7 @@ public class CategorizationRuleEndpointsTests
         var edited = await EditedRule(ruleId, $" {_token.ToUpperInvariant()} BUTIKK ", GroceriesId);
 
         Assert.Equal(
-            new CreatedCategorizationRuleResponse(ruleId, $"{_token.ToUpperInvariant()} BUTIKK", GroceriesId, 0),
+            new SavedCategorizationRuleResponse(ruleId, $"{_token.ToUpperInvariant()} BUTIKK", GroceriesId, 0),
             edited);
         Assert.Equal([GroceriesId], await CategoriesOf(ids));
     }

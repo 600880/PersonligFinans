@@ -103,8 +103,9 @@ export type SaveRuleResult =
   | { ok: true; rule: CategorizationRule; transactionsChanged: number }
   | { ok: false; fieldErrors: RuleFieldErrors; message: string | null }
 
+// alreadyDeleted: the rule was gone before this delete, so nothing changed.
 export type DeleteRuleResult =
-  | { ok: true; transactionsChanged: number }
+  | { ok: true; alreadyDeleted: boolean; transactionsChanged: number }
   | { ok: false; message: string }
 
 export async function fetchRules(): Promise<CategorizationRule[]> {
@@ -131,8 +132,10 @@ export async function deleteRule(id: number): Promise<DeleteRuleResult> {
 
   if (response.ok) {
     const { transactionsChanged } = (await response.json()) as { transactionsChanged: number }
-    return { ok: true, transactionsChanged }
+    return { ok: true, alreadyDeleted: false, transactionsChanged }
   }
+
+  if (response.status === 404) return { ok: true, alreadyDeleted: true, transactionsChanged: 0 }
 
   return { ok: false, message: `Deleting failed (${response.status}).` }
 }

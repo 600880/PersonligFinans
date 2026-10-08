@@ -8,7 +8,7 @@ public record CategorizationRuleRequest(string? Keyword, int? CategoryId);
 
 public record CategorizationRuleResponse(int Id, string Keyword, int CategoryId);
 
-public record CreatedCategorizationRuleResponse(int Id, string Keyword, int CategoryId, int TransactionsChanged);
+public record SavedCategorizationRuleResponse(int Id, string Keyword, int CategoryId, int TransactionsChanged);
 
 public record DeletedCategorizationRuleResponse(int TransactionsChanged);
 
@@ -51,7 +51,7 @@ public static class CategorizationRuleEndpoints
 
         return Results.Created(
             $"/api/categorization-rules/{rule.Id}",
-            new CreatedCategorizationRuleResponse(rule.Id, rule.Keyword, rule.CategoryId, transactionsChanged));
+            new SavedCategorizationRuleResponse(rule.Id, rule.Keyword, rule.CategoryId, transactionsChanged));
     }
 
     private static async Task<IResult> EditRule(int id, CategorizationRuleRequest request, AppDbContext db)
@@ -71,7 +71,7 @@ public static class CategorizationRuleEndpoints
             return await KeywordAlreadyExists(db, keyword);
 
         return Results.Ok(
-            new CreatedCategorizationRuleResponse(rule.Id, rule.Keyword, rule.CategoryId, transactionsChanged));
+            new SavedCategorizationRuleResponse(rule.Id, rule.Keyword, rule.CategoryId, transactionsChanged));
     }
 
     private static async Task<IResult> DeleteRule(int id, AppDbContext db)

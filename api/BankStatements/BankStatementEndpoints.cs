@@ -80,6 +80,10 @@ public static class BankStatementEndpoints
             ClosingBalance = parsed.ClosingBalance,
             ImportedAt = DateTimeOffset.UtcNow,
         };
+        // A share lock lets imports run side by side but waits for any rule change, so a rule change
+        // can't miss these rows while they are being categorized against the rules it is replacing.
+        await using var transaction = await db.Database.BeginTransactionAsync();
+        await db.Database.ExecuteSqlRawAsync("LOCK TABLE categorization_rules IN SHARE MODE");
         var rules = await db.CategorizationRules.ToListAsync();
         statement.Transactions.AddRange(parsed.Rows.Select(row =>
         {
@@ -94,11 +98,12 @@ public static class BankStatementEndpoints
             };
         }));
 
-        // One SaveChanges is one database transaction: the statement and all its rows, or nothing.
+        // One database transaction: the statement and all its rows, or nothing.
         db.BankStatements.Add(statement);
         try
         {
             await db.SaveChangesAsync();
+            await transaction.CommitAsync();
         }
         catch (DbUpdateException e) when (e.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
         {

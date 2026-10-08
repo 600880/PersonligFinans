@@ -128,7 +128,11 @@ export function RulesPage() {
 
     if (result.ok) {
       setRules((rules) => rules.filter((r) => r.id !== rule.id))
-      setStatusMessage(changedMessage('Rule deleted.', result.transactionsChanged))
+      setStatusMessage(
+        result.alreadyDeleted
+          ? 'The rule was already deleted.'
+          : changedMessage('Rule deleted.', result.transactionsChanged),
+      )
     } else {
       setErrorMessage(result.message)
     }

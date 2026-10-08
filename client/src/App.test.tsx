@@ -500,6 +500,17 @@ describe('Rules page', () => {
     expect(screen.queryByRole('cell', { name: 'kiwi' })).not.toBeInTheDocument()
   })
 
+  it('removes a rule that was already deleted elsewhere', async () => {
+    handleDeleteRule = () => Response.json({ title: 'Not Found', status: 404 }, { status: 404 })
+    const user = await openRulesPage()
+
+    await user.click(within(ruleRow('kiwi')).getByRole('button', { name: 'Delete' }))
+
+    expect(await screen.findByRole('status')).toHaveTextContent('The rule was already deleted.')
+    expect(screen.queryByRole('cell', { name: 'kiwi' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
   it('shows a general error when a delete cannot reach the server', async () => {
     handleDeleteRule = () => {
       throw new TypeError('Failed to fetch')

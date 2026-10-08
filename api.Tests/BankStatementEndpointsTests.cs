@@ -292,7 +292,7 @@ public class BankStatementEndpointsTests
     {
         var response = await _client.PostAsJsonAsync("/api/categorization-rules", new { keyword, categoryId });
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
-        return (await response.Content.ReadFromJsonAsync<CreatedCategorizationRuleResponse>())!.Id;
+        return (await response.Content.ReadFromJsonAsync<SavedCategorizationRuleResponse>())!.Id;
     }
 
     // Each row is a purchase of 10,00 from the given merchant, from an opening balance of 1.000,00.
