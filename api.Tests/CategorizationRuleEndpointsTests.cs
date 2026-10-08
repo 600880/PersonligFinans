@@ -14,6 +14,8 @@ public class CategorizationRuleEndpointsTests
 {
     private const int GroceriesId = 1;
     private const int RestaurantsId = 2;
+    private const int TravelId = 10;
+    private const int TransfersId = 12;
     private const int OtherId = 13;
 
     private readonly PostgresApiFactory _factory;
@@ -58,6 +60,17 @@ public class CategorizationRuleEndpointsTests
         Assert.Equal(
             [$"{_token} a", $"{_token} b"],
             rules!.Select(r => r.Keyword).Where(k => k.StartsWith(_token)));
+    }
+
+    [Fact]
+    public async Task Get_FreshDatabase_ListsTheSeededRules()
+    {
+        var rules = await _client.GetFromJsonAsync<List<CategorizationRuleResponse>>("/api/categorization-rules");
+
+        var categoryByKeyword = rules!.ToDictionary(r => r.Keyword, r => r.CategoryId);
+        Assert.Equal(GroceriesId, categoryByKeyword["rema"]);
+        Assert.Equal(TransfersId, categoryByKeyword["overføring mellom egne kontoer"]);
+        Assert.Equal(TravelId, categoryByKeyword["widerøe"]);
     }
 
     // Stores Transactions as if imported from a Bank Statement, all Uncategorized.

@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using PersonligFinans.Api.CategorizationRules;
 
 namespace PersonligFinans.Api.Data;
 
@@ -23,9 +24,16 @@ public static class DatabaseSetup
         return services.AddDbContext<AppDbContext>(options => Configure(options, connectionString));
     }
 
-    public static void MigrateDatabase(this WebApplication app)
+    public static async Task MigrateDatabaseAsync(this WebApplication app)
     {
         using var scope = app.Services.CreateScope();
-        scope.ServiceProvider.GetRequiredService<AppDbContext>().Database.Migrate();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var hadPendingMigrations = (await db.Database.GetPendingMigrationsAsync()).Any();
+        await db.Database.MigrateAsync();
+
+        // A migration may change the rules, for example by seeding them, so re-match the imported
+        // Transactions already stored to keep them in line with the rules.
+        if (hadPendingMigrations)
+            await Categorizer.SaveRuleChangeAsync(db);
     }
 }

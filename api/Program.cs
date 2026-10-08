@@ -10,7 +10,7 @@ builder.Services.AddDatabase(builder.Configuration);
 var app = builder.Build();
 
 // Single-instance app, so migrating on startup is safe in every environment.
-app.MigrateDatabase();
+await app.MigrateDatabaseAsync();
 
 app.UseHttpsRedirection();
 
