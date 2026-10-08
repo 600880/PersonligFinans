@@ -84,3 +84,59 @@ export async function uploadBankStatement(file: File): Promise<UploadBankStateme
 
   return { ok: false, message: `Upload failed (${response.status}).` }
 }
+
+export interface CategorizationRule {
+  id: number
+  keyword: string
+  categoryId: number
+}
+
+export interface CategorizationRuleRequest {
+  keyword: string
+  categoryId: number | null
+}
+
+export type RuleFieldErrors = Partial<Record<keyof CategorizationRuleRequest, string>>
+
+export type AddRuleResult =
+  | { ok: true; rule: CategorizationRule; transactionsChanged: number }
+  | { ok: false; fieldErrors: RuleFieldErrors; message: string | null }
+
+export async function fetchRules(): Promise<CategorizationRule[]> {
+  const response = await fetch('/api/categorization-rules')
+  if (!response.ok) throw new Error(`Loading rules failed (${response.status})`)
+  return (await response.json()) as CategorizationRule[]
+}
+
+export async function addRule(request: CategorizationRuleRequest): Promise<AddRuleResult> {
+  let response: Response
+  try {
+    response = await fetch('/api/categorization-rules', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request),
+    })
+  } catch {
+    return { ok: false, fieldErrors: {}, message: 'Could not reach the server.' }
+  }
+
+  if (response.ok) {
+    const { transactionsChanged, ...rule } = (await response.json()) as CategorizationRule & {
+      transactionsChanged: number
+    }
+    return { ok: true, rule, transactionsChanged }
+  }
+
+  if (response.status === 400) {
+    const problem = (await response.json().catch(() => null)) as {
+      errors?: Record<string, string[]>
+    } | null
+    const fieldErrors: RuleFieldErrors = {}
+    for (const [field, messages] of Object.entries(problem?.errors ?? {})) {
+      fieldErrors[field as keyof RuleFieldErrors] = messages[0]
+    }
+    if (Object.keys(fieldErrors).length > 0) return { ok: false, fieldErrors, message: null }
+  }
+
+  return { ok: false, fieldErrors: {}, message: `Saving failed (${response.status}).` }
+}
