@@ -15,6 +15,11 @@ public class Transaction
     public int? CategoryId { get; set; }
     public Category? Category { get; set; }
 
+    // The Categorization Rule that assigned the Category. An imported Transaction with a Category
+    // but no rule was categorized manually, so rules never change it.
+    public int? CategorizationRuleId { get; set; }
+    public CategorizationRule? CategorizationRule { get; set; }
+
     // Null for manually-entered Transactions.
     public int? BankStatementId { get; set; }
     public BankStatement? BankStatement { get; set; }

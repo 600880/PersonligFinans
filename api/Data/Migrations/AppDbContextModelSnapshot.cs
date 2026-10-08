@@ -69,6 +69,38 @@ namespace PersonligFinans.Api.Data.Migrations
                     b.ToTable("bank_statements", (string)null);
                 });
 
+            modelBuilder.Entity("PersonligFinans.Api.Data.CategorizationRule", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("CategoryId")
+                        .HasColumnType("integer")
+                        .HasColumnName("category_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Keyword")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("keyword");
+
+                    b.HasKey("Id")
+                        .HasName("pk_categorization_rules");
+
+                    b.HasIndex("CategoryId")
+                        .HasDatabaseName("ix_categorization_rules_category_id");
+
+                    b.ToTable("categorization_rules", (string)null);
+                });
+
             modelBuilder.Entity("PersonligFinans.Api.Data.Category", b =>
                 {
                     b.Property<int>("Id")
@@ -179,6 +211,10 @@ namespace PersonligFinans.Api.Data.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("bank_statement_id");
 
+                    b.Property<int?>("CategorizationRuleId")
+                        .HasColumnType("integer")
+                        .HasColumnName("categorization_rule_id");
+
                     b.Property<int?>("CategoryId")
                         .HasColumnType("integer")
                         .HasColumnName("category_id");
@@ -204,6 +240,9 @@ namespace PersonligFinans.Api.Data.Migrations
                     b.HasIndex("BankStatementId")
                         .HasDatabaseName("ix_transactions_bank_statement_id");
 
+                    b.HasIndex("CategorizationRuleId")
+                        .HasDatabaseName("ix_transactions_categorization_rule_id");
+
                     b.HasIndex("CategoryId")
                         .HasDatabaseName("ix_transactions_category_id");
 
@@ -211,6 +250,18 @@ namespace PersonligFinans.Api.Data.Migrations
                         {
                             t.HasCheckConstraint("ck_transactions_amount_nonzero", "amount <> 0");
                         });
+                });
+
+            modelBuilder.Entity("PersonligFinans.Api.Data.CategorizationRule", b =>
+                {
+                    b.HasOne("PersonligFinans.Api.Data.Category", "Category")
+                        .WithMany()
+                        .HasForeignKey("CategoryId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_categorization_rules_categories_category_id");
+
+                    b.Navigation("Category");
                 });
 
             modelBuilder.Entity("PersonligFinans.Api.Data.Transaction", b =>
@@ -221,6 +272,12 @@ namespace PersonligFinans.Api.Data.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .HasConstraintName("fk_transactions_bank_statements_bank_statement_id");
 
+                    b.HasOne("PersonligFinans.Api.Data.CategorizationRule", "CategorizationRule")
+                        .WithMany()
+                        .HasForeignKey("CategorizationRuleId")
+                        .OnDelete(DeleteBehavior.SetNull)
+                        .HasConstraintName("fk_transactions_categorization_rules_categorization_rule_id");
+
                     b.HasOne("PersonligFinans.Api.Data.Category", "Category")
                         .WithMany()
                         .HasForeignKey("CategoryId")
@@ -228,6 +285,8 @@ namespace PersonligFinans.Api.Data.Migrations
                         .HasConstraintName("fk_transactions_categories_category_id");
 
                     b.Navigation("BankStatement");
+
+                    b.Navigation("CategorizationRule");
 
                     b.Navigation("Category");
                 });

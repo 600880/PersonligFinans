@@ -29,7 +29,7 @@ The state of an imported Transaction with no matching Categorization Rule, await
 _Avoid_: Unreviewed, pending
 
 **Categorization Rule**:
-A mapping from a merchant name/keyword to a Category, used to automatically assign a Category to new Transactions. Seeded with common merchants at the start, and extended whenever a Transaction is manually corrected.
+A keyword paired with a Category: an imported Transaction whose description contains the keyword (ignoring case) is automatically assigned that Category, and reassigned whenever the rules change unless its Category was chosen manually; when several match, the longest keyword wins. Keywords are unique. Seeded with common merchants, visible to the user, and extended whenever a Transaction is manually corrected. Never applied to manually-entered Transactions.
 _Avoid_: Mapping, pattern
 
 **Dashboard**:

@@ -7,10 +7,12 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public const int DescriptionMaxLength = 200;
     public const int ReferenceMaxLength = 100;
     public const int AccountNumberMaxLength = 20;
+    public const int KeywordMaxLength = 100;
 
     public DbSet<Category> Categories => Set<Category>();
     public DbSet<Transaction> Transactions => Set<Transaction>();
     public DbSet<BankStatement> BankStatements => Set<BankStatement>();
+    public DbSet<CategorizationRule> CategorizationRules => Set<CategorizationRule>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -35,6 +37,21 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 .WithMany(s => s.Transactions)
                 .HasForeignKey(t => t.BankStatementId)
                 .OnDelete(DeleteBehavior.Cascade);
+            transaction.HasOne(t => t.CategorizationRule)
+                .WithMany()
+                .HasForeignKey(t => t.CategorizationRuleId)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        // Keywords are also unique ignoring case, through an index on lower(keyword) that the
+        // migration creates by hand, since EF Core can't model an expression index.
+        modelBuilder.Entity<CategorizationRule>(rule =>
+        {
+            rule.Property(r => r.Keyword).HasMaxLength(KeywordMaxLength);
+            rule.HasOne(r => r.Category)
+                .WithMany()
+                .HasForeignKey(r => r.CategoryId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<BankStatement>(statement =>

@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
@@ -14,6 +14,8 @@ type UploadHandler = (body: FormData) => Response | Promise<Response>
 
 let handlePost: PostHandler
 let handleUpload: UploadHandler
+let rules: { id: number; keyword: string; categoryId: number }[]
+let handleAddRule: PostHandler
 const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
   if (url === '/api/categories') return Response.json(categories)
   if (url === '/api/transactions' && init?.method === 'POST') {
@@ -22,12 +24,21 @@ const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
   if (url === '/api/bank-statements' && init?.method === 'POST') {
     return handleUpload(init.body as FormData)
   }
+  if (url === '/api/categorization-rules' && init?.method === 'POST') {
+    return handleAddRule(JSON.parse(init.body as string))
+  }
+  if (url === '/api/categorization-rules') return Response.json(rules)
   return new Response(null, { status: 404 })
 })
 
 beforeEach(() => {
   handlePost = () => Response.json({ id: 1 }, { status: 201 })
   handleUpload = () => Response.json(importedStatement, { status: 201 })
+  rules = [
+    { id: 1, keyword: 'kiwi', categoryId: 1 },
+    { id: 2, keyword: 'overføring mellom egne kontoer', categoryId: 13 },
+  ]
+  handleAddRule = (body) => Response.json({ id: 3, ...(body as object), transactionsChanged: 0 }, { status: 201 })
   vi.stubGlobal('fetch', fetchMock)
 })
 
@@ -162,7 +173,9 @@ describe('App', () => {
   it('shows Upload transactions to the left of Add transaction', () => {
     render(<App />)
 
-    const buttons = screen.getAllByRole('button').map((button) => button.textContent)
+    const buttons = within(screen.getByRole('main'))
+      .getAllByRole('button')
+      .map((button) => button.textContent)
     expect(buttons).toEqual(['Upload transactions', 'Add transaction'])
   })
 
@@ -268,5 +281,83 @@ describe('App', () => {
       'Imported 38 transactions from statement 01.08.2026–31.08.2026',
     )
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+})
+
+describe('Rules page', () => {
+  async function openRulesPage() {
+    const user = userEvent.setup()
+    render(<App />)
+    await user.click(screen.getByRole('button', { name: 'Rules' }))
+    await screen.findByRole('cell', { name: 'kiwi' })
+    return user
+  }
+
+  it('opens from the header and lists the rules with their Category names', async () => {
+    await openRulesPage()
+
+    const rows = screen.getAllByRole('row').slice(1)
+    expect(rows.map((row) => row.textContent)).toEqual([
+      'kiwiGroceries',
+      'overføring mellom egne kontoerOther',
+    ])
+  })
+
+  it('goes back to the transactions view', async () => {
+    const user = await openRulesPage()
+
+    await user.click(screen.getByRole('button', { name: 'Back' }))
+
+    expect(screen.getByRole('button', { name: /add transaction/i })).toBeInTheDocument()
+  })
+
+  it('adds a rule and says how many transactions changed category', async () => {
+    let posted: unknown
+    handleAddRule = (body) => {
+      posted = body
+      return Response.json(
+        { id: 3, keyword: 'rema', categoryId: 1, transactionsChanged: 3 },
+        { status: 201 },
+      )
+    }
+    const user = await openRulesPage()
+
+    await user.type(screen.getByLabelText('Keyword'), '  rema ')
+    await user.selectOptions(screen.getByLabelText('Category'), 'Groceries')
+    await user.click(screen.getByRole('button', { name: 'Add rule' }))
+
+    expect(posted).toEqual({ keyword: 'rema', categoryId: 1 })
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      'Rule added. 3 transactions changed category.',
+    )
+    expect(screen.getByRole('cell', { name: 'rema' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Keyword')).toHaveValue('')
+  })
+
+  it("shows the server's field error and keeps the input", async () => {
+    handleAddRule = () =>
+      Response.json({ errors: { keyword: ["A rule for 'Kiwi' already exists."] } }, { status: 400 })
+    const user = await openRulesPage()
+
+    await user.type(screen.getByLabelText('Keyword'), 'KIWI')
+    await user.selectOptions(screen.getByLabelText('Category'), 'Groceries')
+    await user.click(screen.getByRole('button', { name: 'Add rule' }))
+
+    expect(await screen.findByText("A rule for 'Kiwi' already exists.")).toBeInTheDocument()
+    expect(screen.getByLabelText('Keyword')).toHaveValue('KIWI')
+  })
+
+  it('shows a general error when the server cannot be reached', async () => {
+    handleAddRule = () => {
+      throw new TypeError('Failed to fetch')
+    }
+    const user = await openRulesPage()
+
+    await user.type(screen.getByLabelText('Keyword'), 'rema')
+    await user.selectOptions(screen.getByLabelText('Category'), 'Groceries')
+    await user.click(screen.getByRole('button', { name: 'Add rule' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Could not reach the server.')
+    expect(screen.getByLabelText('Keyword')).toHaveValue('rema')
   })
 })
