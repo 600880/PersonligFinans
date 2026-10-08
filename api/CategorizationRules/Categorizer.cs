@@ -18,10 +18,23 @@ public static class Categorizer
             .ThenBy(r => r.Id)
             .FirstOrDefault();
 
+    // Saves the rule change tracked by db together with the re-match it causes, in one database
+    // transaction, and returns how many Transactions changed Category. The rules table is locked
+    // first, so concurrent rule changes run one after another and each re-matches against the rules
+    // as the previous one left them.
+    public static async Task<int> SaveRuleChangeAsync(AppDbContext db)
+    {
+        await using var transaction = await db.Database.BeginTransactionAsync();
+        await db.Database.ExecuteSqlRawAsync("LOCK TABLE categorization_rules IN SHARE ROW EXCLUSIVE MODE");
+        var changed = await RematchAsync(db);
+        await db.SaveChangesAsync();
+        await transaction.CommitAsync();
+        return changed;
+    }
+
     // Re-matches every rule-eligible Transaction against the rules tracked by db, including ones
-    // added but not yet saved, and returns how many changed Category. Nothing is saved here, so the
-    // caller saves the rule change and the re-matched Transactions together.
-    public static async Task<int> RematchAsync(AppDbContext db)
+    // added, changed or deleted but not yet saved, and returns how many changed Category.
+    private static async Task<int> RematchAsync(AppDbContext db)
     {
         await db.CategorizationRules.LoadAsync();
         var rules = db.CategorizationRules.Local.ToList();
