@@ -53,6 +53,7 @@ export interface ImportedBankStatement {
   periodStart: string
   periodEnd: string
   transactionCount: number
+  uncategorizedCount: number
 }
 
 export type UploadBankStatementResult =

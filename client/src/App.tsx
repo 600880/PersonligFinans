@@ -37,10 +37,11 @@ function App() {
 
     const result = await uploadBankStatement(file).finally(() => setIsUploading(false))
     if (result.ok) {
-      const { transactionCount, periodStart, periodEnd } = result.statement
+      const { transactionCount, uncategorizedCount, periodStart, periodEnd } = result.statement
       setImportMessage(
         `Imported ${transactionCount} transactions from statement ` +
-          `${formatNorwegianDate(periodStart)}–${formatNorwegianDate(periodEnd)}`,
+          `${formatNorwegianDate(periodStart)}–${formatNorwegianDate(periodEnd)}: ` +
+          `${transactionCount - uncategorizedCount} categorized, ${uncategorizedCount} Uncategorized`,
       )
     } else {
       setUploadError(result.message)

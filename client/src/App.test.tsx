@@ -55,6 +55,7 @@ const importedStatement = {
   periodStart: '2026-08-01',
   periodEnd: '2026-08-31',
   transactionCount: 38,
+  uncategorizedCount: 7,
 }
 
 const statementPdf = new File(['%PDF-1.7'], 'kontoutskrift.pdf', { type: 'application/pdf' })
@@ -181,7 +182,7 @@ describe('App', () => {
     expect(buttons).toEqual(['Upload transactions', 'Add transaction'])
   })
 
-  it('uploads the chosen PDF and shows how many transactions were imported', async () => {
+  it('uploads the chosen PDF and shows how many transactions were imported and categorized', async () => {
     let uploaded: FormData | undefined
     handleUpload = (body) => {
       uploaded = body
@@ -194,7 +195,7 @@ describe('App', () => {
 
     expect(uploaded?.get('file')).toBe(statementPdf)
     expect(await screen.findByRole('status')).toHaveTextContent(
-      'Imported 38 transactions from statement 01.08.2026–31.08.2026',
+      'Imported 38 transactions from statement 01.08.2026–31.08.2026: 31 categorized, 7 Uncategorized',
     )
   })
 

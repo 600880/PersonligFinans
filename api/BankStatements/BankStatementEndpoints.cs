@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
+using PersonligFinans.Api.CategorizationRules;
 using PersonligFinans.Api.Data;
 
 namespace PersonligFinans.Api.BankStatements;
@@ -9,7 +10,8 @@ public record BankStatementResponse(
     string AccountNumber,
     DateOnly PeriodStart,
     DateOnly PeriodEnd,
-    int TransactionCount);
+    int TransactionCount,
+    int UncategorizedCount);
 
 public static class BankStatementEndpoints
 {
@@ -78,11 +80,18 @@ public static class BankStatementEndpoints
             ClosingBalance = parsed.ClosingBalance,
             ImportedAt = DateTimeOffset.UtcNow,
         };
-        statement.Transactions.AddRange(parsed.Rows.Select(row => new Transaction
+        var rules = await db.CategorizationRules.ToListAsync();
+        statement.Transactions.AddRange(parsed.Rows.Select(row =>
         {
-            PostedDate = row.BookedDate,
-            Description = row.Description,
-            Amount = row.Amount,
+            var rule = Categorizer.ChooseRule(row.Description, rules);
+            return new Transaction
+            {
+                PostedDate = row.BookedDate,
+                Description = row.Description,
+                Amount = row.Amount,
+                CategoryId = rule?.CategoryId,
+                CategorizationRule = rule,
+            };
         }));
 
         // One SaveChanges is one database transaction: the statement and all its rows, or nothing.
@@ -104,7 +113,8 @@ public static class BankStatementEndpoints
                 statement.AccountNumber,
                 statement.PeriodStart,
                 statement.PeriodEnd,
-                statement.Transactions.Count));
+                statement.Transactions.Count,
+                statement.Transactions.Count(t => t.CategoryId is null)));
     }
 
     private static IResult FileProblem(string message) =>
