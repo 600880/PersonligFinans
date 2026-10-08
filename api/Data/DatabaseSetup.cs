@@ -28,12 +28,11 @@ public static class DatabaseSetup
     {
         using var scope = app.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var hadPendingMigrations = (await db.Database.GetPendingMigrationsAsync()).Any();
         await db.Database.MigrateAsync();
 
-        // A migration may change the rules, for example by seeding them, so re-match the imported
-        // Transactions already stored to keep them in line with the rules.
-        if (hadPendingMigrations)
-            await Categorizer.SaveRuleChangeAsync(db);
+        // A migration may change the rules, for example by seeding them, whether applied here or by
+        // hand. Re-matching is idempotent and cheap, so do it on every startup to keep the imported
+        // Transactions already stored in line with the rules.
+        await Categorizer.SaveRuleChangeAsync(db);
     }
 }
