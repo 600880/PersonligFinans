@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using PersonligFinans.Api.BankStatements;
+using PersonligFinans.Api.CategorizationRules;
 using PersonligFinans.Api.Data;
 using UglyToad.PdfPig.Content;
 using UglyToad.PdfPig.Core;
@@ -18,6 +19,13 @@ public class BankStatementEndpointsTests
 {
     private readonly PostgresApiFactory _factory;
     private readonly HttpClient _client;
+
+    private const int GroceriesId = 1;
+    private const int RestaurantsId = 2;
+
+    // The tests share one database and rules match every imported Transaction, so the tests that
+    // add rules put a token of their own in each keyword and description.
+    private readonly string _token = "t" + Guid.NewGuid().ToString("N")[..8];
 
     public BankStatementEndpointsTests(PostgresApiFactory factory)
     {
@@ -272,5 +280,78 @@ public class BankStatementEndpointsTests
         var response = await _client.PostAsync("/api/bank-statements", form);
 
         Assert.Equal(["Choose a PDF file to upload."], await FileErrors(response));
+    }
+
+    private static string UniqueAccountNumber()
+    {
+        var digits = Random.Shared.NextInt64(0, 100_000_000_000).ToString("D11");
+        return $"{digits[..4]}.{digits[4..6]}.{digits[6..]}";
+    }
+
+    private async Task<int> AddRule(string keyword, int categoryId)
+    {
+        var response = await _client.PostAsJsonAsync("/api/categorization-rules", new { keyword, categoryId });
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        return (await response.Content.ReadFromJsonAsync<CreatedCategorizationRuleResponse>())!.Id;
+    }
+
+    // Each row is a purchase of 10,00 from the given merchant, from an opening balance of 1.000,00.
+    private static byte[] StatementWithPurchasesFrom(params string[] merchants) =>
+        StatementPdf.Create(
+            UniqueAccountNumber(),
+            period: "01.08.2026 - 31.08.2026",
+            openingBalance: "1.000,00",
+            rows: merchants.Select(m => new StatementPdfRow($"Varer 03.08 {m}", "0408", "10,00", null, "0408", "21", "12345678")),
+            closingBalance: $"{1000 - 10 * merchants.Length},00");
+
+    private async Task<List<Transaction>> StoredTransactions(int statementId)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        return await db.Transactions
+            .Where(t => t.BankStatementId == statementId)
+            .OrderBy(t => t.Id)
+            .ToListAsync();
+    }
+
+    [Fact]
+    public async Task Post_Statement_CategorizesMatchingRowsByRuleAndLeavesOthersUncategorized()
+    {
+        var ruleId = await AddRule($"{_token} butikk", GroceriesId);
+
+        var response = await Upload(StatementWithPurchasesFrom($"{_token} Butikk Sentrum", $"{_token} Kafé"));
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var created = await response.Content.ReadFromJsonAsync<BankStatementResponse>();
+        var stored = await StoredTransactions(created!.Id);
+        Assert.Equal(
+            [($"{_token} Butikk Sentrum", (int?)GroceriesId, (int?)ruleId), ($"{_token} Kafé", null, null)],
+            stored.Select(t => (t.Description, t.CategoryId, t.CategorizationRuleId)));
+    }
+
+    [Fact]
+    public async Task Post_Statement_RowMatchingSeveralRulesGetsTheLongestKeywordsCategory()
+    {
+        await AddRule($"{_token} butikk", GroceriesId);
+        var longerRuleId = await AddRule($"{_token} butikk kafé", RestaurantsId);
+
+        var response = await Upload(StatementWithPurchasesFrom($"{_token} BUTIKK KAFÉ Bryggen"));
+
+        var created = await response.Content.ReadFromJsonAsync<BankStatementResponse>();
+        var stored = Assert.Single(await StoredTransactions(created!.Id));
+        Assert.Equal((RestaurantsId, longerRuleId), (stored.CategoryId, stored.CategorizationRuleId));
+    }
+
+    [Fact]
+    public async Task Post_Statement_ReportsHowManyRowsStayedUncategorized()
+    {
+        await AddRule($"{_token} butikk", GroceriesId);
+
+        var response = await Upload(StatementWithPurchasesFrom(
+            $"{_token} Butikk Sentrum", $"{_token} Kafé", $"{_token} Kino", $"{_token} Butikk Torget"));
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var created = await response.Content.ReadFromJsonAsync<BankStatementResponse>();
+        Assert.Equal((4, 2), (created!.TransactionCount, created.UncategorizedCount));
     }
 }
