@@ -16,7 +16,14 @@ let handlePost: PostHandler
 let handleUpload: UploadHandler
 let rules: { id: number; keyword: string; categoryId: number }[] | Response
 let handleAddRule: PostHandler
+let handleEditRule: (id: number, body: unknown) => Response
+let handleDeleteRule: (id: number) => Response
 const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+  const ruleUrl = /^\/api\/categorization-rules\/(\d+)$/.exec(url)
+  if (ruleUrl && init?.method === 'PUT') {
+    return handleEditRule(Number(ruleUrl[1]), JSON.parse(init.body as string))
+  }
+  if (ruleUrl && init?.method === 'DELETE') return handleDeleteRule(Number(ruleUrl[1]))
   if (url === '/api/categories') return Response.json(categories)
   if (url === '/api/transactions' && init?.method === 'POST') {
     return handlePost(JSON.parse(init.body as string))
@@ -41,6 +48,8 @@ beforeEach(() => {
     { id: 2, keyword: 'overføring mellom egne kontoer', categoryId: 13 },
   ]
   handleAddRule = (body) => Response.json({ id: 3, ...(body as object), transactionsChanged: 0 }, { status: 201 })
+  handleEditRule = (id, body) => Response.json({ id, ...(body as object), transactionsChanged: 0 })
+  handleDeleteRule = () => Response.json({ transactionsChanged: 0 })
   vi.stubGlobal('fetch', fetchMock)
 })
 
@@ -300,9 +309,11 @@ describe('Rules page', () => {
     await openRulesPage()
 
     const rows = screen.getAllByRole('row').slice(1)
-    expect(rows.map((row) => row.textContent)).toEqual([
-      'kiwiGroceries',
-      'overføring mellom egne kontoerOther',
+    expect(
+      rows.map((row) => within(row).getAllByRole('cell').slice(0, 2).map((cell) => cell.textContent)),
+    ).toEqual([
+      ['kiwi', 'Groceries'],
+      ['overføring mellom egne kontoer', 'Other'],
     ])
   })
 
@@ -390,5 +401,114 @@ describe('Rules page', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Could not reach the server.')
     expect(screen.queryByText("A rule for 'Kiwi' already exists.")).not.toBeInTheDocument()
+  })
+
+  function ruleRow(keyword: string) {
+    const row = screen.getByRole('cell', { name: keyword }).closest('tr')
+    if (!row) throw new Error(`No row for ${keyword}`)
+    return row
+  }
+
+  async function startEditingKiwi(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(within(ruleRow('kiwi')).getByRole('button', { name: 'Edit' }))
+    const row = screen.getByRole('button', { name: 'Save' }).closest('tr')!
+    return within(row)
+  }
+
+  it('edits a rule inline and says how many transactions changed category', async () => {
+    let edited: { id: number; body: unknown } | undefined
+    handleEditRule = (id, body) => {
+      edited = { id, body }
+      return Response.json({ id, keyword: 'kiwi minipris', categoryId: 13, transactionsChanged: 1 })
+    }
+    const user = await openRulesPage()
+
+    const row = await startEditingKiwi(user)
+    expect(row.getByLabelText('Keyword')).toHaveValue('kiwi')
+    expect(row.getByLabelText('Category')).toHaveValue('1')
+    await user.clear(row.getByLabelText('Keyword'))
+    await user.type(row.getByLabelText('Keyword'), ' kiwi minipris ')
+    await user.selectOptions(row.getByLabelText('Category'), 'Other')
+    await user.click(row.getByRole('button', { name: 'Save' }))
+
+    expect(edited).toEqual({ id: 1, body: { keyword: 'kiwi minipris', categoryId: 13 } })
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      'Rule updated. 1 transaction changed category.',
+    )
+    expect(ruleRow('kiwi minipris')).toHaveTextContent('kiwi miniprisOther')
+    expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument()
+  })
+
+  it('cancels an edit and restores the row', async () => {
+    const user = await openRulesPage()
+
+    const row = await startEditingKiwi(user)
+    await user.type(row.getByLabelText('Keyword'), ' extra')
+    await user.selectOptions(row.getByLabelText('Category'), 'Other')
+    await user.click(row.getByRole('button', { name: 'Cancel' }))
+
+    expect(ruleRow('kiwi')).toHaveTextContent('kiwiGroceries')
+    expect(fetchMock).not.toHaveBeenCalledWith(expect.stringMatching(/\/1$/), expect.anything())
+  })
+
+  it("shows the server's field error on an edit and keeps the input", async () => {
+    handleEditRule = () =>
+      Response.json(
+        { errors: { keyword: ["A rule for 'overføring mellom egne kontoer' already exists."] } },
+        { status: 400 },
+      )
+    const user = await openRulesPage()
+
+    const row = await startEditingKiwi(user)
+    await user.clear(row.getByLabelText('Keyword'))
+    await user.type(row.getByLabelText('Keyword'), 'Overføring mellom egne kontoer')
+    await user.click(row.getByRole('button', { name: 'Save' }))
+
+    const error = await row.findByText("A rule for 'overføring mellom egne kontoer' already exists.")
+    expect(row.getByLabelText('Keyword')).toHaveAccessibleDescription(error.textContent!)
+    expect(row.getByLabelText('Keyword')).toHaveValue('Overføring mellom egne kontoer')
+  })
+
+  it('shows a general error when an edit cannot reach the server', async () => {
+    handleEditRule = () => {
+      throw new TypeError('Failed to fetch')
+    }
+    const user = await openRulesPage()
+
+    const row = await startEditingKiwi(user)
+    await user.type(row.getByLabelText('Keyword'), ' extra')
+    await user.click(row.getByRole('button', { name: 'Save' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Could not reach the server.')
+    expect(row.getByLabelText('Keyword')).toHaveValue('kiwi extra')
+  })
+
+  it('deletes a rule and says how many transactions changed category', async () => {
+    let deletedId: number | undefined
+    handleDeleteRule = (id) => {
+      deletedId = id
+      return Response.json({ transactionsChanged: 2 })
+    }
+    const user = await openRulesPage()
+
+    await user.click(within(ruleRow('kiwi')).getByRole('button', { name: 'Delete' }))
+
+    expect(deletedId).toBe(1)
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      'Rule deleted. 2 transactions changed category.',
+    )
+    expect(screen.queryByRole('cell', { name: 'kiwi' })).not.toBeInTheDocument()
+  })
+
+  it('shows a general error when a delete cannot reach the server', async () => {
+    handleDeleteRule = () => {
+      throw new TypeError('Failed to fetch')
+    }
+    const user = await openRulesPage()
+
+    await user.click(within(ruleRow('kiwi')).getByRole('button', { name: 'Delete' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Could not reach the server.')
+    expect(screen.getByRole('cell', { name: 'kiwi' })).toBeInTheDocument()
   })
 })

@@ -99,9 +99,13 @@ export interface CategorizationRuleRequest {
 
 export type RuleFieldErrors = Partial<Record<keyof CategorizationRuleRequest, string>>
 
-export type AddRuleResult =
+export type SaveRuleResult =
   | { ok: true; rule: CategorizationRule; transactionsChanged: number }
   | { ok: false; fieldErrors: RuleFieldErrors; message: string | null }
+
+export type DeleteRuleResult =
+  | { ok: true; transactionsChanged: number }
+  | { ok: false; message: string }
 
 export async function fetchRules(): Promise<CategorizationRule[]> {
   const response = await fetch('/api/categorization-rules')
@@ -109,11 +113,39 @@ export async function fetchRules(): Promise<CategorizationRule[]> {
   return (await response.json()) as CategorizationRule[]
 }
 
-export async function addRule(request: CategorizationRuleRequest): Promise<AddRuleResult> {
+export function addRule(request: CategorizationRuleRequest): Promise<SaveRuleResult> {
+  return saveRule('/api/categorization-rules', 'POST', request)
+}
+
+export function editRule(id: number, request: CategorizationRuleRequest): Promise<SaveRuleResult> {
+  return saveRule(`/api/categorization-rules/${id}`, 'PUT', request)
+}
+
+export async function deleteRule(id: number): Promise<DeleteRuleResult> {
   let response: Response
   try {
-    response = await fetch('/api/categorization-rules', {
-      method: 'POST',
+    response = await fetch(`/api/categorization-rules/${id}`, { method: 'DELETE' })
+  } catch {
+    return { ok: false, message: 'Could not reach the server.' }
+  }
+
+  if (response.ok) {
+    const { transactionsChanged } = (await response.json()) as { transactionsChanged: number }
+    return { ok: true, transactionsChanged }
+  }
+
+  return { ok: false, message: `Deleting failed (${response.status}).` }
+}
+
+async function saveRule(
+  url: string,
+  method: 'POST' | 'PUT',
+  request: CategorizationRuleRequest,
+): Promise<SaveRuleResult> {
+  let response: Response
+  try {
+    response = await fetch(url, {
+      method,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(request),
     })

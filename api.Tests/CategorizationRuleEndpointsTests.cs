@@ -229,4 +229,147 @@ public class CategorizationRuleEndpointsTests
 
         Assert.Equal(["Category does not exist."], errors["categoryId"]);
     }
+
+    private async Task<int> AddedRuleId(string keyword, int categoryId)
+    {
+        var response = await AddRule(keyword, categoryId);
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        return (await response.Content.ReadFromJsonAsync<CreatedCategorizationRuleResponse>())!.Id;
+    }
+
+    private async Task<HttpResponseMessage> EditRule(int id, string? keyword, int? categoryId) =>
+        await _client.PutAsJsonAsync($"/api/categorization-rules/{id}", new { keyword, categoryId });
+
+    private async Task<CreatedCategorizationRuleResponse> EditedRule(int id, string keyword, int categoryId)
+    {
+        var response = await EditRule(id, keyword, categoryId);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        return (await response.Content.ReadFromJsonAsync<CreatedCategorizationRuleResponse>())!;
+    }
+
+    [Fact]
+    public async Task Put_CategoryChange_MovesTheRulesTransactions()
+    {
+        var ids = await Imported($"{_token} Butikk Sentrum", $"{_token} Butikk Nord", $"{_token} Annet");
+        var ruleId = await AddedRuleId($"{_token} butikk", GroceriesId);
+
+        var edited = await EditedRule(ruleId, $"{_token} butikk", RestaurantsId);
+
+        Assert.Equal(new CreatedCategorizationRuleResponse(ruleId, $"{_token} butikk", RestaurantsId, 2), edited);
+        Assert.Equal([RestaurantsId, RestaurantsId, null], await CategoriesOf(ids));
+        var rules = await _client.GetFromJsonAsync<List<CategorizationRuleResponse>>("/api/categorization-rules");
+        Assert.Contains(new CategorizationRuleResponse(ruleId, $"{_token} butikk", RestaurantsId), rules!);
+    }
+
+    [Fact]
+    public async Task Put_KeywordChange_ReleasesTransactionsAndPicksUpNewOnes()
+    {
+        var ids = await Imported($"{_token} Butikk {_token} Sentrum", $"{_token} Butikk Nord", $"{_token} Bakeri");
+        await AddedRuleId($"{_token} sent", OtherId);
+        var ruleId = await AddedRuleId($"{_token} butikk", GroceriesId);
+
+        var edited = await EditedRule(ruleId, $"{_token} bakeri", GroceriesId);
+
+        Assert.Equal(3, edited.TransactionsChanged);
+        Assert.Equal([OtherId, null, GroceriesId], await CategoriesOf(ids));
+    }
+
+    [Fact]
+    public async Task Put_OnlyTheKeywordsCase_IsAllowedAndChangesNoTransactions()
+    {
+        var ids = await Imported($"{_token} Butikk Sentrum");
+        var ruleId = await AddedRuleId($"{_token} butikk", GroceriesId);
+
+        var edited = await EditedRule(ruleId, $" {_token.ToUpperInvariant()} BUTIKK ", GroceriesId);
+
+        Assert.Equal(
+            new CreatedCategorizationRuleResponse(ruleId, $"{_token.ToUpperInvariant()} BUTIKK", GroceriesId, 0),
+            edited);
+        Assert.Equal([GroceriesId], await CategoriesOf(ids));
+    }
+
+    [Fact]
+    public async Task Put_KeywordOfAnotherRule_IsRejected()
+    {
+        await AddedRuleId($"{_token} kafé", RestaurantsId);
+        var ruleId = await AddedRuleId($"{_token} butikk", GroceriesId);
+
+        var response = await EditRule(ruleId, $"{_token.ToUpperInvariant()} KAFÉ", GroceriesId);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var problem = await response.Content.ReadFromJsonAsync<ValidationProblemDetails>();
+        Assert.Equal([$"A rule for '{_token} kafé' already exists."], problem!.Errors["keyword"]);
+    }
+
+    [Fact]
+    public async Task Put_InvalidRequest_IsRejectedWithErrorPerField()
+    {
+        var ruleId = await AddedRuleId($"{_token} butikk", GroceriesId);
+
+        var response = await EditRule(ruleId, " x ", 9999);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var problem = await response.Content.ReadFromJsonAsync<ValidationProblemDetails>();
+        Assert.Equal(["Keyword must be at least 2 characters."], problem!.Errors["keyword"]);
+        Assert.Equal(["Category does not exist."], problem.Errors["categoryId"]);
+    }
+
+    [Fact]
+    public async Task Put_UnknownRule_ReturnsNotFound()
+    {
+        var response = await EditRule(int.MaxValue, $"{_token} butikk", GroceriesId);
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    private async Task<int> TransactionsChangedByDeleting(int ruleId)
+    {
+        var response = await _client.DeleteAsync($"/api/categorization-rules/{ruleId}");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        return (await response.Content.ReadFromJsonAsync<DeletedCategorizationRuleResponse>())!.TransactionsChanged;
+    }
+
+    [Fact]
+    public async Task Delete_Rule_HandsItsTransactionsToTheNextBestRuleOrLeavesThemUncategorized()
+    {
+        var ids = await Imported($"{_token} Butikk {_token} Sentrum", $"{_token} Butikk Nord", $"{_token} Annet");
+        await AddedRuleId($"{_token} sent", OtherId);
+        var ruleId = await AddedRuleId($"{_token} butikk", GroceriesId);
+
+        var changed = await TransactionsChangedByDeleting(ruleId);
+
+        Assert.Equal(2, changed);
+        Assert.Equal([OtherId, null, null], await CategoriesOf(ids));
+        var rules = await _client.GetFromJsonAsync<List<CategorizationRuleResponse>>("/api/categorization-rules");
+        Assert.DoesNotContain(rules!, r => r.Id == ruleId);
+    }
+
+    [Fact]
+    public async Task Delete_UnknownRule_ReturnsNotFound()
+    {
+        var response = await _client.DeleteAsync($"/api/categorization-rules/{int.MaxValue}");
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task EditAndDelete_NeverChangeManuallyEnteredTransactions()
+    {
+        var response = await _client.PostAsJsonAsync("/api/transactions", new
+        {
+            date = "2026-08-03",
+            description = $"{_token} Butikk",
+            amount = -100m,
+            categoryId = OtherId,
+        });
+        var manual = await response.Content.ReadFromJsonAsync<TransactionResponse>();
+        var ruleId = await AddedRuleId($"{_token} butikk", GroceriesId);
+
+        var edited = await EditedRule(ruleId, $"{_token} butikk", RestaurantsId);
+        var deleted = await TransactionsChangedByDeleting(ruleId);
+
+        Assert.Equal(0, edited.TransactionsChanged);
+        Assert.Equal(0, deleted);
+        Assert.Equal([OtherId], await CategoriesOf(manual!.Id));
+    }
 }
