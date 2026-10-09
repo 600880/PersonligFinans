@@ -9,6 +9,7 @@ import {
   type TransactionMonth,
 } from '../lib/api'
 import { formatAmount } from '../lib/amount'
+import { categoryColour } from '../lib/categoryColours'
 import { percent } from '../lib/percent'
 import { currentMonth } from '../lib/month'
 import { SpendingTrend } from './SpendingTrend'
@@ -27,28 +28,6 @@ const LOAD_ERROR = 'Could not load the Spending.'
 
 const CHART_SIZE = 240
 
-// Keyed by Category id, so each Category keeps its colour whichever Period is shown.
-const CATEGORY_COLOURS: Record<number, string> = {
-  1: '#2a78d6',
-  2: '#eb6834',
-  3: '#1baf7a',
-  4: '#eda100',
-  5: '#e87ba4',
-  6: '#008300',
-  7: '#4a3aa7',
-  8: '#e34948',
-  9: '#104281',
-  10: '#86b6ef',
-  11: '#8a5a1c',
-  12: '#0f766e',
-  13: '#9085e9',
-  14: '#b8336a',
-  15: '#6b8e23',
-}
-// Neutral grey, so Uncategorized stands apart from the Categories.
-const UNCATEGORIZED_COLOUR = '#94a3b8'
-// For a Category added after this list; never the Uncategorized grey.
-const FALLBACK_COLOUR = '#475569'
 const EMPTY_RING_COLOUR = '#e2e8f0'
 
 // Shared by the Spending ring and the empty ring.
@@ -79,7 +58,7 @@ function toSliceViews(spending: Spending, categories: Category[]): SliceView[] {
         : (categories.find((c) => c.id === categoryId)?.name ?? `Category ${categoryId}`),
     amount,
     share: amount / spending.total,
-    colour: categoryId === null ? UNCATEGORIZED_COLOUR : (CATEGORY_COLOURS[categoryId] ?? FALLBACK_COLOUR),
+    colour: categoryColour(categoryId),
   }))
 }
 
@@ -102,8 +81,8 @@ export function Dashboard({ version }: { version: number }) {
 
   useEffect(() => {
     let ignore = false
-    // Loaded apart from the months, so the Spending trend, which needs no Categories, still shows
-    // when they fail.
+    // Loaded apart from the months, so the Spending trend still shows, with its Total, when they
+    // fail.
     fetchCategories()
       .then((loadedCategories) => {
         if (!ignore) setCategories(loadedCategories)
@@ -304,7 +283,7 @@ export function Dashboard({ version }: { version: number }) {
       </section>
 
       {/* Waits for the months, which decide the Spans it offers. */}
-      {selected && <SpendingTrend months={months} />}
+      {selected && <SpendingTrend months={months} categories={categories} />}
     </>
   )
 }

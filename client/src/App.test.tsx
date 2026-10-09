@@ -1378,6 +1378,9 @@ describe('Dashboard', () => {
         expect(trendTable()).toEqual([
           ['', 'October 2025', 'September 2026', 'Change'],
           ['Total', '1 000,00 kr', '1 123,00 kr', '▲ +12,3 %'],
+          ['Other', '0,00 kr', '1 123,00 kr', 'New'],
+          ['Groceries', '600,00 kr', '0,00 kr', '−100 %'],
+          ['Uncategorized', '400,00 kr', '0,00 kr', '−100 %'],
         ]),
       )
       expect(selectedMonth('From')).toBe('10.2025')
@@ -1452,6 +1455,7 @@ describe('Dashboard', () => {
         expect(trendTable()).toEqual([
           ['', 'January 2026', 'March 2026', 'Change'],
           ['Total', firstShown, lastShown, change],
+          ['Groceries', firstShown, lastShown, change],
         ]),
       )
     })
@@ -1490,6 +1494,7 @@ describe('Dashboard', () => {
           expect(trendTable()).toEqual([
             ['', 'March 2025', 'June 2025', 'Change'],
             ['Total', '300,00 kr', '600,00 kr', '▲ +100,0 %'],
+            ['Groceries', '300,00 kr', '600,00 kr', '▲ +100,0 %'],
           ]),
         )
         expect(requestedMonthlySpending()).toEqual([
@@ -1593,6 +1598,138 @@ describe('Dashboard', () => {
 
       await waitFor(() => expect(trendTable()[1]).toEqual(['Total', '0,00 kr', '75,00 kr', 'New']))
       expect(requestedMonthlySpending()).toHaveLength(2)
+    })
+
+    describe('Categories', () => {
+      function toggle(name: string) {
+        return within(trend()).getByRole('checkbox', { name }) as HTMLInputElement
+      }
+
+      // The names of the rows switched on, in table order.
+      function switchedOn() {
+        return within(trend())
+          .getAllByRole('checkbox')
+          .filter((checkbox) => (checkbox as HTMLInputElement).checked)
+          .map((checkbox) => checkbox.closest('tr')!.firstElementChild!.textContent)
+      }
+
+      it('lists Total, then each Category and Uncategorized with Spending in the Span, largest over the Span first', async () => {
+        categoriesServed = [...categories, { id: 4, name: 'Transport' }, { id: 5, name: 'Restaurants' }]
+        months = [
+          { year: 2026, month: 3 },
+          { year: 2026, month: 1 },
+        ]
+        handleMonthlySpending = (from, to) =>
+          Response.json(
+            monthlySpending(from, to, {
+              '2026-1': [
+                { categoryId: 1, amount: 100 },
+                { categoryId: null, amount: 50 },
+              ],
+              '2026-2': [{ categoryId: 13, amount: 1000 }],
+              '2026-3': [
+                { categoryId: 1, amount: 150 },
+                { categoryId: 4, amount: 40 },
+              ],
+            }),
+          )
+
+        render(<App />)
+
+        await waitFor(() =>
+          expect(trendTable()).toEqual([
+            ['', 'January 2026', 'March 2026', 'Change'],
+            ['Total', '150,00 kr', '190,00 kr', '▲ +26,7 %'],
+            ['Other', '0,00 kr', '0,00 kr', '–'],
+            ['Groceries', '100,00 kr', '150,00 kr', '▲ +50,0 %'],
+            ['Uncategorized', '50,00 kr', '0,00 kr', '−100 %'],
+            ['Transport', '0,00 kr', '40,00 kr', 'New'],
+          ]),
+        )
+      })
+
+      // The swatch in the named row of a table, as a CSS colour.
+      function rowSwatch(region: HTMLElement, name: string) {
+        const row = within(region).getByRole('row', { name: new RegExp(`^${name}`) })
+        return (row.querySelector('[aria-hidden="true"]') as HTMLElement).style.backgroundColor
+      }
+
+      it('gives each Category and Uncategorized the colour it has in the donut, and Total dark slate', async () => {
+        months = [
+          { year: 2026, month: 9 },
+          { year: 2026, month: 8 },
+        ]
+        handleSpending = () => Response.json(septemberSpending)
+        handleMonthlySpending = (from, to) =>
+          Response.json(monthlySpending(from, to, { '2026-9': septemberSpending.slices }))
+
+        render(<App />)
+
+        await waitFor(() => expect(trendTable()).toHaveLength(5))
+        await waitFor(() => expect(legendRows()).toHaveLength(3))
+        for (const name of ['Other', 'Uncategorized', 'Groceries']) {
+          expect(rowSwatch(trend(), name)).toBe(rowSwatch(dashboard(), name))
+        }
+        expect(rowSwatch(trend(), 'Total')).toBe('rgb(30, 41, 59)')
+      })
+
+      it('opens with Total switched on and the Categories off, and switches any of them', async () => {
+        months = [
+          { year: 2026, month: 9 },
+          { year: 2026, month: 8 },
+        ]
+        handleMonthlySpending = (from, to) =>
+          Response.json(monthlySpending(from, to, { '2026-9': septemberSpending.slices }))
+        const user = userEvent.setup()
+        render(<App />)
+        await waitFor(() => expect(trendTable()).toHaveLength(5))
+        expect(switchedOn()).toEqual(['Total'])
+
+        await user.click(toggle('Total'))
+        await user.click(toggle('Groceries'))
+        await user.click(toggle('Uncategorized'))
+
+        expect(switchedOn()).toEqual(['Uncategorized', 'Groceries'])
+      })
+
+      it('keeps rows switched on when the Span changes, including a Category that drops out and comes back', async () => {
+        // Every month from January 2025 to September 2026 is offered.
+        months = [
+          { year: 2026, month: 9 },
+          { year: 2025, month: 1 },
+        ]
+        handleMonthlySpending = (from, to) =>
+          Response.json(
+            monthlySpending(from, to, {
+              '2025-3': [{ categoryId: 1, amount: 300 }],
+              '2026-1': [{ categoryId: 13, amount: 500 }],
+              '2026-9': [{ categoryId: 1, amount: 100 }],
+            }),
+          )
+        const user = userEvent.setup()
+        render(<App />)
+        await waitFor(() => expect(trendTable()).toHaveLength(4))
+        await user.click(toggle('Total'))
+        await user.click(toggle('Other'))
+
+        await user.selectOptions(within(trend()).getByLabelText('From'), '02.2025')
+        await waitFor(() => expect(trendTable()[0][1]).toBe('February 2025'))
+        expect(switchedOn()).toEqual(['Other'])
+
+        await user.selectOptions(within(trend()).getByLabelText('To'), '06.2025')
+        await waitFor(() =>
+          expect(trendTable()).toEqual([
+            ['', 'February 2025', 'June 2025', 'Change'],
+            ['Total', '0,00 kr', '0,00 kr', '–'],
+            ['Groceries', '0,00 kr', '0,00 kr', '–'],
+          ]),
+        )
+        expect(switchedOn()).toEqual([])
+
+        await user.selectOptions(within(trend()).getByLabelText('To'), '09.2026')
+        await waitFor(() => expect(trendTable()).toHaveLength(4))
+        expect(switchedOn()).toEqual(['Other'])
+      })
     })
   })
 })

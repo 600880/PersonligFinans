@@ -1,9 +1,17 @@
 import { useEffect, useId, useMemo, useState } from 'react'
 import { CartesianGrid, Line, LineChart, Tooltip, XAxis, YAxis } from 'recharts'
-import { fetchMonthlySpending, type MonthSpending, type TransactionMonth } from '../lib/api'
+import { fetchMonthlySpending, type Category, type MonthSpending, type TransactionMonth } from '../lib/api'
 import { formatAmount } from '../lib/amount'
+import { categoryColour } from '../lib/categoryColours'
 import { defaultSpan, monthLabel, monthValue, offeredMonths, withFrom, withTo, type Span } from '../lib/span'
-import { formatChange, trendPoints, type TrendPoint } from '../lib/trend'
+import {
+  categoryRow,
+  formatChange,
+  TOTAL_ROW,
+  trendCategories,
+  trendPoints,
+  type TrendPoint,
+} from '../lib/trend'
 
 const LOAD_ERROR = 'Could not load the Spending trend.'
 
@@ -20,11 +28,37 @@ interface LoadedTrend {
   monthly: MonthSpending[] | null
 }
 
-// How Spending changed over a Span, as a line with one point per month and a table of the first and
-// last points. `months` are the months with Transactions, newest first, which decide the months
-// offered. Opens on the 12 months ending at the latest of them, and does so again whenever they are
-// reloaded. Transfers are always left out.
-export function SpendingTrend({ months }: { months: TransactionMonth[] }) {
+// One row of the table, and the line it switches on.
+interface TrendRow {
+  key: string
+  name: string
+  colour: string
+}
+
+// The Total row, then one per Category with Spending in the Span, largest first. The Categories wait
+// for their names, so a Category is never shown without its name.
+function trendRows(monthly: MonthSpending[], categories: Category[] | null): TrendRow[] {
+  const total = { key: TOTAL_ROW, name: 'Total', colour: TOTAL_COLOUR }
+  if (!categories) return [total]
+  return [
+    total,
+    ...trendCategories(monthly).map((categoryId) => ({
+      key: categoryRow(categoryId),
+      name:
+        categoryId === null
+          ? 'Uncategorized'
+          : (categories.find((c) => c.id === categoryId)?.name ?? `Category ${categoryId}`),
+      colour: categoryColour(categoryId),
+    })),
+  ]
+}
+
+// How Spending changed over a Span, as lines with one point per month and a table of the first and
+// last points for Total and each Category. Each row switches its line on and off; Total starts on and
+// the Categories off, and they stay as switched when the Span changes. `months` are the months with
+// Transactions, newest first, which decide the months offered. Opens on the 12 months ending at the
+// latest of them, and does so again whenever they are reloaded. Transfers are always left out.
+export function SpendingTrend({ months, categories }: { months: TransactionMonth[]; categories: Category[] | null }) {
   const headingId = useId()
   const offered = useMemo(() => offeredMonths(months), [months])
   // The Span the user chose, remembered with the months it was chosen from.
@@ -34,6 +68,9 @@ export function SpendingTrend({ months }: { months: TransactionMonth[] }) {
     [chosen, months, offered],
   )
   const [loaded, setLoaded] = useState<LoadedTrend | null>(null)
+  // The rows whose lines are drawn, by key. Kept for rows missing from the current Span, so they are
+  // drawn again when a later Span includes them.
+  const [switchedOn, setSwitchedOn] = useState<ReadonlySet<string>>(() => new Set([TOTAL_ROW]))
 
   useEffect(() => {
     if (!span) return
@@ -54,6 +91,17 @@ export function SpendingTrend({ months }: { months: TransactionMonth[] }) {
   const points = current?.monthly ? trendPoints(current.monthly) : []
   const first = points[0]
   const last = points[points.length - 1]
+  const rows = current?.monthly ? trendRows(current.monthly, categories) : []
+  const drawn = rows.filter((row) => switchedOn.has(row.key))
+
+  function switchRow(key: string, on: boolean) {
+    setSwitchedOn((keys) => {
+      const next = new Set(keys)
+      if (on) next.add(key)
+      else next.delete(key)
+      return next
+    })
+  }
 
   function chooseMonth(end: 'from' | 'to', value: string) {
     if (!span) return
@@ -120,19 +168,27 @@ export function SpendingTrend({ months }: { months: TransactionMonth[] }) {
                     return (
                       <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm">
                         <p className="font-medium text-slate-900">{point.label}</p>
-                        <p className="text-slate-600 tabular-nums">Total {formatAmount(point.total)} per month</p>
+                        {drawn.map((row) => (
+                          <p key={row.key} className="text-slate-600 tabular-nums">
+                            {row.name} {formatAmount(point.values[row.key])} per month
+                          </p>
+                        ))}
                       </div>
                     )
                   }}
                 />
-                <Line
-                  dataKey="total"
-                  name="Total"
-                  stroke={TOTAL_COLOUR}
-                  strokeWidth={3}
-                  dot={{ r: 3, fill: TOTAL_COLOUR }}
-                  isAnimationActive={false}
-                />
+                {/* Backwards, so the Total line is drawn on top. It is slightly thicker than the rest. */}
+                {drawn.toReversed().map((row) => (
+                  <Line
+                    key={row.key}
+                    dataKey={(point: TrendPoint) => point.values[row.key]}
+                    name={row.name}
+                    stroke={row.colour}
+                    strokeWidth={row.key === TOTAL_ROW ? 3 : 2}
+                    dot={{ r: row.key === TOTAL_ROW ? 3 : 2, fill: row.colour }}
+                    isAnimationActive={false}
+                  />
+                ))}
               </LineChart>
 
               <table className="mt-4 w-full text-sm">
@@ -145,27 +201,35 @@ export function SpendingTrend({ months }: { months: TransactionMonth[] }) {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200 text-slate-900">
-                  <tr>
-                    <td className="py-2 pr-3">
-                      <span className="flex items-center gap-2">
-                        <span
-                          aria-hidden="true"
-                          className="size-3 shrink-0 rounded-sm"
-                          style={{ backgroundColor: TOTAL_COLOUR }}
-                        />
-                        Total
-                      </span>
-                    </td>
-                    <td className="py-2 pr-3 text-right whitespace-nowrap tabular-nums">
-                      {formatAmount(first.total)}
-                    </td>
-                    <td className="py-2 pr-3 text-right whitespace-nowrap tabular-nums">
-                      {formatAmount(last.total)}
-                    </td>
-                    <td className="py-2 text-right whitespace-nowrap text-slate-600 tabular-nums">
-                      {formatChange(first.total, last.total)}
-                    </td>
-                  </tr>
+                  {rows.map((row) => (
+                    <tr key={row.key}>
+                      <td className="py-2 pr-3">
+                        <label className="flex w-fit items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={switchedOn.has(row.key)}
+                            onChange={(event) => switchRow(row.key, event.target.checked)}
+                            className="size-4 rounded border-slate-300"
+                          />
+                          <span
+                            aria-hidden="true"
+                            className="size-3 shrink-0 rounded-sm"
+                            style={{ backgroundColor: row.colour }}
+                          />
+                          {row.name}
+                        </label>
+                      </td>
+                      <td className="py-2 pr-3 text-right whitespace-nowrap tabular-nums">
+                        {formatAmount(first.values[row.key])}
+                      </td>
+                      <td className="py-2 pr-3 text-right whitespace-nowrap tabular-nums">
+                        {formatAmount(last.values[row.key])}
+                      </td>
+                      <td className="py-2 text-right whitespace-nowrap text-slate-600 tabular-nums">
+                        {formatChange(first.values[row.key], last.values[row.key])}
+                      </td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </>
