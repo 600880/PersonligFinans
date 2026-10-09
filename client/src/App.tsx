@@ -22,7 +22,7 @@ function App() {
   const [isUploading, setIsUploading] = useState(false)
   const [importMessage, setImportMessage] = useState<string | null>(null)
   const [uploadError, setUploadError] = useState<string | null>(null)
-  // Bumped after new Transactions are saved, so the Dashboard loads afresh.
+  // Bumped after new Transactions are saved, so the Dashboard reloads in place.
   const [dashboardVersion, setDashboardVersion] = useState(0)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -146,7 +146,7 @@ function App() {
             </p>
           )}
 
-          <Dashboard key={dashboardVersion} />
+          <Dashboard version={dashboardVersion} />
         </main>
       )}
 

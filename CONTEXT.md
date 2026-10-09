@@ -41,8 +41,12 @@ The money that left during a Period: the sum of the negative Amounts, shown as a
 _Avoid_: Outgoing, expenses, costs
 
 **Period**:
-A calendar year, quarter (Q1–Q4) or month that Spending is summarized over.
+A specific calendar year, quarter (Q1–Q4) or month that Spending is summarized over, such as 2026, Q3 2026 or September 2026. Each Period has a Granularity.
 _Avoid_: Range, interval, timeframe
+
+**Granularity**:
+The length of a Period: Year, Quarter or Month. Changing it keeps the user in the same span of time, moving to the Period that contains the current one or to the latest one with Transactions inside it.
+_Avoid_: Resolution, period type, interval
 
 **Dashboard**:
 The view summarizing Spending by Category over a chosen Period.

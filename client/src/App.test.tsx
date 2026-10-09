@@ -1090,6 +1090,26 @@ describe('Dashboard', () => {
     expect(screen.getByLabelText('Period')).toHaveValue('2026-9')
   })
 
+  it('keeps the Period and Include transfers when reloading after an upload', async () => {
+    months = [
+      { year: 2026, month: 9 },
+      { year: 2026, month: 8 },
+    ]
+    const user = userEvent.setup()
+    render(<App />)
+    await waitFor(() => expect(centreTotal()).toBe('Total 0,00 kr'))
+    await user.selectOptions(screen.getByLabelText('Period'), 'August 2026')
+    await user.click(within(dashboard()).getByRole('checkbox', { name: 'Include transfers' }))
+    handleSpending = () => Response.json(septemberSpending)
+
+    await user.upload(screen.getByLabelText(/bank statement pdf/i), statementPdf)
+
+    await waitFor(() => expect(centreTotal()).toBe('Total 1 570,50 kr'))
+    expect(screen.getByLabelText('Period')).toHaveValue('2026-8')
+    expect(within(dashboard()).getByRole('checkbox', { name: 'Include transfers' })).toBeChecked()
+    expect(requestedSpending().at(-1)).toBe('/api/spending?year=2026&month=8&includeTransfers=true')
+  })
+
   it('reloads after a Transaction is added', async () => {
     const user = await openModal()
     await waitFor(() => expect(centreTotal()).toBe('Total 0,00 kr'))
