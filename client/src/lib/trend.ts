@@ -1,23 +1,37 @@
 import type { MonthSpending } from './api'
+import { groupMonths } from './grouping'
 import { percent } from './percent'
-import { periodLabel, periodOfMonth } from './period'
-import { monthValue } from './span'
 
-// One point of the trend: a stretch of the Span, labelled like the Dashboard's Periods, with its
-// Spending as NOK per month. Every point is one month for now.
+// One point of the trend: a month, quarter or half-year of the Span, with its Spending as NOK per
+// month. `monthsCovered` is how many of the `monthsInUnit` months of its unit fall inside the Span.
 export interface TrendPoint {
   key: string
   label: string
+  monthsCovered: number
+  monthsInUnit: number
   total: number
 }
 
-// The trend's points for a Span's monthly Spending, in order.
+// The trend's points for a Span's monthly Spending, in order. Each point's Spending is divided by
+// the months it covers, so that partial points at the Span's edges compare with full ones.
 export function trendPoints(monthly: MonthSpending[]): TrendPoint[] {
-  return monthly.map((month) => ({
-    key: monthValue(month),
-    label: periodLabel(periodOfMonth(month, 'month')),
-    total: month.slices.reduce((sum, slice) => sum + slice.amount, 0),
-  }))
+  return groupMonths(monthly).map((group) => {
+    const spending = group.months
+      .flatMap((month) => month.slices)
+      .reduce((sum, slice) => sum + slice.amount, 0)
+    return {
+      key: group.key,
+      label: group.label,
+      monthsCovered: group.months.length,
+      monthsInUnit: group.monthsInUnit,
+      total: spending / group.months.length,
+    }
+  })
+}
+
+// " (2 of 3 months)" for a point covering only part of its quarter or half-year, otherwise "".
+export function coverageNote({ monthsCovered, monthsInUnit }: TrendPoint): string {
+  return monthsCovered < monthsInUnit ? ` (${monthsCovered} of ${monthsInUnit} months)` : ''
 }
 
 // The change from the first point's monthly value to the last's, e.g. "▲ +12,3 %" or "▼ −8,0 %".

@@ -1544,6 +1544,62 @@ describe('Dashboard', () => {
       })
     })
 
+    describe('Points', () => {
+      // Every month from January 2023 to September 2026 is offered.
+      async function openTrend() {
+        months = [
+          { year: 2026, month: 9 },
+          { year: 2023, month: 1 },
+        ]
+        handleMonthlySpending = (from, to) =>
+          Response.json(
+            monthlySpending(from, to, {
+              '2023-3': [{ categoryId: 1, amount: 400 }],
+              '2023-9': [{ categoryId: 1, amount: 800 }],
+              '2023-10': [{ categoryId: 1, amount: 400 }],
+              '2025-2': [{ categoryId: 1, amount: 100 }],
+              '2025-3': [{ categoryId: 1, amount: 500 }],
+              '2025-9': [{ categoryId: 1, amount: 900 }],
+              '2025-10': [{ categoryId: 1, amount: 1000 }],
+              '2026-7': [
+                { categoryId: 1, amount: 600 },
+                { categoryId: null, amount: 400 },
+              ],
+              '2026-8': [{ categoryId: 13, amount: 500 }],
+              '2026-9': [{ categoryId: 1, amount: 300 }],
+            }),
+          )
+        const user = userEvent.setup()
+        render(<App />)
+        await waitFor(() => expect(trendTable()).toHaveLength(2))
+        return user
+      }
+
+      it.each([
+        ['12 months by month', '10.2025', '09.2026', 'October 2025', 'September 2026', '1 000,00 kr', '300,00 kr', '▼ −70,0 %'],
+        ['13 months by quarter, from a partial first quarter', '09.2025', '09.2026', 'Q3 2025', 'Q3 2026', '900,00 kr', '600,00 kr', '▼ −33,3 %'],
+        ['partial first and last quarters', '02.2025', '08.2026', 'Q1 2025', 'Q3 2026', '300,00 kr', '750,00 kr', '▲ +150,0 %'],
+        ['36 months by quarter', '10.2023', '09.2026', 'Q4 2023', 'Q3 2026', '133,33 kr', '600,00 kr', '▲ +350,0 %'],
+        ['37 months by half-year, from a partial first half-year', '09.2023', '09.2026', 'H2 2023', 'H2 2026', '300,00 kr', '600,00 kr', '▲ +100,0 %'],
+        ['partial first and last half-years', '03.2023', '09.2026', 'H1 2023', 'H2 2026', '100,00 kr', '600,00 kr', '▲ +500,0 %'],
+      ])(
+        'shows %s, each point as its Spending divided by the months of the Span it covers',
+        async (_case, from, to, firstLabel, lastLabel, first, last, change) => {
+          const user = await openTrend()
+
+          await user.selectOptions(within(trend()).getByLabelText('From'), from)
+          await user.selectOptions(within(trend()).getByLabelText('To'), to)
+
+          await waitFor(() =>
+            expect(trendTable()).toEqual([
+              ['', firstLabel, lastLabel, 'Change'],
+              ['Total', first, last, change],
+            ]),
+          )
+        },
+      )
+    })
+
     it('says when the trend could not be loaded, leaving the Spending by Category shown', async () => {
       months = [
         { year: 2026, month: 9 },

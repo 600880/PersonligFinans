@@ -3,7 +3,7 @@ import { CartesianGrid, Line, LineChart, Tooltip, XAxis, YAxis } from 'recharts'
 import { fetchMonthlySpending, type MonthSpending, type TransactionMonth } from '../lib/api'
 import { formatAmount } from '../lib/amount'
 import { defaultSpan, monthLabel, monthValue, offeredMonths, withFrom, withTo, type Span } from '../lib/span'
-import { formatChange, trendPoints, type TrendPoint } from '../lib/trend'
+import { coverageNote, formatChange, trendPoints, type TrendPoint } from '../lib/trend'
 
 const LOAD_ERROR = 'Could not load the Spending trend.'
 
@@ -20,9 +20,9 @@ interface LoadedTrend {
   monthly: MonthSpending[] | null
 }
 
-// How Spending changed over a Span, as a line with one point per month and a table of the first and
-// last points. `months` are the months with Transactions, newest first, which decide the months
-// offered. Opens on the 12 months ending at the latest of them, and does so again whenever they are
+// How Spending changed over a Span, as a line with a point per month, quarter or half-year and a
+// table of the first and last points. `months` are the months with Transactions, newest first, which
+// decide the months offered. Opens on the 12 months ending at the latest of them, and does so again whenever they are
 // reloaded. Transfers are always left out.
 export function SpendingTrend({ months }: { months: TransactionMonth[] }) {
   const headingId = useId()
@@ -119,7 +119,10 @@ export function SpendingTrend({ months }: { months: TransactionMonth[] }) {
                     if (!point) return null
                     return (
                       <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm">
-                        <p className="font-medium text-slate-900">{point.label}</p>
+                        <p className="font-medium text-slate-900">
+                          {point.label}
+                          {coverageNote(point)}
+                        </p>
                         <p className="text-slate-600 tabular-nums">Total {formatAmount(point.total)} per month</p>
                       </div>
                     )
