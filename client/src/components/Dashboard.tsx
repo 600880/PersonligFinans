@@ -10,6 +10,7 @@ import {
 } from '../lib/api'
 import { formatAmount } from '../lib/amount'
 import { categoryColour } from '../lib/categoryColours'
+import { categoryName } from '../lib/categoryName'
 import { percent } from '../lib/percent'
 import { currentMonth } from '../lib/month'
 import { SpendingTrend } from './SpendingTrend'
@@ -52,10 +53,7 @@ interface LoadedSpending {
 function toSliceViews(spending: Spending, categories: Category[]): SliceView[] {
   return spending.slices.map(({ categoryId, amount }) => ({
     key: String(categoryId),
-    name:
-      categoryId === null
-        ? 'Uncategorized'
-        : (categories.find((c) => c.id === categoryId)?.name ?? `Category ${categoryId}`),
+    name: categoryName(categoryId, categories),
     amount,
     share: amount / spending.total,
     colour: categoryColour(categoryId),

@@ -3,6 +3,7 @@ import { CartesianGrid, Line, LineChart, Tooltip, XAxis, YAxis } from 'recharts'
 import { fetchMonthlySpending, type Category, type MonthSpending, type TransactionMonth } from '../lib/api'
 import { formatAmount } from '../lib/amount'
 import { categoryColour } from '../lib/categoryColours'
+import { categoryName } from '../lib/categoryName'
 import { defaultSpan, monthLabel, monthValue, offeredMonths, withFrom, withTo, type Span } from '../lib/span'
 import {
   categoryRow,
@@ -47,10 +48,7 @@ function trendRows(monthly: MonthSpending[], categories: Category[] | null): Tre
     total,
     ...trendCategories(monthly).map((categoryId) => ({
       key: categoryRow(categoryId),
-      name:
-        categoryId === null
-          ? 'Uncategorized'
-          : (categories.find((c) => c.id === categoryId)?.name ?? `Category ${categoryId}`),
+      name: categoryName(categoryId, categories),
       colour: categoryColour(categoryId),
     })),
   ]

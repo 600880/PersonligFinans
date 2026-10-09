@@ -1680,7 +1680,7 @@ describe('Dashboard', () => {
 
       // The names of the rows switched on, in table order.
       function switchedOn() {
-        return within(trend())
+        return within(within(trend()).getByRole('table'))
           .getAllByRole('checkbox')
           .filter((checkbox) => (checkbox as HTMLInputElement).checked)
           .map((checkbox) => checkbox.closest('tr')!.firstElementChild!.textContent)
@@ -1803,6 +1803,43 @@ describe('Dashboard', () => {
         await user.selectOptions(within(trend()).getByLabelText('To'), '09.2026')
         await waitFor(() => expect(trendTable()).toHaveLength(4))
         expect(switchedOn()).toEqual(['Other'])
+      })
+
+      it('keeps rows switched on when Include transfers changes', async () => {
+        categoriesServed = [...categories, { id: 12, name: 'Transfers' }]
+        months = [
+          { year: 2026, month: 9 },
+          { year: 2026, month: 8 },
+        ]
+        handleMonthlySpending = (from, to, includeTransfers) =>
+          Response.json(
+            monthlySpending(from, to, {
+              '2026-8': [{ categoryId: 1, amount: 400 }],
+              '2026-9': includeTransfers
+                ? [
+                    { categoryId: 12, amount: 1500 },
+                    { categoryId: 1, amount: 500 },
+                  ]
+                : [{ categoryId: 1, amount: 500 }],
+            }),
+          )
+        const user = userEvent.setup()
+        render(<App />)
+        await waitFor(() => expect(trendTable()).toHaveLength(3))
+        await user.click(toggle('Groceries'))
+
+        await user.click(toggle('Include transfers'))
+        await waitFor(() => expect(trendTable()).toHaveLength(4))
+        expect(switchedOn()).toEqual(['Total', 'Groceries'])
+        await user.click(toggle('Transfers'))
+
+        await user.click(toggle('Include transfers'))
+        await waitFor(() => expect(trendTable()).toHaveLength(3))
+        expect(switchedOn()).toEqual(['Total', 'Groceries'])
+
+        await user.click(toggle('Include transfers'))
+        await waitFor(() => expect(trendTable()).toHaveLength(4))
+        expect(switchedOn()).toEqual(['Total', 'Transfers', 'Groceries'])
       })
     })
 
