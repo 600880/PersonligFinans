@@ -1,6 +1,7 @@
 import type { MonthSpending } from './api'
 import { groupMonths } from './grouping'
 import { percent } from './percent'
+import type { Granularity } from './period'
 
 // Identifies the Total row of the trend, and its line.
 export const TOTAL_ROW = 'total'
@@ -10,14 +11,14 @@ export function categoryRow(categoryId: number | null): string {
   return categoryId === null ? 'uncategorized' : String(categoryId)
 }
 
-// One point of the trend: a month, quarter or half-year of the Span, with the Spending of Total and
-// of each Category in the Span as NOK per month, keyed by row. `monthsCovered` is how many of the
-// `monthsInUnit` months of its unit fall inside the Span.
+// One point of the trend: a Period of the Span, with the Spending of Total and of each Category in the
+// Span as NOK per month, keyed by row. `monthsCovered` is how many of the `monthsInPeriod` months of
+// its Period fall inside the Span.
 export interface TrendPoint {
   key: string
   label: string
   monthsCovered: number
-  monthsInUnit: number
+  monthsInPeriod: number
   values: Record<string, number>
 }
 
@@ -31,12 +32,13 @@ export function trendCategories(monthly: MonthSpending[]): (number | null)[] {
   return [...sums].sort(([, a], [, b]) => b - a).map(([categoryId]) => categoryId)
 }
 
-// The trend's points for a Span's monthly Spending, in order. Each point has a value for Total and
-// every Category in the Span, 0 when it had no Spending there. Each value is the Spending divided by
-// the months the point covers, so that partial points at the Span's edges compare with full ones.
-export function trendPoints(monthly: MonthSpending[]): TrendPoint[] {
+// The trend's points for a Span's monthly Spending, one per Period of the granularity, in order.
+// Each point has a value for Total and every Category in the Span, 0 when it had no Spending there.
+// Each value is the Spending divided by the months the point covers, so that partial points at the
+// Span's edges compare with full ones.
+export function trendPoints(monthly: MonthSpending[], granularity: Granularity): TrendPoint[] {
   const rows = [TOTAL_ROW, ...trendCategories(monthly).map(categoryRow)]
-  return groupMonths(monthly).map((group) => {
+  return groupMonths(monthly, granularity).map((group) => {
     const monthsCovered = group.months.length
     const sums: Record<string, number> = Object.fromEntries(rows.map((row) => [row, 0]))
     for (const { categoryId, amount } of group.months.flatMap((month) => month.slices)) {
@@ -44,13 +46,13 @@ export function trendPoints(monthly: MonthSpending[]): TrendPoint[] {
       sums[TOTAL_ROW] += amount
     }
     const values = Object.fromEntries(rows.map((row) => [row, sums[row] / monthsCovered]))
-    return { key: group.key, label: group.label, monthsCovered, monthsInUnit: group.monthsInUnit, values }
+    return { key: group.key, label: group.label, monthsCovered, monthsInPeriod: group.monthsInPeriod, values }
   })
 }
 
-// " (2 of 3 months)" for a point covering only part of its quarter or half-year, otherwise "".
-export function coverageNote({ monthsCovered, monthsInUnit }: TrendPoint): string {
-  return monthsCovered < monthsInUnit ? ` (${monthsCovered} of ${monthsInUnit} months)` : ''
+// " (2 of 3 months)" for a point covering only part of its quarter or year, otherwise "".
+export function coverageNote({ monthsCovered, monthsInPeriod }: TrendPoint): string {
+  return monthsCovered < monthsInPeriod ? ` (${monthsCovered} of ${monthsInPeriod} months)` : ''
 }
 
 // The change from the first point's monthly value to the last's, e.g. "▲ +12,3 %" or "▼ −8,0 %".
