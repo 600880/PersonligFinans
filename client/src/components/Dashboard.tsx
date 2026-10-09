@@ -81,8 +81,8 @@ export function Dashboard({ version }: { version: number }) {
 
   useEffect(() => {
     let ignore = false
-    // Loaded apart from the months, so the Spending trend, which needs no Categories, still shows
-    // when they fail.
+    // Loaded apart from the months, so the Spending trend still shows, with its Total, when they
+    // fail.
     fetchCategories()
       .then((loadedCategories) => {
         if (!ignore) setCategories(loadedCategories)
@@ -283,7 +283,7 @@ export function Dashboard({ version }: { version: number }) {
       </section>
 
       {/* Waits for the months, which decide the Spans it offers. */}
-      {selected && <SpendingTrend months={months} />}
+      {selected && <SpendingTrend months={months} categories={categories} />}
     </>
   )
 }
