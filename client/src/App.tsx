@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { AddTransactionModal } from './components/AddTransactionModal'
+import { Dashboard } from './components/Dashboard'
 import { RulesPage } from './components/RulesPage'
 import { TransactionsPage } from './components/TransactionsPage'
 import { uploadBankStatement } from './lib/api'
@@ -21,6 +22,8 @@ function App() {
   const [isUploading, setIsUploading] = useState(false)
   const [importMessage, setImportMessage] = useState<string | null>(null)
   const [uploadError, setUploadError] = useState<string | null>(null)
+  // Bumped after new Transactions are saved, so the Dashboard loads afresh.
+  const [dashboardVersion, setDashboardVersion] = useState(0)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -34,6 +37,7 @@ function App() {
     setImportMessage(null)
     setUploadError(null)
     setShowSavedMessage(true)
+    setDashboardVersion((version) => version + 1)
   }
 
   async function handleFileChosen(file: File | undefined) {
@@ -45,6 +49,7 @@ function App() {
 
     const result = await uploadBankStatement(file).finally(() => setIsUploading(false))
     if (result.ok) {
+      setDashboardVersion((version) => version + 1)
       const { transactionCount, uncategorizedCount, aiCategorizationUnavailable, periodStart, periodEnd } =
         result.statement
       setImportMessage(
@@ -140,6 +145,8 @@ function App() {
               {showSavedMessage ? 'Transaction saved' : importMessage}
             </p>
           )}
+
+          <Dashboard key={dashboardVersion} />
         </main>
       )}
 

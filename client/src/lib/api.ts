@@ -1,3 +1,4 @@
+import { periodQuery, type Period } from './period'
 import type { CreateTransactionRequest } from './transactionForm'
 
 export interface Category {
@@ -43,6 +44,26 @@ export async function fetchTransactionsOfMonth({ year, month }: TransactionMonth
   const response = await fetch(`/api/transactions?year=${year}&month=${month}`)
   if (!response.ok) throw new Error(`Loading transactions failed (${response.status})`)
   return (await response.json()) as Transaction[]
+}
+
+// categoryId is null for the Uncategorized slice. Amounts are positive.
+export interface SpendingSlice {
+  categoryId: number | null
+  amount: number
+}
+
+// A Period's Spending: the total and one slice per group with Spending, largest first.
+export interface Spending {
+  total: number
+  slices: SpendingSlice[]
+}
+
+// Transactions in the Transfers Category count only when includeTransfers is set.
+export async function fetchSpending(period: Period, includeTransfers: boolean): Promise<Spending> {
+  const transfers = includeTransfers ? '&includeTransfers=true' : ''
+  const response = await fetch(`/api/spending?${periodQuery(period)}${transfers}`)
+  if (!response.ok) throw new Error(`Loading spending failed (${response.status})`)
+  return (await response.json()) as Spending
 }
 
 export type ChangeCategoryResult = { ok: true; transaction: Transaction } | { ok: false; message: string }

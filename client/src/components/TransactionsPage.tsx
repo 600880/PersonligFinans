@@ -10,32 +10,13 @@ import {
 } from '../lib/api'
 import { formatAmount } from '../lib/amount'
 import { formatNorwegianDate } from '../lib/date'
-
-const MONTH_NAMES = [
-  'January',
-  'February',
-  'March',
-  'April',
-  'May',
-  'June',
-  'July',
-  'August',
-  'September',
-  'October',
-  'November',
-  'December',
-]
+import { currentMonth, MONTH_NAMES } from '../lib/month'
 
 const LOAD_ERROR = 'Could not load the transactions.'
 
 const inputClass = 'rounded-lg border border-slate-300 px-3 py-2 font-normal'
 const categorySelectClass =
   'rounded-lg border border-slate-300 px-2 py-1 disabled:cursor-not-allowed disabled:bg-slate-100'
-
-function currentMonth(): TransactionMonth {
-  const today = new Date()
-  return { year: today.getFullYear(), month: today.getMonth() + 1 }
-}
 
 // A month's Transactions, remembered with the month they were loaded for.
 interface LoadedMonth extends TransactionMonth {

@@ -21,7 +21,21 @@ let handleDeleteRule: (id: number) => Response
 let months: { year: number; month: number }[] | Response
 let handleListMonth: (year: number, month: number) => Response
 let handleChangeCategory: (id: number, body: unknown) => Response | Promise<Response>
+// What the categories endpoint returns: `categories` unless a test adds to it.
+let categoriesServed: { id: number; name: string }[]
+// The month or quarter is undefined when the Spending of a whole year, or of a quarter, is asked for.
+let handleSpending: (year: number, month: number | undefined, quarter: number | undefined, includeTransfers: boolean) => Response
 const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+  const spendingUrl = /^\/api\/spending\?year=(\d+)(?:&quarter=(\d+))?(?:&month=(\d+))?(&includeTransfers=true)?$/.exec(url)
+  if (spendingUrl) {
+    const [, year, quarter, month, transfers] = spendingUrl
+    return handleSpending(
+      Number(year),
+      month ? Number(month) : undefined,
+      quarter ? Number(quarter) : undefined,
+      transfers !== undefined,
+    )
+  }
   const monthUrl = /^\/api\/transactions\?year=(\d+)&month=(\d+)$/.exec(url)
   if (monthUrl) return handleListMonth(Number(monthUrl[1]), Number(monthUrl[2]))
   const categoryUrl = /^\/api\/transactions\/(\d+)\/category$/.exec(url)
@@ -36,7 +50,7 @@ const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
     return handleEditRule(Number(ruleUrl[1]), JSON.parse(init.body as string))
   }
   if (ruleUrl && init?.method === 'DELETE') return handleDeleteRule(Number(ruleUrl[1]))
-  if (url === '/api/categories') return Response.json(categories)
+  if (url === '/api/categories') return Response.json(categoriesServed)
   if (url === '/api/transactions' && init?.method === 'POST') {
     return handlePost(JSON.parse(init.body as string))
   }
@@ -67,6 +81,8 @@ beforeEach(() => {
   months = []
   handleListMonth = () => Response.json([])
   handleChangeCategory = () => new Response(null, { status: 500 })
+  handleSpending = () => Response.json({ total: 0, slices: [] })
+  categoriesServed = categories
   vi.stubGlobal('fetch', fetchMock)
 })
 
@@ -123,7 +139,9 @@ describe('App', () => {
   it('offers the categories loaded from the API', async () => {
     await openModal()
 
-    const options = screen.getAllByRole('option').map((option) => option.textContent)
+    const options = within(screen.getByRole('dialog'))
+      .getAllByRole('option')
+      .map((option) => option.textContent)
     expect(options).toEqual(['Choose…', 'Groceries', 'Other'])
   })
 
@@ -852,5 +870,392 @@ describe('Transactions page', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Could not reach the server.')
     expect(categorySelect('Lønn Fra: Testfirma AS').selectedOptions[0]).toHaveTextContent('Uncategorized')
+  })
+})
+
+describe('Dashboard', () => {
+  const monthNames = [
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December',
+  ]
+
+  const septemberSpending = {
+    total: 1570.5,
+    slices: [
+      { categoryId: 13, amount: 1000 },
+      { categoryId: null, amount: 450.5 },
+      { categoryId: 1, amount: 120 },
+    ],
+  }
+
+  function dashboard() {
+    return screen.getByRole('region', { name: 'Spending' })
+  }
+
+  function centreTotal() {
+    return within(dashboard()).getByText('Total').parentElement?.textContent
+  }
+
+  // Each legend row as shown: Category, amount and percentage.
+  function legendRows() {
+    return within(dashboard())
+      .queryAllByRole('row')
+      .map((row) => within(row).getAllByRole('cell').map((cell) => cell.textContent))
+  }
+
+  function monthOptions() {
+    return within(screen.getByLabelText('Period'))
+      .getAllByRole('option')
+      .map((option) => option.textContent)
+  }
+
+  function requestedSpending() {
+    return fetchMock.mock.calls.map(([url]) => url).filter((url) => url.startsWith('/api/spending?'))
+  }
+
+  it("opens on the latest month with Transactions and shows its Spending by Category, largest first", async () => {
+    months = [
+      { year: 2026, month: 9 },
+      { year: 2026, month: 8 },
+      { year: 2025, month: 12 },
+    ]
+    handleSpending = (year, month) =>
+      Response.json(year === 2026 && month === 9 ? septemberSpending : { total: 0, slices: [] })
+
+    render(<App />)
+
+    await waitFor(() => expect(legendRows()).toHaveLength(3))
+    expect(legendRows()).toEqual([
+      ['Other', '1 000,00 kr', '63,7 %'],
+      ['Uncategorized', '450,50 kr', '28,7 %'],
+      ['Groceries', '120,00 kr', '7,6 %'],
+    ])
+    expect(centreTotal()).toBe('Total 1 570,50 kr')
+    expect(screen.getByLabelText('Period')).toHaveValue('2026-9')
+    expect(monthOptions()).toEqual(['September 2026', 'August 2026', 'December 2025'])
+    expect(requestedSpending()).toEqual(['/api/spending?year=2026&month=9'])
+  })
+
+  it('sits below the upload and Add transaction buttons', async () => {
+    render(<App />)
+
+    const addTransaction = screen.getByRole('button', { name: /add transaction/i })
+    expect(addTransaction.compareDocumentPosition(dashboard())).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+    await waitFor(() => expect(centreTotal()).toBe('Total 0,00 kr'))
+  })
+
+  it('opens on the current month with an empty chart and a total of 0 when there are no Transactions', async () => {
+    render(<App />)
+
+    await waitFor(() => expect(centreTotal()).toBe('Total 0,00 kr'))
+    const today = new Date()
+    expect(monthOptions()).toEqual([`${monthNames[today.getMonth()]} ${today.getFullYear()}`])
+    expect(requestedSpending()).toEqual([
+      `/api/spending?year=${today.getFullYear()}&month=${today.getMonth() + 1}`,
+    ])
+    expect(legendRows()).toEqual([])
+    expect(within(dashboard()).queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it("shows the chosen month's Spending", async () => {
+    months = [
+      { year: 2026, month: 9 },
+      { year: 2026, month: 8 },
+    ]
+    handleSpending = (_year, month) =>
+      Response.json(month === 8 ? { total: 80, slices: [{ categoryId: 1, amount: 80 }] } : septemberSpending)
+    const user = userEvent.setup()
+    render(<App />)
+    await waitFor(() => expect(legendRows()).toHaveLength(3))
+
+    await user.selectOptions(screen.getByLabelText('Period'), 'August 2026')
+
+    await waitFor(() => expect(legendRows()).toEqual([['Groceries', '80,00 kr', '100,0 %']]))
+    expect(centreTotal()).toBe('Total 80,00 kr')
+    expect(requestedSpending()).toEqual(['/api/spending?year=2026&month=9', '/api/spending?year=2026&month=8'])
+  })
+
+  // The legend swatch of the named slice, as a CSS colour.
+  function swatchColour(name: string) {
+    const row = within(dashboard()).getByRole('row', { name: new RegExp(`^${name}`) })
+    return (row.querySelector('[aria-hidden="true"]') as HTMLElement).style.backgroundColor
+  }
+
+  it('shows Uncategorized in grey and keeps each Category in its colour across months', async () => {
+    months = [
+      { year: 2026, month: 9 },
+      { year: 2026, month: 8 },
+    ]
+    handleSpending = (_year, month) =>
+      Response.json(month === 8 ? { total: 80, slices: [{ categoryId: 1, amount: 80 }] } : septemberSpending)
+    const user = userEvent.setup()
+    render(<App />)
+    await waitFor(() => expect(legendRows()).toHaveLength(3))
+    const groceries = swatchColour('Groceries')
+
+    expect(swatchColour('Uncategorized')).toBe('rgb(148, 163, 184)')
+    expect(groceries).not.toBe(swatchColour('Other'))
+
+    await user.selectOptions(screen.getByLabelText('Period'), 'August 2026')
+    await waitFor(() => expect(legendRows()).toHaveLength(1))
+    expect(swatchColour('Groceries')).toBe(groceries)
+  })
+
+  it('adds a Transfers slice, counted in the total and percentages, while Include transfers is on', async () => {
+    categoriesServed = [...categories, { id: 12, name: 'Transfers' }]
+    months = [{ year: 2026, month: 9 }]
+    handleSpending = (_year, _month, _quarter, includeTransfers) =>
+      Response.json(
+        includeTransfers
+          ? {
+              total: 2000,
+              slices: [
+                { categoryId: 12, amount: 1500 },
+                { categoryId: 1, amount: 500 },
+              ],
+            }
+          : { total: 500, slices: [{ categoryId: 1, amount: 500 }] },
+      )
+    const user = userEvent.setup()
+    render(<App />)
+    await waitFor(() => expect(legendRows()).toEqual([['Groceries', '500,00 kr', '100,0 %']]))
+    const toggle = within(dashboard()).getByRole('checkbox', { name: 'Include transfers' })
+    expect(toggle).not.toBeChecked()
+
+    await user.click(toggle)
+
+    await waitFor(() =>
+      expect(legendRows()).toEqual([
+        ['Transfers', '1 500,00 kr', '75,0 %'],
+        ['Groceries', '500,00 kr', '25,0 %'],
+      ]),
+    )
+    expect(centreTotal()).toBe('Total 2 000,00 kr')
+
+    await user.click(toggle)
+
+    await waitFor(() => expect(legendRows()).toEqual([['Groceries', '500,00 kr', '100,0 %']]))
+    expect(centreTotal()).toBe('Total 500,00 kr')
+    expect(requestedSpending()).toEqual([
+      '/api/spending?year=2026&month=9',
+      '/api/spending?year=2026&month=9&includeTransfers=true',
+      '/api/spending?year=2026&month=9',
+    ])
+  })
+
+  it('shows an empty chart with a total of 0 and no hint when the Period has only Transfers', async () => {
+    categoriesServed = [...categories, { id: 12, name: 'Transfers' }]
+    months = [{ year: 2026, month: 9 }]
+    handleSpending = (_year, _month, _quarter, includeTransfers) =>
+      Response.json(
+        includeTransfers
+          ? { total: 1500, slices: [{ categoryId: 12, amount: 1500 }] }
+          : { total: 0, slices: [] },
+      )
+
+    render(<App />)
+
+    await waitFor(() => expect(centreTotal()).toBe('Total 0,00 kr'))
+    expect(legendRows()).toEqual([])
+    expect(within(dashboard()).queryByRole('alert')).not.toBeInTheDocument()
+    expect(within(dashboard()).queryByText(/transfer/i, { ignore: 'label, option' })).toBeNull()
+  })
+
+  it('says when the Spending could not be loaded', async () => {
+    handleSpending = () => new Response(null, { status: 500 })
+
+    render(<App />)
+
+    expect(await within(dashboard()).findByRole('alert')).toHaveTextContent('Could not load the Spending.')
+  })
+
+  it('says when the months could not be loaded', async () => {
+    months = new Response(null, { status: 500 })
+
+    render(<App />)
+
+    expect(await within(dashboard()).findByRole('alert')).toHaveTextContent('Could not load the Spending.')
+  })
+
+  it('reloads after a Bank Statement is uploaded', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+    await waitFor(() => expect(centreTotal()).toBe('Total 0,00 kr'))
+    months = [{ year: 2026, month: 9 }]
+    handleSpending = () => Response.json(septemberSpending)
+
+    await user.upload(screen.getByLabelText(/bank statement pdf/i), statementPdf)
+
+    await waitFor(() => expect(centreTotal()).toBe('Total 1 570,50 kr'))
+    expect(screen.getByLabelText('Period')).toHaveValue('2026-9')
+  })
+
+  it('reloads after a Transaction is added', async () => {
+    const user = await openModal()
+    await waitFor(() => expect(centreTotal()).toBe('Total 0,00 kr'))
+    await fillValidForm(user)
+    months = [{ year: 2026, month: 9 }]
+    handleSpending = () => Response.json(septemberSpending)
+
+    await user.click(screen.getByRole('button', { name: /^save$/i }))
+
+    await waitFor(() => expect(centreTotal()).toBe('Total 1 570,50 kr'))
+  })
+
+  it('loads afresh, on the latest month, when coming back to the home view', async () => {
+    months = [
+      { year: 2026, month: 9 },
+      { year: 2026, month: 8 },
+    ]
+    const user = userEvent.setup()
+    render(<App />)
+    await waitFor(() => expect(centreTotal()).toBe('Total 0,00 kr'))
+    await user.selectOptions(screen.getByLabelText('Period'), 'August 2026')
+    await user.click(screen.getByRole('button', { name: 'Transactions' }))
+    handleSpending = () => Response.json(septemberSpending)
+
+    await user.click(screen.getByRole('button', { name: 'PersonligFinans' }))
+
+    await waitFor(() => expect(centreTotal()).toBe('Total 1 570,50 kr'))
+    expect(screen.getByLabelText('Period')).toHaveValue('2026-9')
+  })
+
+  describe('Periods', () => {
+    const monthsWithTransactions = [
+      { year: 2026, month: 9 },
+      { year: 2026, month: 8 },
+      { year: 2026, month: 4 },
+      { year: 2025, month: 12 },
+      { year: 2025, month: 11 },
+      { year: 2025, month: 2 },
+      { year: 2025, month: 1 },
+    ]
+
+    function chooseGranularity(user: ReturnType<typeof userEvent.setup>, granularity: string) {
+      return user.selectOptions(screen.getByLabelText('Granularity'), granularity)
+    }
+
+    function choosePeriod(user: ReturnType<typeof userEvent.setup>, period: string) {
+      return user.selectOptions(screen.getByLabelText('Period'), period)
+    }
+
+    async function openDashboard() {
+      months = monthsWithTransactions
+      const user = userEvent.setup()
+      render(<App />)
+      await waitFor(() => expect(requestedSpending()).toEqual(['/api/spending?year=2026&month=9']))
+      return user
+    }
+
+    it('opens on the Month granularity', async () => {
+      await openDashboard()
+
+      expect(screen.getByLabelText('Granularity')).toHaveDisplayValue('Month')
+      expect(
+        within(screen.getByLabelText('Granularity'))
+          .getAllByRole('option')
+          .map((option) => option.textContent),
+      ).toEqual(['Year', 'Quarter', 'Month'])
+    })
+
+    it('offers only the quarters and years with Transactions, newest first', async () => {
+      const user = await openDashboard()
+
+      await chooseGranularity(user, 'Quarter')
+      expect(monthOptions()).toEqual(['Q3 2026', 'Q2 2026', 'Q4 2025', 'Q1 2025'])
+
+      await chooseGranularity(user, 'Year')
+      expect(monthOptions()).toEqual(['2026', '2025'])
+
+      await chooseGranularity(user, 'Month')
+      expect(monthOptions()).toEqual([
+        'September 2026',
+        'August 2026',
+        'April 2026',
+        'December 2025',
+        'November 2025',
+        'February 2025',
+        'January 2025',
+      ])
+    })
+
+    it("shows a quarter's Spending", async () => {
+      handleSpending = (_year, _month, quarter) =>
+        Response.json(quarter === 3 ? { total: 80, slices: [{ categoryId: 1, amount: 80 }] } : septemberSpending)
+      const user = await openDashboard()
+
+      await chooseGranularity(user, 'Quarter')
+
+      await waitFor(() => expect(legendRows()).toEqual([['Groceries', '80,00 kr', '100,0 %']]))
+      expect(centreTotal()).toBe('Total 80,00 kr')
+    })
+
+    it('keeps the Period that contains the current one when switching to a coarser granularity', async () => {
+      const user = await openDashboard()
+      await choosePeriod(user, 'April 2026')
+
+      await chooseGranularity(user, 'Quarter')
+      expect(screen.getByLabelText('Period')).toHaveDisplayValue('Q2 2026')
+
+      await chooseGranularity(user, 'Year')
+      expect(screen.getByLabelText('Period')).toHaveDisplayValue('2026')
+
+      await waitFor(() =>
+        expect(requestedSpending()).toEqual([
+          '/api/spending?year=2026&month=9',
+          '/api/spending?year=2026&month=4',
+          '/api/spending?year=2026&quarter=2',
+          '/api/spending?year=2026',
+        ]),
+      )
+    })
+
+    it('goes to the latest Period with Transactions inside the current one when switching to a finer granularity', async () => {
+      const user = await openDashboard()
+      await chooseGranularity(user, 'Year')
+      await choosePeriod(user, '2025')
+
+      await chooseGranularity(user, 'Quarter')
+      expect(screen.getByLabelText('Period')).toHaveDisplayValue('Q4 2025')
+
+      await choosePeriod(user, 'Q1 2025')
+      await chooseGranularity(user, 'Month')
+      expect(screen.getByLabelText('Period')).toHaveDisplayValue('February 2025')
+
+      await chooseGranularity(user, 'Year')
+      await chooseGranularity(user, 'Month')
+      expect(screen.getByLabelText('Period')).toHaveDisplayValue('December 2025')
+
+      await waitFor(() =>
+        expect(requestedSpending()).toEqual([
+          '/api/spending?year=2026&month=9',
+          '/api/spending?year=2026',
+          '/api/spending?year=2025',
+          '/api/spending?year=2025&quarter=4',
+          '/api/spending?year=2025&quarter=1',
+          '/api/spending?year=2025&month=2',
+          '/api/spending?year=2025',
+          '/api/spending?year=2025&month=12',
+        ]),
+      )
+    })
+
+    it('keeps Include transfers on when the Period or granularity changes', async () => {
+      const user = await openDashboard()
+      await user.click(within(dashboard()).getByRole('checkbox', { name: 'Include transfers' }))
+
+      await choosePeriod(user, 'April 2026')
+      await chooseGranularity(user, 'Quarter')
+
+      expect(within(dashboard()).getByRole('checkbox', { name: 'Include transfers' })).toBeChecked()
+      await waitFor(() =>
+        expect(requestedSpending()).toEqual([
+          '/api/spending?year=2026&month=9',
+          '/api/spending?year=2026&month=9&includeTransfers=true',
+          '/api/spending?year=2026&month=4&includeTransfers=true',
+          '/api/spending?year=2026&quarter=2&includeTransfers=true',
+        ]),
+      )
+    })
   })
 })

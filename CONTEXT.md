@@ -36,6 +36,14 @@ _Avoid_: Mapping, pattern
 A Categorization Rule created by an LLM during import, for an imported Transaction that no existing rule matched. It behaves exactly like any other rule; the mark only lets the user find and review it among the rules, and is removed once the user edits the rule (even saving it unchanged), after which it is an ordinary rule. It is never given the "Other" Category, and is only created when it categorizes nothing that already has a Category; the LLM sees only the cleaned description and whether the Amount is negative or positive, and may decline, leaving the Transaction Uncategorized.
 _Avoid_: Suggested rule, suggestion, unconfirmed rule
 
+**Spending**:
+The money that left during a Period: the sum of the negative Amounts, shown as a positive figure and grouped by Category (Uncategorized Transactions count as their own group). Positive Amounts, such as refunds, never reduce it. Transactions in the Transfers Category are left out unless the user chooses to include them, since moving money between the user's own accounts is not spending.
+_Avoid_: Outgoing, expenses, costs
+
+**Period**:
+A calendar year, quarter (Q1–Q4) or month that Spending is summarized over.
+_Avoid_: Range, interval, timeframe
+
 **Dashboard**:
-The view summarizing spending aggregated by Category and month.
+The view summarizing Spending by Category over a chosen Period.
 _Avoid_: Report, overview
