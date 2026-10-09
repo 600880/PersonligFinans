@@ -19,9 +19,11 @@ function monthlySpending(
   slices: Record<string, { categoryId: number | null; amount: number }[]> = {},
 ) {
   const entries = []
-  for (let index = from.year * 12 + from.month - 1; index <= to.year * 12 + to.month - 1; index++) {
-    const year = Math.floor(index / 12)
-    const month = (index % 12) + 1
+  // Steps through calendar months with Date, rather than the month arithmetic the app uses.
+  const last = new Date(to.year, to.month - 1)
+  for (const date = new Date(from.year, from.month - 1); date <= last; date.setMonth(date.getMonth() + 1)) {
+    const year = date.getFullYear()
+    const month = date.getMonth() + 1
     entries.push({ year, month, slices: slices[`${year}-${month}`] ?? [] })
   }
   return entries
@@ -39,8 +41,8 @@ let handleDeleteRule: (id: number) => Response
 let months: { year: number; month: number }[] | Response
 let handleListMonth: (year: number, month: number) => Response
 let handleChangeCategory: (id: number, body: unknown) => Response | Promise<Response>
-// What the categories endpoint returns: `categories` unless a test adds to it.
-let categoriesServed: { id: number; name: string }[]
+// What the categories endpoint returns: `categories` unless a test adds to it or makes it fail.
+let categoriesServed: { id: number; name: string }[] | Response
 // The month or quarter is undefined when the Spending of a whole year, or of a quarter, is asked for.
 let handleSpending: (year: number, month: number | undefined, quarter: number | undefined, includeTransfers: boolean) => Response
 // The Spending of each month of the Span from `from` to `to`.
@@ -80,7 +82,9 @@ const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
     return handleEditRule(Number(ruleUrl[1]), JSON.parse(init.body as string))
   }
   if (ruleUrl && init?.method === 'DELETE') return handleDeleteRule(Number(ruleUrl[1]))
-  if (url === '/api/categories') return Response.json(categoriesServed)
+  if (url === '/api/categories') {
+    return categoriesServed instanceof Response ? categoriesServed : Response.json(categoriesServed)
+  }
   if (url === '/api/transactions' && init?.method === 'POST') {
     return handlePost(JSON.parse(init.body as string))
   }
@@ -1426,7 +1430,7 @@ describe('Dashboard', () => {
       ['less Spending', 1000, 920, '1 000,00 kr', '920,00 kr', '▼ −8,0 %'],
       ['the same Spending', 250, 250, '250,00 kr', '250,00 kr', '0,0 %'],
       ['Spending that is new', 0, 500, '0,00 kr', '500,00 kr', 'New'],
-      ['Spending that stopped', 400, 0, '400,00 kr', '0,00 kr', '▼ −100 %'],
+      ['Spending that stopped', 400, 0, '400,00 kr', '0,00 kr', '−100 %'],
       ['no Spending at either end', 0, 0, '0,00 kr', '0,00 kr', '–'],
     ])('shows the first and last monthly totals and the change for %s', async (_case, first, last, firstShown, lastShown, change) => {
       months = [
@@ -1556,6 +1560,22 @@ describe('Dashboard', () => {
       await waitFor(() => expect(centreTotal()).toBe('Total 1 570,50 kr'))
       expect(within(dashboard()).queryByRole('alert')).toBeNull()
       expect(trendTable()).toEqual([])
+    })
+
+    it('still shows the trend when the Categories could not be loaded', async () => {
+      months = [
+        { year: 2026, month: 9 },
+        { year: 2026, month: 8 },
+      ]
+      categoriesServed = new Response(null, { status: 500 })
+
+      render(<App />)
+
+      await waitFor(() =>
+        expect(within(dashboard()).getByRole('alert')).toHaveTextContent('Could not load the Spending.'),
+      )
+      await waitFor(() => expect(trendTable()).toHaveLength(2))
+      expect(within(trend()).queryByRole('alert')).toBeNull()
     })
 
     it('reloads after a Bank Statement is uploaded', async () => {

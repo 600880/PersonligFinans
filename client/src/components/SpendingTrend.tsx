@@ -111,7 +111,7 @@ export function SpendingTrend({ months }: { months: TransactionMonth[] }) {
                   tickFormatter={(value: number) => wholeKroner.format(value)}
                   tick={{ fontSize: 12 }}
                   width={72}
-                  label={{ value: 'kr per month', angle: -90, position: 'insideLeft', fontSize: 12 }}
+                  label={{ value: 'NOK per month', angle: -90, position: 'insideLeft', fontSize: 12 }}
                 />
                 <Tooltip
                   content={({ active, payload }) => {

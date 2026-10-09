@@ -9,6 +9,7 @@ import {
   type TransactionMonth,
 } from '../lib/api'
 import { formatAmount } from '../lib/amount'
+import { percent } from '../lib/percent'
 import { currentMonth } from '../lib/month'
 import { SpendingTrend } from './SpendingTrend'
 import {
@@ -53,12 +54,6 @@ const EMPTY_RING_COLOUR = '#e2e8f0'
 // Shared by the Spending ring and the empty ring.
 const RING = { innerRadius: 76, outerRadius: 116, isAnimationActive: false } as const
 
-const percent = new Intl.NumberFormat('nb-NO', {
-  style: 'percent',
-  minimumFractionDigits: 1,
-  maximumFractionDigits: 1,
-})
-
 // One slice as the chart and the legend show it.
 interface SliceView {
   key: string
@@ -88,12 +83,13 @@ function toSliceViews(spending: Spending, categories: Category[]): SliceView[] {
   }))
 }
 
-// Spending by Category for one Period, with the Spending trend over a Span below it. Opens on the latest month with Transactions and the Transfers
-// Category left out, and remembers nothing between visits. A new version reloads it in place,
-// keeping the chosen Period and Include transfers.
+// Spending by Category for one Period, with the Spending trend over a Span below it. Opens on the
+// latest month with Transactions and the Transfers Category left out, and remembers nothing between
+// visits. A new version reloads it in place, keeping the chosen Period and Include transfers.
 export function Dashboard({ version }: { version: number }) {
   const headingId = useId()
-  const [categories, setCategories] = useState<Category[]>([])
+  // Null until loaded, so the donut never shows a Category without its name.
+  const [categories, setCategories] = useState<Category[] | null>(null)
   // The months with Transactions, newest first, or the current month when there are none. The
   // Periods offered are worked out from them.
   const [months, setMonths] = useState<TransactionMonth[]>([])
@@ -106,10 +102,18 @@ export function Dashboard({ version }: { version: number }) {
 
   useEffect(() => {
     let ignore = false
-    Promise.all([fetchCategories(), fetchTransactionMonths()])
-      .then(([loadedCategories, loadedMonths]) => {
+    // Loaded apart from the months, so the Spending trend, which needs no Categories, still shows
+    // when they fail.
+    fetchCategories()
+      .then((loadedCategories) => {
+        if (!ignore) setCategories(loadedCategories)
+      })
+      .catch(() => {
+        if (!ignore) setErrorMessage(LOAD_ERROR)
+      })
+    fetchTransactionMonths()
+      .then((loadedMonths) => {
         if (ignore) return
-        setCategories(loadedCategories)
         const available = loadedMonths.length > 0 ? loadedMonths : [currentMonth()]
         setMonths(available)
         // A fresh copy of a kept Period, so its Spending is fetched again. The current month stands
@@ -144,10 +148,10 @@ export function Dashboard({ version }: { version: number }) {
   }, [selected, includeTransfers])
 
   const spending =
-    loaded && selected && loaded.period === selected && loaded.includeTransfers === includeTransfers
+    categories && loaded && selected && loaded.period === selected && loaded.includeTransfers === includeTransfers
       ? loaded.spending
       : null
-  const slices = spending ? toSliceViews(spending, categories) : []
+  const slices = spending && categories ? toSliceViews(spending, categories) : []
   const periodOptions = selected ? periodsOfMonths(months, selected.granularity) : []
 
   function choosePeriod(period: Period) {
