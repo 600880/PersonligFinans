@@ -45,6 +45,13 @@ export function defaultSpan(offered: TransactionMonth[]): Span | null {
   return { from: offered[Math.max(0, offered.length - DEFAULT_SPAN_MONTHS)], to: offered[offered.length - 1] }
 }
 
+// The Span to show once the offered months are reloaded: a fresh copy of `span`, so its Spending is
+// fetched again, when both its ends are still offered, or else the default Span.
+export function reloadedSpan(span: Span | null, offered: TransactionMonth[]): Span | null {
+  const isOffered = (month: TransactionMonth) => offered.some((option) => monthValue(option) === monthValue(month))
+  return span && isOffered(span.from) && isOffered(span.to) ? { ...span } : defaultSpan(offered)
+}
+
 // The Span starting at `from`. When `from` isn't at least one month before To, To moves to the month
 // after it, or `from` moves back to the month before the latest one if there is no month after it.
 export function withFrom(span: Span, from: TransactionMonth, offered: TransactionMonth[]): Span {

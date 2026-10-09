@@ -4,7 +4,7 @@ import { fetchMonthlySpending, type Category, type MonthSpending, type Transacti
 import { formatAmount } from '../lib/amount'
 import { categoryColour } from '../lib/categoryColours'
 import { categoryName } from '../lib/categoryName'
-import { defaultSpan, monthLabel, monthValue, offeredMonths, withFrom, withTo, type Span } from '../lib/span'
+import { defaultSpan, monthLabel, monthValue, offeredMonths, reloadedSpan, withFrom, withTo, type Span } from '../lib/span'
 import {
   categoryRow,
   coverageNote,
@@ -58,17 +58,21 @@ function trendRows(monthly: MonthSpending[], categories: Category[] | null): Tre
 // of the first and last points for Total and each Category. Each row switches its line on and off;
 // Total starts on and the Categories off, and they stay as switched when the Span changes. `months`
 // are the months with Transactions, newest first, which decide the months offered. Opens on the 12
-// months ending at the latest of them, and does so again whenever they are reloaded. Has its own
+// months ending at the latest of them. When they are reloaded, after Transactions are saved, it
+// fetches its Spending again, keeping the Span if both its ends are still offered and otherwise
+// going back to the 12 months; its Include transfers and switched-on lines are kept. Has its own
 // Include transfers, off at first and apart from the donut's.
 export function SpendingTrend({ months, categories }: { months: TransactionMonth[]; categories: Category[] | null }) {
   const headingId = useId()
   const offered = useMemo(() => offeredMonths(months), [months])
-  // The Span the user chose, remembered with the months it was chosen from.
-  const [chosen, setChosen] = useState<{ months: TransactionMonth[]; span: Span } | null>(null)
-  const span = useMemo(
-    () => (chosen && chosen.months === months ? chosen.span : defaultSpan(offered)),
-    [chosen, months, offered],
-  )
+  // The Span shown, remembered with the months it was worked out from. When the months are reloaded
+  // it is kept, or falls back to the default, before anything is drawn or fetched for the old one.
+  const [shown, setShown] = useState<{ months: TransactionMonth[]; span: Span | null }>(() => ({
+    months,
+    span: defaultSpan(offered),
+  }))
+  if (shown.months !== months) setShown({ months, span: reloadedSpan(shown.span, offered) })
+  const span = shown.span
   const [includeTransfers, setIncludeTransfers] = useState(false)
   const [loaded, setLoaded] = useState<LoadedTrend | null>(null)
   // The rows whose lines are drawn, by key. Kept for rows missing from the current Span, so they are
@@ -109,7 +113,7 @@ export function SpendingTrend({ months, categories }: { months: TransactionMonth
   function chooseMonth(end: 'from' | 'to', value: string) {
     if (!span) return
     const month = offered.find((option) => monthValue(option) === value)!
-    setChosen({ months, span: end === 'from' ? withFrom(span, month, offered) : withTo(span, month, offered) })
+    setShown({ months, span: end === 'from' ? withFrom(span, month, offered) : withTo(span, month, offered) })
   }
 
   return (

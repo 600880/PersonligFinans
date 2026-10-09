@@ -1656,21 +1656,157 @@ describe('Dashboard', () => {
       expect(within(trend()).queryByRole('alert')).toBeNull()
     })
 
-    it('reloads after a Bank Statement is uploaded', async () => {
-      months = [
-        { year: 2026, month: 9 },
-        { year: 2026, month: 8 },
-      ]
-      const user = userEvent.setup()
-      render(<App />)
-      await waitFor(() => expect(trendTable()).toHaveLength(2))
-      handleMonthlySpending = (from, to) =>
-        Response.json(monthlySpending(from, to, { '2026-9': [{ categoryId: 1, amount: 75 }] }))
+    describe('Reloading', () => {
+      // Every month from January 2025 to September 2026 is offered, with Groceries in March and June
+      // 2025.
+      beforeEach(() => {
+        months = [
+          { year: 2026, month: 9 },
+          { year: 2025, month: 1 },
+        ]
+        handleMonthlySpending = (from, to) =>
+          Response.json(
+            monthlySpending(from, to, {
+              '2025-3': [{ categoryId: 1, amount: 300 }],
+              '2025-6': [{ categoryId: 1, amount: 600 }],
+            }),
+          )
+      })
 
-      await user.upload(screen.getByLabelText(/bank statement pdf/i), statementPdf)
+      // The names of the rows switched on, in table order.
+      function switchedOn() {
+        return within(within(trend()).getByRole('table'))
+          .getAllByRole('checkbox')
+          .filter((checkbox) => (checkbox as HTMLInputElement).checked)
+          .map((checkbox) => checkbox.closest('tr')!.firstElementChild!.textContent)
+      }
 
-      await waitFor(() => expect(trendTable()[1]).toEqual(['Total', '0,00 kr', '75,00 kr', 'New']))
-      expect(requestedMonthlySpending()).toHaveLength(2)
+      // Waits for the trend, then chooses March to June 2025, Include transfers, and Groceries in
+      // place of Total.
+      async function chooseView(user: ReturnType<typeof userEvent.setup>) {
+        await waitFor(() => expect(trendTable()).toHaveLength(2))
+        await user.selectOptions(within(trend()).getByLabelText('From'), '03.2025')
+        await user.selectOptions(within(trend()).getByLabelText('To'), '06.2025')
+        await user.click(within(trend()).getByRole('checkbox', { name: 'Include transfers' }))
+        await waitFor(() => expect(trendTable()).toHaveLength(3))
+        await user.click(within(trend()).getByRole('checkbox', { name: 'Total' }))
+        await user.click(within(trend()).getByRole('checkbox', { name: 'Groceries' }))
+      }
+
+      it('keeps the Span, Include transfers and switched-on lines after a Transaction is added, and fetches the Spending again', async () => {
+        const user = userEvent.setup()
+        render(<App />)
+        await chooseView(user)
+        const requestsBefore = requestedMonthlySpending().length
+        await user.click(screen.getByRole('button', { name: /add transaction/i }))
+        await screen.findByRole('option', { name: 'Groceries' })
+        await fillValidForm(user)
+        handleMonthlySpending = (from, to) =>
+          Response.json(
+            monthlySpending(from, to, {
+              '2025-3': [{ categoryId: 1, amount: 300 }],
+              '2025-6': [
+                { categoryId: 1, amount: 849.9 },
+                { categoryId: 13, amount: 100 },
+              ],
+            }),
+          )
+
+        await user.click(screen.getByRole('button', { name: /^save$/i }))
+
+        await waitFor(() =>
+          expect(trendTable()).toEqual([
+            ['', 'March 2025', 'June 2025', 'Change'],
+            ['Total', '300,00 kr', '949,90 kr', '▲ +216,6 %'],
+            ['Groceries', '300,00 kr', '849,90 kr', '▲ +183,3 %'],
+            ['Other', '0,00 kr', '100,00 kr', 'New'],
+          ]),
+        )
+        expect(selectedMonth('From')).toBe('03.2025')
+        expect(selectedMonth('To')).toBe('06.2025')
+        expect(within(trend()).getByRole('checkbox', { name: 'Include transfers' })).toBeChecked()
+        expect(switchedOn()).toEqual(['Groceries'])
+        expect(requestedMonthlySpending().slice(requestsBefore)).toEqual([
+          '/api/spending/monthly?fromYear=2025&fromMonth=3&toYear=2025&toMonth=6&includeTransfers=true',
+        ])
+      })
+
+      it('keeps the Span after a Bank Statement is uploaded, and fetches its Spending again', async () => {
+        const user = userEvent.setup()
+        render(<App />)
+        await chooseView(user)
+        const requestsBefore = requestedMonthlySpending().length
+        handleMonthlySpending = (from, to) =>
+          Response.json(monthlySpending(from, to, { '2025-6': [{ categoryId: 1, amount: 75 }] }))
+
+        await user.upload(screen.getByLabelText(/bank statement pdf/i), statementPdf)
+
+        await waitFor(() => expect(trendTable()[1]).toEqual(['Total', '0,00 kr', '75,00 kr', 'New']))
+        expect(selectedMonth('From')).toBe('03.2025')
+        expect(selectedMonth('To')).toBe('06.2025')
+        expect(requestedMonthlySpending().slice(requestsBefore)).toEqual([
+          '/api/spending/monthly?fromYear=2025&fromMonth=3&toYear=2025&toMonth=6&includeTransfers=true',
+        ])
+      })
+
+      it('keeps the default Span when it is still offered', async () => {
+        const user = userEvent.setup()
+        render(<App />)
+        await waitFor(() => expect(trendTable()).toHaveLength(2))
+        months = [
+          { year: 2026, month: 10 },
+          { year: 2025, month: 1 },
+        ]
+
+        await user.upload(screen.getByLabelText(/bank statement pdf/i), statementPdf)
+
+        await waitFor(() => expect(spanOptions('To').at(-1)).toBe('10.2026'))
+        await waitFor(() => expect(requestedMonthlySpending()).toHaveLength(2))
+        expect(selectedMonth('From')).toBe('10.2025')
+        expect(selectedMonth('To')).toBe('09.2026')
+        expect(requestedMonthlySpending()[1]).toBe(
+          '/api/spending/monthly?fromYear=2025&fromMonth=10&toYear=2026&toMonth=9',
+        )
+      })
+
+      it('falls back to the 12 months ending at the latest month with Transactions when the Span is no longer offered', async () => {
+        const user = userEvent.setup()
+        render(<App />)
+        await chooseView(user)
+        months = [
+          { year: 2026, month: 10 },
+          { year: 2025, month: 4 },
+        ]
+
+        await user.upload(screen.getByLabelText(/bank statement pdf/i), statementPdf)
+
+        await waitFor(() => expect(trendTable()[0]).toEqual(['', 'November 2025', 'October 2026', 'Change']))
+        expect(selectedMonth('From')).toBe('11.2025')
+        expect(selectedMonth('To')).toBe('10.2026')
+        expect(spanOptions('From')[0]).toBe('04.2025')
+        expect(within(trend()).getByRole('checkbox', { name: 'Include transfers' })).toBeChecked()
+        expect(requestedMonthlySpending().at(-1)).toBe(
+          '/api/spending/monthly?fromYear=2025&fromMonth=11&toYear=2026&toMonth=10&includeTransfers=true',
+        )
+      })
+
+      it('opens afresh, on the default Span, when coming back to the home view', async () => {
+        const user = userEvent.setup()
+        render(<App />)
+        await chooseView(user)
+        await user.click(screen.getByRole('button', { name: 'Transactions' }))
+
+        await user.click(screen.getByRole('button', { name: 'PersonligFinans' }))
+
+        await waitFor(() => expect(trendTable()).toHaveLength(2))
+        expect(selectedMonth('From')).toBe('10.2025')
+        expect(selectedMonth('To')).toBe('09.2026')
+        expect(within(trend()).getByRole('checkbox', { name: 'Include transfers' })).not.toBeChecked()
+        expect(switchedOn()).toEqual(['Total'])
+        expect(requestedMonthlySpending().at(-1)).toBe(
+          '/api/spending/monthly?fromYear=2025&fromMonth=10&toYear=2026&toMonth=9',
+        )
+      })
     })
 
     describe('Categories', () => {
