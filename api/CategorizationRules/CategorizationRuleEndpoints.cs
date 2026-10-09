@@ -6,9 +6,10 @@ namespace PersonligFinans.Api.CategorizationRules;
 
 public record CategorizationRuleRequest(string? Keyword, int? CategoryId);
 
-public record CategorizationRuleResponse(int Id, string Keyword, int CategoryId);
+public record CategorizationRuleResponse(int Id, string Keyword, int CategoryId, bool AiGenerated);
 
-public record SavedCategorizationRuleResponse(int Id, string Keyword, int CategoryId, int TransactionsChanged);
+public record SavedCategorizationRuleResponse(
+    int Id, string Keyword, int CategoryId, bool AiGenerated, int TransactionsChanged);
 
 public record DeletedCategorizationRuleResponse(int TransactionsChanged);
 
@@ -24,7 +25,7 @@ public static class CategorizationRuleEndpoints
         api.MapGet("/", async (AppDbContext db) =>
             await db.CategorizationRules
                 .OrderBy(r => r.Keyword)
-                .Select(r => new CategorizationRuleResponse(r.Id, r.Keyword, r.CategoryId))
+                .Select(r => new CategorizationRuleResponse(r.Id, r.Keyword, r.CategoryId, r.AiGenerated))
                 .ToListAsync());
 
         api.MapPost("/", AddRule);
@@ -49,9 +50,7 @@ public static class CategorizationRuleEndpoints
         if (await SaveRuleChange(db) is not { } transactionsChanged)
             return await KeywordAlreadyExists(db, keyword);
 
-        return Results.Created(
-            $"/api/categorization-rules/{rule.Id}",
-            new SavedCategorizationRuleResponse(rule.Id, rule.Keyword, rule.CategoryId, transactionsChanged));
+        return Results.Created($"/api/categorization-rules/{rule.Id}", Saved(rule, transactionsChanged));
     }
 
     private static async Task<IResult> EditRule(int id, CategorizationRuleRequest request, AppDbContext db)
@@ -70,8 +69,7 @@ public static class CategorizationRuleEndpoints
         if (await SaveRuleChange(db) is not { } transactionsChanged)
             return await KeywordAlreadyExists(db, keyword);
 
-        return Results.Ok(
-            new SavedCategorizationRuleResponse(rule.Id, rule.Keyword, rule.CategoryId, transactionsChanged));
+        return Results.Ok(Saved(rule, transactionsChanged));
     }
 
     private static async Task<IResult> DeleteRule(int id, AppDbContext db)
@@ -85,6 +83,9 @@ public static class CategorizationRuleEndpoints
 
         return Results.Ok(new DeletedCategorizationRuleResponse(transactionsChanged));
     }
+
+    private static SavedCategorizationRuleResponse Saved(CategorizationRule rule, int transactionsChanged) =>
+        new(rule.Id, rule.Keyword, rule.CategoryId, rule.AiGenerated, transactionsChanged);
 
     // The trimmed keyword, and the validation errors keyed on the request's fields. When editing,
     // the edited rule's own keyword doesn't count as a duplicate.

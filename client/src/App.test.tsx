@@ -14,7 +14,7 @@ type UploadHandler = (body: FormData) => Response | Promise<Response>
 
 let handlePost: PostHandler
 let handleUpload: UploadHandler
-let rules: { id: number; keyword: string; categoryId: number }[] | Response
+let rules: { id: number; keyword: string; categoryId: number; aiGenerated: boolean }[] | Response
 let handleAddRule: PostHandler
 let handleEditRule: (id: number, body: unknown) => Response
 let handleDeleteRule: (id: number) => Response
@@ -44,11 +44,13 @@ beforeEach(() => {
   handlePost = () => Response.json({ id: 1 }, { status: 201 })
   handleUpload = () => Response.json(importedStatement, { status: 201 })
   rules = [
-    { id: 1, keyword: 'kiwi', categoryId: 1 },
-    { id: 2, keyword: 'overføring mellom egne kontoer', categoryId: 13 },
+    { id: 1, keyword: 'kiwi', categoryId: 1, aiGenerated: false },
+    { id: 2, keyword: 'overføring mellom egne kontoer', categoryId: 13, aiGenerated: false },
   ]
-  handleAddRule = (body) => Response.json({ id: 3, ...(body as object), transactionsChanged: 0 }, { status: 201 })
-  handleEditRule = (id, body) => Response.json({ id, ...(body as object), transactionsChanged: 0 })
+  handleAddRule = (body) =>
+    Response.json({ id: 3, ...(body as object), aiGenerated: false, transactionsChanged: 0 }, { status: 201 })
+  handleEditRule = (id, body) =>
+    Response.json({ id, ...(body as object), aiGenerated: false, transactionsChanged: 0 })
   handleDeleteRule = () => Response.json({ transactionsChanged: 0 })
   vi.stubGlobal('fetch', fetchMock)
 })
@@ -330,7 +332,7 @@ describe('Rules page', () => {
     handleAddRule = (body) => {
       posted = body
       return Response.json(
-        { id: 3, keyword: 'rema', categoryId: 1, transactionsChanged: 3 },
+        { id: 3, keyword: 'rema', categoryId: 1, aiGenerated: false, transactionsChanged: 3 },
         { status: 201 },
       )
     }
@@ -419,7 +421,13 @@ describe('Rules page', () => {
     let edited: { id: number; body: unknown } | undefined
     handleEditRule = (id, body) => {
       edited = { id, body }
-      return Response.json({ id, keyword: 'kiwi minipris', categoryId: 13, transactionsChanged: 1 })
+      return Response.json({
+        id,
+        keyword: 'kiwi minipris',
+        categoryId: 13,
+        aiGenerated: false,
+        transactionsChanged: 1,
+      })
     }
     const user = await openRulesPage()
 
@@ -521,5 +529,48 @@ describe('Rules page', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Could not reach the server.')
     expect(screen.getByRole('cell', { name: 'kiwi' })).toBeInTheDocument()
+  })
+  function keywords() {
+    return screen
+      .getAllByRole('row')
+      .slice(1)
+      .map((row) => within(row).getAllByRole('cell')[0].textContent)
+  }
+
+  it('shows an AI badge next to the keyword of AI-generated rules only', async () => {
+    rules = [
+      { id: 3, keyword: 'café løkka', categoryId: 13, aiGenerated: true },
+      { id: 1, keyword: 'kiwi', categoryId: 1, aiGenerated: false },
+    ]
+    await openRulesPage()
+
+    expect(within(ruleRow('café løkka AI')).getByText('AI')).toBeInTheDocument()
+    expect(within(ruleRow('kiwi')).queryByText('AI')).not.toBeInTheDocument()
+  })
+
+  it('shows only AI-generated rules, still sorted by keyword, while AI only is on', async () => {
+    rules = [
+      { id: 3, keyword: 'bakeriet', categoryId: 13, aiGenerated: true },
+      { id: 1, keyword: 'kiwi', categoryId: 1, aiGenerated: false },
+      { id: 4, keyword: 'nille', categoryId: 13, aiGenerated: true },
+      { id: 2, keyword: 'overføring mellom egne kontoer', categoryId: 13, aiGenerated: false },
+    ]
+    handleEditRule = (id, body) =>
+      Response.json({ id, ...(body as object), aiGenerated: true, transactionsChanged: 0 })
+    const user = await openRulesPage()
+
+    await user.click(screen.getByRole('checkbox', { name: 'AI only' }))
+    expect(keywords()).toEqual(['bakeriet AI', 'nille AI'])
+
+    await user.click(within(ruleRow('bakeriet AI')).getByRole('button', { name: 'Edit' }))
+    const editing = within(screen.getByRole('button', { name: 'Save' }).closest('tr')!)
+    await user.clear(editing.getByLabelText('Keyword'))
+    await user.type(editing.getByLabelText('Keyword'), 'zbakeriet')
+    await user.click(editing.getByRole('button', { name: 'Save' }))
+    await screen.findByRole('status')
+    expect(keywords()).toEqual(['nille AI', 'zbakeriet AI'])
+
+    await user.click(screen.getByRole('checkbox', { name: 'AI only' }))
+    expect(keywords()).toEqual(['kiwi', 'nille AI', 'overføring mellom egne kontoer', 'zbakeriet AI'])
   })
 })

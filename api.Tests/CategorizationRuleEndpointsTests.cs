@@ -46,7 +46,7 @@ public class CategorizationRuleEndpointsTests
         Assert.Equal(0, created.TransactionsChanged);
 
         var rules = await _client.GetFromJsonAsync<List<CategorizationRuleResponse>>("/api/categorization-rules");
-        Assert.Contains(new CategorizationRuleResponse(created.Id, $"{_token} butikk", GroceriesId), rules!);
+        Assert.Contains(new CategorizationRuleResponse(created.Id, $"{_token} butikk", GroceriesId, AiGenerated: false), rules!);
     }
 
     [Fact]
@@ -268,10 +268,10 @@ public class CategorizationRuleEndpointsTests
 
         var edited = await EditedRule(ruleId, $"{_token} butikk", RestaurantsId);
 
-        Assert.Equal(new SavedCategorizationRuleResponse(ruleId, $"{_token} butikk", RestaurantsId, 2), edited);
+        Assert.Equal(new SavedCategorizationRuleResponse(ruleId, $"{_token} butikk", RestaurantsId, AiGenerated: false, 2), edited);
         Assert.Equal([RestaurantsId, RestaurantsId, null], await CategoriesOf(ids));
         var rules = await _client.GetFromJsonAsync<List<CategorizationRuleResponse>>("/api/categorization-rules");
-        Assert.Contains(new CategorizationRuleResponse(ruleId, $"{_token} butikk", RestaurantsId), rules!);
+        Assert.Contains(new CategorizationRuleResponse(ruleId, $"{_token} butikk", RestaurantsId, AiGenerated: false), rules!);
     }
 
     [Fact]
@@ -296,7 +296,7 @@ public class CategorizationRuleEndpointsTests
         var edited = await EditedRule(ruleId, $" {_token.ToUpperInvariant()} BUTIKK ", GroceriesId);
 
         Assert.Equal(
-            new SavedCategorizationRuleResponse(ruleId, $"{_token.ToUpperInvariant()} BUTIKK", GroceriesId, 0),
+            new SavedCategorizationRuleResponse(ruleId, $"{_token.ToUpperInvariant()} BUTIKK", GroceriesId, AiGenerated: false, 0),
             edited);
         Assert.Equal([GroceriesId], await CategoriesOf(ids));
     }
@@ -333,6 +333,78 @@ public class CategorizationRuleEndpointsTests
         var response = await EditRule(int.MaxValue, $"{_token} butikk", GroceriesId);
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    // The rule endpoints never set the mark, so the tests set it directly in the database.
+    private async Task MarkAiGenerated(int ruleId)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var rule = await db.CategorizationRules.SingleAsync(r => r.Id == ruleId);
+        rule.AiGenerated = true;
+        await db.SaveChangesAsync();
+    }
+
+    [Fact]
+    public async Task Get_AiGeneratedRule_IsReportedAsAiGenerated()
+    {
+        var aiRuleId = await AddedRuleId($"{_token} kafé", RestaurantsId);
+        var handAddedRuleId = await AddedRuleId($"{_token} butikk", GroceriesId);
+        await MarkAiGenerated(aiRuleId);
+
+        var rules = await _client.GetFromJsonAsync<List<CategorizationRuleResponse>>("/api/categorization-rules");
+
+        Assert.Contains(new CategorizationRuleResponse(aiRuleId, $"{_token} kafé", RestaurantsId, AiGenerated: true), rules!);
+        Assert.Contains(new CategorizationRuleResponse(handAddedRuleId, $"{_token} butikk", GroceriesId, AiGenerated: false), rules!);
+    }
+
+    [Fact]
+    public async Task Get_FreshDatabase_SeededRulesAreNotAiGenerated()
+    {
+        var rules = await _client.GetFromJsonAsync<List<CategorizationRuleResponse>>("/api/categorization-rules");
+
+        Assert.False(rules!.Single(r => r.Keyword == "rema").AiGenerated);
+    }
+
+    [Fact]
+    public async Task Post_RuleClaimingToBeAiGenerated_IsNotAiGenerated()
+    {
+        var response = await _client.PostAsJsonAsync(
+            "/api/categorization-rules",
+            new { keyword = $"{_token} butikk", categoryId = GroceriesId, aiGenerated = true });
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var created = await response.Content.ReadFromJsonAsync<SavedCategorizationRuleResponse>();
+        Assert.False(created!.AiGenerated);
+        var rules = await _client.GetFromJsonAsync<List<CategorizationRuleResponse>>("/api/categorization-rules");
+        Assert.False(rules!.Single(r => r.Id == created.Id).AiGenerated);
+    }
+
+    [Fact]
+    public async Task Put_AiGeneratedRule_KeepsTheMarkWhenItsKeywordAndCategoryChange()
+    {
+        var ruleId = await AddedRuleId($"{_token} kafé", RestaurantsId);
+        await MarkAiGenerated(ruleId);
+
+        var edited = await EditedRule(ruleId, $"{_token} bakeri", GroceriesId);
+
+        Assert.True(edited.AiGenerated);
+        var rules = await _client.GetFromJsonAsync<List<CategorizationRuleResponse>>("/api/categorization-rules");
+        Assert.Contains(new CategorizationRuleResponse(ruleId, $"{_token} bakeri", GroceriesId, AiGenerated: true), rules!);
+    }
+
+    [Fact]
+    public async Task Put_RequestClaimingAiGenerated_LeavesAHandAddedRuleUnmarked()
+    {
+        var ruleId = await AddedRuleId($"{_token} butikk", GroceriesId);
+
+        var response = await _client.PutAsJsonAsync(
+            $"/api/categorization-rules/{ruleId}",
+            new { keyword = $"{_token} butikk", categoryId = RestaurantsId, aiGenerated = true });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var edited = await response.Content.ReadFromJsonAsync<SavedCategorizationRuleResponse>();
+        Assert.False(edited!.AiGenerated);
     }
 
     private async Task<int> TransactionsChangedByDeleting(int ruleId)

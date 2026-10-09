@@ -86,10 +86,13 @@ export async function uploadBankStatement(file: File): Promise<UploadBankStateme
   return { ok: false, message: `Upload failed (${response.status}).` }
 }
 
+// aiGenerated: created by an LLM during import rather than by hand. Only records where the rule
+// came from; the rule otherwise behaves like any other.
 export interface CategorizationRule {
   id: number
   keyword: string
   categoryId: number
+  aiGenerated: boolean
 }
 
 export interface CategorizationRuleRequest {

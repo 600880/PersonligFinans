@@ -78,6 +78,10 @@ namespace PersonligFinans.Api.Data.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
+                    b.Property<bool>("AiGenerated")
+                        .HasColumnType("boolean")
+                        .HasColumnName("ai_generated");
+
                     b.Property<int>("CategoryId")
                         .HasColumnType("integer")
                         .HasColumnName("category_id");
