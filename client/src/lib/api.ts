@@ -1,3 +1,4 @@
+import type { Period } from './period'
 import type { CreateTransactionRequest } from './transactionForm'
 
 export interface Category {
@@ -57,8 +58,19 @@ export interface Spending {
   slices: SpendingSlice[]
 }
 
-export async function fetchSpendingOfMonth({ year, month }: TransactionMonth): Promise<Spending> {
-  const response = await fetch(`/api/spending?year=${year}&month=${month}`)
+function periodQuery(period: Period) {
+  switch (period.granularity) {
+    case 'year':
+      return `year=${period.year}`
+    case 'quarter':
+      return `year=${period.year}&quarter=${period.quarter}`
+    case 'month':
+      return `year=${period.year}&month=${period.month}`
+  }
+}
+
+export async function fetchSpending(period: Period): Promise<Spending> {
+  const response = await fetch(`/api/spending?${periodQuery(period)}`)
   if (!response.ok) throw new Error(`Loading spending failed (${response.status})`)
   return (await response.json()) as Spending
 }
