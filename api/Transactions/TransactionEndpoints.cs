@@ -77,12 +77,21 @@ public static class TransactionEndpoints
     // The errors per field of a month given as a year and a month; empty when both are valid.
     internal static Dictionary<string, string[]> ValidateMonth(int? year, int? month)
     {
+        var errors = ValidateYear(year);
+
+        if (month is not (>= 1 and <= 12))
+            errors["month"] = ["Month must be between 1 and 12."];
+
+        return errors;
+    }
+
+    // The errors per field of a year; empty when it is valid.
+    internal static Dictionary<string, string[]> ValidateYear(int? year)
+    {
         var errors = new Dictionary<string, string[]>();
 
         if (year is not (>= MinYear and <= MaxYear))
             errors["year"] = [$"Year must be between {MinYear} and {MaxYear}."];
-        if (month is not (>= 1 and <= 12))
-            errors["month"] = ["Month must be between 1 and 12."];
 
         return errors;
     }
