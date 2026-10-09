@@ -194,6 +194,16 @@ namespace PersonligFinans.Api.Data.Migrations
                         {
                             Id = 13,
                             Name = "Other"
+                        },
+                        new
+                        {
+                            Id = 14,
+                            Name = "Clothing"
+                        },
+                        new
+                        {
+                            Id = 15,
+                            Name = "Electronics"
                         });
                 });
 

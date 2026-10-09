@@ -26,6 +26,8 @@ public class BankStatementEndpointsTests
     private const int RestaurantsId = 2;
     private const int TransfersId = 12;
     private const int OtherId = 13;
+    private const int ClothingId = 14;
+    private const int ElectronicsId = 15;
 
     // The tests share one database and rules match every imported Transaction, so the tests that
     // add rules put a token of their own in each keyword and description.
@@ -344,6 +346,17 @@ public class BankStatementEndpointsTests
         Assert.Equal(
             [($"{_token} Butikk Sentrum", (int?)GroceriesId, (int?)ruleId), ($"{_token} Kafé", null, null)],
             stored.Select(t => (t.Description, t.CategoryId, t.CategorizationRuleId)));
+    }
+
+    [Fact]
+    public async Task Post_Statement_SeededRulesCategorizeClothingAndElectronics()
+    {
+        var response = await Upload(StatementWithPurchasesFrom("Cubus Bergen Storsenter", "Komplett.no"));
+
+        var created = await Created(response);
+        Assert.Equal(
+            [ClothingId, ElectronicsId],
+            (await StoredTransactions(created.Id)).Select(t => t.CategoryId));
     }
 
     [Fact]

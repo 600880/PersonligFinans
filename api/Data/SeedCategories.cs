@@ -17,5 +17,7 @@ public static class SeedCategories
         new() { Id = 11, Name = "Income" },
         new() { Id = 12, Name = "Transfers" },
         new() { Id = 13, Name = "Other" },
+        new() { Id = 14, Name = "Clothing" },
+        new() { Id = 15, Name = "Electronics" },
     ];
 }
