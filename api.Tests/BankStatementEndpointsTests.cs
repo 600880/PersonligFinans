@@ -538,6 +538,29 @@ public class BankStatementEndpointsTests
 
         Assert.Equal([(int?)GroceriesId, null], (await StoredTransactions(created.Id)).Select(t => t.CategoryId));
         Assert.Equal((2, 1), (created.TransactionCount, created.UncategorizedCount));
+        Assert.True(created.AiCategorizationUnavailable);
+    }
+
+    [Fact]
+    public async Task Post_GeneratorDeclinesEveryRow_DoesNotReportAiCategorizationUnavailable()
+    {
+        var created = await Created(await Upload(
+            StatementWithPurchasesFrom($"{_token} Kafé", $"{_token} Frisør"), new FakeRuleGenerator()));
+
+        Assert.Equal(2, created.UncategorizedCount);
+        Assert.False(created.AiCategorizationUnavailable);
+    }
+
+    [Fact]
+    public async Task Post_StatementWhoseRowsAllMatchRules_DoesNotReportAiCategorizationUnavailable()
+    {
+        await AddRule($"{_token} butikk", GroceriesId);
+
+        var created = await Created(await Upload(
+            StatementWithPurchasesFrom($"{_token} Butikk Sentrum"), new FakeRuleGenerator { Unavailable = true }));
+
+        Assert.Equal(0, created.UncategorizedCount);
+        Assert.False(created.AiCategorizationUnavailable);
     }
 
     [Fact]
@@ -547,6 +570,7 @@ public class BankStatementEndpointsTests
 
         Assert.Null(Assert.Single(await StoredTransactions(created.Id)).CategoryId);
         Assert.Equal(1, created.UncategorizedCount);
+        Assert.False(created.AiCategorizationUnavailable);
         Assert.Empty(await RulesWithToken());
     }
 }
