@@ -1656,6 +1656,8 @@ describe('Dashboard', () => {
         ["moves To to the end of the next quarter when From is chosen in To's quarter", [['Granularity', 'Quarter'], ['To', '06.2026'], ['From', '05.2026']], '05.2026', '09.2026'],
         ['moves From back to the start of the previous quarter when From is chosen in the latest quarter', [['Granularity', 'Quarter'], ['From', '08.2026']], '04.2026', '09.2026'],
         ["moves From back to the start of the previous quarter when To is chosen in From's quarter", [['Granularity', 'Quarter'], ['From', '02.2025'], ['To', '03.2025']], '10.2024', '03.2025'],
+        ['moves To to the end of the next quarter when To is chosen in the earliest quarter', [['Granularity', 'Quarter'], ['From', '01.2023'], ['To', '02.2023']], '01.2023', '06.2023'],
+        ['keeps a Span widened at Year when going back to Month', [['From', '03.2026'], ['To', '08.2026'], ['Granularity', 'Year'], ['Granularity', 'Month']], '01.2025', '08.2026'],
       ])('%s, so the Span touches at least two Periods', async (_case, choices, from, to) => {
         months = [
           { year: 2026, month: 9 },
@@ -1672,6 +1674,56 @@ describe('Dashboard', () => {
         expect(selectedMonth('From')).toBe(from)
         expect(selectedMonth('To')).toBe(to)
         expect(within(trend()).queryByRole('alert')).toBeNull()
+      })
+
+      it.each([
+        ['From back no further than the earliest month', [{ year: 2026, month: 9 }, { year: 2025, month: 6 }], [['Granularity', 'Year'], ['From', '03.2026']], '06.2025', '09.2026'],
+        ['To no further than the latest month', [{ year: 2026, month: 9 }, { year: 2025, month: 1 }], [['From', '02.2025'], ['To', '05.2025'], ['Granularity', 'Year']], '02.2025', '09.2026'],
+      ])('moves %s', async (_case, offered, choices, from, to) => {
+        months = offered
+        const user = userEvent.setup()
+        render(<App />)
+        await waitFor(() => expect(trendTable()).toHaveLength(2))
+
+        for (const [label, value] of choices) {
+          await user.selectOptions(within(trend()).getByLabelText(label), value)
+        }
+
+        expect(selectedMonth('From')).toBe(from)
+        expect(selectedMonth('To')).toBe(to)
+      })
+
+      it('regroups the Spending already loaded when the Span is kept, without fetching it again', async () => {
+        months = [
+          { year: 2026, month: 9 },
+          { year: 2025, month: 1 },
+        ]
+        const user = userEvent.setup()
+        render(<App />)
+        await waitFor(() => expect(trendTable()[0]).toEqual(['', 'October 2025', 'September 2026', 'Change']))
+        const requestsBefore = requestedMonthlySpending().length
+
+        await user.selectOptions(within(trend()).getByLabelText('Granularity'), 'Quarter')
+
+        expect(trendTable()[0]).toEqual(['', 'Q4 2025', 'Q3 2026', 'Change'])
+        expect(requestedMonthlySpending()).toHaveLength(requestsBefore)
+      })
+
+      it('opens on Month again after leaving the home view and coming back', async () => {
+        months = [
+          { year: 2026, month: 9 },
+          { year: 2025, month: 1 },
+        ]
+        const user = userEvent.setup()
+        render(<App />)
+        await waitFor(() => expect(trendTable()).toHaveLength(2))
+        await user.selectOptions(within(trend()).getByLabelText('Granularity'), 'Quarter')
+
+        await user.click(screen.getByRole('button', { name: 'Transactions' }))
+        await user.click(screen.getByRole('button', { name: 'PersonligFinans' }))
+
+        await waitFor(() => expect(trendTable()[0]).toEqual(['', 'October 2025', 'September 2026', 'Change']))
+        expect(selectedGranularity()).toBe('Month')
       })
 
       it.each([

@@ -4,7 +4,7 @@ import { fetchMonthlySpending, type Category, type MonthSpending, type Transacti
 import { formatAmount } from '../lib/amount'
 import { categoryColour } from '../lib/categoryColours'
 import { categoryName } from '../lib/categoryName'
-import { GRANULARITIES, type Granularity } from '../lib/period'
+import type { Granularity } from '../lib/period'
 import {
   defaultSpan,
   monthLabel,
@@ -25,6 +25,7 @@ import {
   trendPoints,
   type TrendPoint,
 } from '../lib/trend'
+import { GranularitySelect } from './GranularitySelect'
 
 const LOAD_ERROR = 'Could not load the Spending trend.'
 
@@ -72,14 +73,14 @@ function trendRows(monthly: MonthSpending[], categories: Category[] | null): Tre
   ]
 }
 
-// How Spending changed over a Span, as lines with a point per Period of its own Granularity, Month at
-// first, and a table of the first and last points for Total and each Category. Each row switches its line on and off;
-// Total starts on and the Categories off, and they stay as switched when the Span changes. `months`
-// are the months with Transactions, newest first, which decide the months offered. Opens on the 12
-// months ending at the latest of them. When they are reloaded, after Transactions are saved, it
-// fetches its Spending again, keeping the Span if both its ends are still offered and otherwise
-// going back to the 12 months; its Granularity, Include transfers and switched-on lines are kept. Has its own
-// Include transfers, off at first and apart from the donut's.
+// How Spending changed over a Span, as lines with a point per Period of its own Granularity, Month
+// at first, and a table of the first and last points for Total and each Category. Each row switches
+// its line on and off; Total starts on and the Categories off, and they stay as switched when the
+// Span changes. `months` are the months with Transactions, newest first, which decide the months
+// offered. Opens on the 12 months ending at the latest of them. When they are reloaded, after
+// Transactions are saved, it fetches its Spending again, keeping the Span if both its ends are still
+// offered and otherwise going back to the 12 months; its Granularity, Include transfers and
+// switched-on lines are kept. Has its own Include transfers, off at first and apart from the donut's.
 export function SpendingTrend({ months, categories }: { months: TransactionMonth[]; categories: Category[] | null }) {
   const headingId = useId()
   const offered = useMemo(() => offeredMonths(months), [months])
@@ -155,20 +156,7 @@ export function SpendingTrend({ months, categories }: { months: TransactionMonth
         <p className="mt-4 text-sm text-slate-600">{TOO_FEW_PERIODS.month}</p>
       ) : (
         <div className="mt-4 flex flex-wrap gap-4">
-          <label className="flex w-fit flex-col gap-1 text-sm font-medium text-slate-700">
-            Granularity
-            <select
-              value={granularity}
-              onChange={(event) => chooseGranularity(event.target.value as Granularity)}
-              className="rounded-lg border border-slate-300 px-3 py-2 font-normal"
-            >
-              {GRANULARITIES.map(({ value, label }) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
-            </select>
-          </label>
+          <GranularitySelect value={granularity} onChange={chooseGranularity} />
           {span &&
             (['from', 'to'] as const).map((end) => (
               <label key={end} className="flex w-fit flex-col gap-1 text-sm font-medium text-slate-700">

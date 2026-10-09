@@ -13,15 +13,14 @@ import { categoryColour } from '../lib/categoryColours'
 import { categoryName } from '../lib/categoryName'
 import { percent } from '../lib/percent'
 import { currentMonth } from '../lib/month'
+import { GranularitySelect } from './GranularitySelect'
 import { SpendingTrend } from './SpendingTrend'
 import {
-  GRANULARITIES,
   periodLabel,
   periodOfMonth,
   periodsOfMonths,
   periodValue,
   switchGranularity,
-  type Granularity,
   type Period,
 } from '../lib/period'
 
@@ -150,22 +149,10 @@ export function Dashboard({ version }: { version: number }) {
 
         {selected && (
           <div className="mt-4 flex flex-wrap gap-4">
-            <label className="flex w-fit flex-col gap-1 text-sm font-medium text-slate-700">
-              Granularity
-              <select
-                value={selected.granularity}
-                onChange={(event) =>
-                  choosePeriod(switchGranularity(selected, event.target.value as Granularity, months))
-                }
-                className="rounded-lg border border-slate-300 px-3 py-2 font-normal"
-              >
-                {GRANULARITIES.map(({ value, label }) => (
-                  <option key={value} value={value}>
-                    {label}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <GranularitySelect
+              value={selected.granularity}
+              onChange={(granularity) => choosePeriod(switchGranularity(selected, granularity, months))}
+            />
             <label className="flex w-fit flex-col gap-1 text-sm font-medium text-slate-700">
               Period
               <select

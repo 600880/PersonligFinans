@@ -90,10 +90,13 @@ export function withTo(span: Span, to: TransactionMonth, offered: TransactionMon
   }
 }
 
-// The Span shown at a new granularity: kept when it touches at least two Periods of it, or else
-// corrected as when From is chosen. Null when the offered months all fall in one Period of it.
+// The Span shown at a new granularity: the same Span when it touches at least two Periods of it, so
+// its Spending isn't fetched again, or else corrected as when From is chosen. Null when the offered
+// months all fall in one Period of it.
 export function withGranularity(span: Span, offered: TransactionMonth[], granularity: Granularity): Span | null {
-  return isOnePeriod(offered, granularity) ? null : withFrom(span, span.from, offered, granularity)
+  if (isOnePeriod(offered, granularity)) return null
+  if (periodIndexOf(span.from, granularity) < periodIndexOf(span.to, granularity)) return span
+  return withFrom(span, span.from, offered, granularity)
 }
 
 function isOnePeriod(offered: TransactionMonth[], granularity: Granularity) {
