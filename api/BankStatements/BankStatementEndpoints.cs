@@ -90,7 +90,7 @@ public static class BankStatementEndpoints
         // The import may add rules, so it takes the rule-change lock: imports and rule changes run one
         // after another, and a rule change can't miss these rows while they are being categorized.
         await using var transaction = await Categorizer.BeginRuleChangeAsync(db);
-        var rules = await Categorizer.AddAiGeneratedRulesAsync(db, proposals);
+        var rules = await Categorizer.AddAiGeneratedRulesAsync(db, proposals, parsed.Rows.Select(row => row.Description));
         statement.Transactions.AddRange(parsed.Rows.Select(row =>
         {
             var rule = Categorizer.ChooseRule(row.Description, rules);
@@ -130,10 +130,10 @@ public static class BankStatementEndpoints
                 statement.Transactions.Count(t => t.CategoryId is null)));
     }
 
-    // The rule generator's proposals for the rows no current rule matches, in row order. Each
-    // distinct description and sign is asked about once. Empty when there is no rule generator,
-    // every row is matched, or the generator is unavailable.
-    private static async Task<List<RuleProposal>> ProposeRules(
+    // The rule generator's proposals for the rows no current rule matches, in row order, each with
+    // the description it was made for. Each distinct description and sign is asked about once.
+    // Empty when there is no rule generator, every row is matched, or the generator is unavailable.
+    private static async Task<List<(string Description, RuleProposal Proposal)>> ProposeRules(
         IReadOnlyList<StatementRow> rows, AppDbContext db, IRuleGenerator? ruleGenerator)
     {
         if (ruleGenerator is null)
@@ -153,7 +153,10 @@ public static class BankStatementEndpoints
         return await ruleGenerator.GenerateAsync(unmatched, categoryNames) switch
         {
             RuleGeneration.Generated generated =>
-                unmatched.Where(generated.Proposals.ContainsKey).Select(row => generated.Proposals[row]).ToList(),
+                unmatched
+                    .Where(generated.Proposals.ContainsKey)
+                    .Select(row => (row.Description, generated.Proposals[row]))
+                    .ToList(),
             // Unavailable: the unmatched rows stay Uncategorized.
             _ => [],
         };
