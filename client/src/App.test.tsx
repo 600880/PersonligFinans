@@ -1187,7 +1187,7 @@ describe('Dashboard', () => {
     ]
 
     function chooseGranularity(user: ReturnType<typeof userEvent.setup>, granularity: string) {
-      return user.selectOptions(screen.getByLabelText('Granularity'), granularity)
+      return user.selectOptions(within(dashboard()).getByLabelText('Granularity'), granularity)
     }
 
     function choosePeriod(user: ReturnType<typeof userEvent.setup>, period: string) {
@@ -1205,9 +1205,9 @@ describe('Dashboard', () => {
     it('opens on the Month granularity', async () => {
       await openDashboard()
 
-      expect(screen.getByLabelText('Granularity')).toHaveDisplayValue('Month')
+      expect(within(dashboard()).getByLabelText('Granularity')).toHaveDisplayValue('Month')
       expect(
-        within(screen.getByLabelText('Granularity'))
+        within(within(dashboard()).getByLabelText('Granularity'))
           .getAllByRole('option')
           .map((option) => option.textContent),
       ).toEqual(['Year', 'Quarter', 'Month'])
@@ -1581,19 +1581,19 @@ describe('Dashboard', () => {
       }
 
       it.each([
-        ['12 months by month', '10.2025', '09.2026', 'October 2025', 'September 2026', '1 000,00 kr', '300,00 kr', '▼ −70,0 %'],
-        ['13 months by quarter, from a partial first quarter', '09.2025', '09.2026', 'Q3 2025', 'Q3 2026', '900,00 kr', '600,00 kr', '▼ −33,3 %'],
-        ['partial first and last quarters', '02.2025', '08.2026', 'Q1 2025', 'Q3 2026', '300,00 kr', '750,00 kr', '▲ +150,0 %'],
-        ['36 months by quarter', '10.2023', '09.2026', 'Q4 2023', 'Q3 2026', '133,33 kr', '600,00 kr', '▲ +350,0 %'],
-        ['37 months by half-year, from a partial first half-year', '09.2023', '09.2026', 'H2 2023', 'H2 2026', '300,00 kr', '600,00 kr', '▲ +100,0 %'],
-        ['partial first and last half-years', '03.2023', '09.2026', 'H1 2023', 'H2 2026', '100,00 kr', '600,00 kr', '▲ +500,0 %'],
+        ['a long Span by month', 'Month', '09.2023', '09.2026', 'September 2023', 'September 2026', '800,00 kr', '300,00 kr', '▼ −62,5 %'],
+        ['by quarter, from a partial first quarter', 'Quarter', '09.2025', '09.2026', 'Q3 2025', 'Q3 2026', '900,00 kr', '600,00 kr', '▼ −33,3 %'],
+        ['partial first and last quarters', 'Quarter', '02.2025', '08.2026', 'Q1 2025', 'Q3 2026', '300,00 kr', '750,00 kr', '▲ +150,0 %'],
+        ['by year, from a partial first year to a partial last one', 'Year', '03.2023', '09.2026', '2023', '2026', '160,00 kr', '200,00 kr', '▲ +25,0 %'],
+        ['by year, from three months of the first year', 'Year', '10.2023', '09.2026', '2023', '2026', '133,33 kr', '200,00 kr', '▲ +50,0 %'],
       ])(
         'shows %s, each point as its Spending divided by the months of the Span it covers',
-        async (_case, from, to, firstLabel, lastLabel, first, last, change) => {
+        async (_case, granularity, from, to, firstLabel, lastLabel, first, last, change) => {
           const user = await openTrend()
 
           await user.selectOptions(within(trend()).getByLabelText('From'), from)
           await user.selectOptions(within(trend()).getByLabelText('To'), to)
+          await user.selectOptions(within(trend()).getByLabelText('Granularity'), granularity)
 
           await waitFor(() =>
             expect(trendTable().slice(0, 2)).toEqual([
@@ -1609,6 +1609,7 @@ describe('Dashboard', () => {
 
         await user.selectOptions(within(trend()).getByLabelText('From'), '02.2025')
         await user.selectOptions(within(trend()).getByLabelText('To'), '08.2026')
+        await user.selectOptions(within(trend()).getByLabelText('Granularity'), 'Quarter')
 
         await waitFor(() =>
           expect(trendTable()).toEqual([
@@ -1619,6 +1620,101 @@ describe('Dashboard', () => {
             ['Uncategorized', '0,00 kr', '200,00 kr', 'New'],
           ]),
         )
+      })
+    })
+
+    describe('Granularity', () => {
+      function selectedGranularity() {
+        return (within(trend()).getByLabelText('Granularity') as HTMLSelectElement).selectedOptions[0].textContent
+      }
+
+      it('offers Year, Quarter and Month before From and To, opening on Month', async () => {
+        months = [
+          { year: 2026, month: 9 },
+          { year: 2026, month: 8 },
+        ]
+        render(<App />)
+        await waitFor(() => expect(trendTable()).toHaveLength(2))
+
+        expect(
+          within(trend())
+            .getAllByRole('combobox')
+            .map((select) => select.closest('label')!.firstChild!.textContent),
+        ).toEqual(['Granularity', 'From', 'To'])
+        expect(
+          within(within(trend()).getByLabelText('Granularity'))
+            .getAllByRole('option')
+            .map((option) => option.textContent),
+        ).toEqual(['Year', 'Quarter', 'Month'])
+        expect(selectedGranularity()).toBe('Month')
+      })
+
+      // Every month from January 2023 to September 2026 is offered.
+      it.each([
+        ['moves To to the end of the next year when the Span falls in one year', [['From', '03.2024'], ['To', '08.2024'], ['Granularity', 'Year']], '03.2024', '12.2025'],
+        ['moves From back to the start of the previous year when there is no next one', [['From', '03.2026'], ['To', '08.2026'], ['Granularity', 'Year']], '01.2025', '08.2026'],
+        ["moves To to the end of the next quarter when From is chosen in To's quarter", [['Granularity', 'Quarter'], ['To', '06.2026'], ['From', '05.2026']], '05.2026', '09.2026'],
+        ['moves From back to the start of the previous quarter when From is chosen in the latest quarter', [['Granularity', 'Quarter'], ['From', '08.2026']], '04.2026', '09.2026'],
+        ["moves From back to the start of the previous quarter when To is chosen in From's quarter", [['Granularity', 'Quarter'], ['From', '02.2025'], ['To', '03.2025']], '10.2024', '03.2025'],
+      ])('%s, so the Span touches at least two Periods', async (_case, choices, from, to) => {
+        months = [
+          { year: 2026, month: 9 },
+          { year: 2023, month: 1 },
+        ]
+        const user = userEvent.setup()
+        render(<App />)
+        await waitFor(() => expect(trendTable()).toHaveLength(2))
+
+        for (const [label, value] of choices) {
+          await user.selectOptions(within(trend()).getByLabelText(label), value)
+        }
+
+        expect(selectedMonth('From')).toBe(from)
+        expect(selectedMonth('To')).toBe(to)
+        expect(within(trend()).queryByRole('alert')).toBeNull()
+      })
+
+      it.each([
+        ['Year', [{ year: 2026, month: 9 }, { year: 2026, month: 1 }], 'Trends by Year need Transactions in at least two years'],
+        ['Quarter', [{ year: 2026, month: 9 }, { year: 2026, month: 7 }], 'Trends by Quarter need Transactions in at least two quarters'],
+      ])('says when the Transactions all fall in one Period at %s, and comes back at Month', async (granularity, offered, message) => {
+        months = offered
+        const user = userEvent.setup()
+        render(<App />)
+        await waitFor(() => expect(trendTable()).toHaveLength(2))
+
+        await user.selectOptions(within(trend()).getByLabelText('Granularity'), granularity)
+
+        expect(trend()).toHaveTextContent(message)
+        expect(within(trend()).queryByLabelText('From')).toBeNull()
+        expect(trendTable()).toEqual([])
+
+        await user.selectOptions(within(trend()).getByLabelText('Granularity'), 'Month')
+
+        await waitFor(() => expect(trendTable()).toHaveLength(2))
+        expect(selectedMonth('To')).toBe('09.2026')
+      })
+
+      it('keeps the Granularity after a Transaction is added', async () => {
+        months = [
+          { year: 2026, month: 9 },
+          { year: 2025, month: 1 },
+        ]
+        const user = userEvent.setup()
+        render(<App />)
+        await waitFor(() => expect(trendTable()).toHaveLength(2))
+        await user.selectOptions(within(trend()).getByLabelText('Granularity'), 'Quarter')
+        await waitFor(() => expect(trendTable()[0]).toEqual(['', 'Q4 2025', 'Q3 2026', 'Change']))
+        const requestsBefore = requestedMonthlySpending().length
+        await user.click(screen.getByRole('button', { name: /add transaction/i }))
+        await screen.findByRole('option', { name: 'Groceries' })
+        await fillValidForm(user)
+
+        await user.click(screen.getByRole('button', { name: /^save$/i }))
+
+        await waitFor(() => expect(requestedMonthlySpending().length).toBeGreaterThan(requestsBefore))
+        await waitFor(() => expect(trendTable()[0]).toEqual(['', 'Q4 2025', 'Q3 2026', 'Change']))
+        expect(selectedGranularity()).toBe('Quarter')
       })
     })
 
@@ -1922,8 +2018,7 @@ describe('Dashboard', () => {
         await user.click(toggle('Other'))
 
         await user.selectOptions(within(trend()).getByLabelText('From'), '02.2025')
-        // February 2025 to September 2026 is 20 months, so drawn per quarter.
-        await waitFor(() => expect(trendTable()[0][1]).toBe('Q1 2025'))
+        await waitFor(() => expect(trendTable()[0][1]).toBe('February 2025'))
         expect(switchedOn()).toEqual(['Other'])
 
         await user.selectOptions(within(trend()).getByLabelText('To'), '06.2025')

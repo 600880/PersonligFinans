@@ -45,7 +45,7 @@ A specific calendar year, quarter (Q1–Q4) or month that Spending is summarized
 _Avoid_: Range, interval, timeframe
 
 **Granularity**:
-The length of a Period: Year, Quarter or Month. Changing it keeps the user in the same span of time, moving to the Period that contains the current one or to the latest one with Transactions inside it.
+The length of a Period: Year, Quarter or Month. The Dashboard has one for the Period it summarizes, where changing it keeps the user in the same stretch of time, moving to the Period that contains the current one or to the latest one with Transactions inside it. It has another, chosen separately, for how Spending changed over a Span, which is shown one Period of that Granularity at a time; a Period only partly inside the Span counts just its months inside the Span.
 _Avoid_: Resolution, period type, interval
 
 **Span**:

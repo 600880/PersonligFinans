@@ -4,7 +4,18 @@ import { fetchMonthlySpending, type Category, type MonthSpending, type Transacti
 import { formatAmount } from '../lib/amount'
 import { categoryColour } from '../lib/categoryColours'
 import { categoryName } from '../lib/categoryName'
-import { defaultSpan, monthLabel, monthValue, offeredMonths, reloadedSpan, withFrom, withTo, type Span } from '../lib/span'
+import { GRANULARITIES, type Granularity } from '../lib/period'
+import {
+  defaultSpan,
+  monthLabel,
+  monthValue,
+  offeredMonths,
+  reloadedSpan,
+  withFrom,
+  withGranularity,
+  withTo,
+  type Span,
+} from '../lib/span'
 import {
   categoryRow,
   coverageNote,
@@ -16,6 +27,13 @@ import {
 } from '../lib/trend'
 
 const LOAD_ERROR = 'Could not load the Spending trend.'
+
+// Why there is no trend when the months with Transactions all fall in one Period of the granularity.
+const TOO_FEW_PERIODS: Record<Granularity, string> = {
+  month: 'Trends need at least two months with Transactions',
+  quarter: 'Trends by Quarter need Transactions in at least two quarters',
+  year: 'Trends by Year need Transactions in at least two years',
+}
 
 const CHART_HEIGHT = 280
 
@@ -54,24 +72,25 @@ function trendRows(monthly: MonthSpending[], categories: Category[] | null): Tre
   ]
 }
 
-// How Spending changed over a Span, as lines with a point per month, quarter or half-year and a table
-// of the first and last points for Total and each Category. Each row switches its line on and off;
+// How Spending changed over a Span, as lines with a point per Period of its own Granularity, Month at
+// first, and a table of the first and last points for Total and each Category. Each row switches its line on and off;
 // Total starts on and the Categories off, and they stay as switched when the Span changes. `months`
 // are the months with Transactions, newest first, which decide the months offered. Opens on the 12
 // months ending at the latest of them. When they are reloaded, after Transactions are saved, it
 // fetches its Spending again, keeping the Span if both its ends are still offered and otherwise
-// going back to the 12 months; its Include transfers and switched-on lines are kept. Has its own
+// going back to the 12 months; its Granularity, Include transfers and switched-on lines are kept. Has its own
 // Include transfers, off at first and apart from the donut's.
 export function SpendingTrend({ months, categories }: { months: TransactionMonth[]; categories: Category[] | null }) {
   const headingId = useId()
   const offered = useMemo(() => offeredMonths(months), [months])
+  const [granularity, setGranularity] = useState<Granularity>('month')
   // The Span shown, remembered with the months it was worked out from. When the months are reloaded
   // it is kept, or falls back to the default, before anything is drawn or fetched for the old one.
   const [shown, setShown] = useState<{ months: TransactionMonth[]; span: Span | null }>(() => ({
     months,
-    span: defaultSpan(offered),
+    span: defaultSpan(offered, 'month'),
   }))
-  if (shown.months !== months) setShown({ months, span: reloadedSpan(shown.span, offered) })
+  if (shown.months !== months) setShown({ months, span: reloadedSpan(shown.span, offered, granularity) })
   const span = shown.span
   const [includeTransfers, setIncludeTransfers] = useState(false)
   const [loaded, setLoaded] = useState<LoadedTrend | null>(null)
@@ -95,7 +114,7 @@ export function SpendingTrend({ months, categories }: { months: TransactionMonth
   }, [span, includeTransfers])
 
   const current = loaded && loaded.span === span && loaded.includeTransfers === includeTransfers ? loaded : null
-  const points = current?.monthly ? trendPoints(current.monthly) : []
+  const points = current?.monthly ? trendPoints(current.monthly, granularity) : []
   const first = points[0]
   const last = points[points.length - 1]
   const rows = current?.monthly ? trendRows(current.monthly, categories) : []
@@ -113,7 +132,17 @@ export function SpendingTrend({ months, categories }: { months: TransactionMonth
   function chooseMonth(end: 'from' | 'to', value: string) {
     if (!span) return
     const month = offered.find((option) => monthValue(option) === value)!
-    setShown({ months, span: end === 'from' ? withFrom(span, month, offered) : withTo(span, month, offered) })
+    setShown({
+      months,
+      span: end === 'from' ? withFrom(span, month, offered, granularity) : withTo(span, month, offered, granularity),
+    })
+  }
+
+  // Keeps the Span when it touches two Periods of the new granularity, and otherwise corrects it, or
+  // goes back to the default when there was none at the old one.
+  function chooseGranularity(next: Granularity) {
+    setGranularity(next)
+    setShown({ months, span: span ? withGranularity(span, offered, next) : defaultSpan(offered, next) })
   }
 
   return (
@@ -122,12 +151,26 @@ export function SpendingTrend({ months, categories }: { months: TransactionMonth
         Spending trend
       </h2>
 
-      {!span ? (
-        <p className="mt-4 text-sm text-slate-600">Trends need at least two months with Transactions</p>
+      {offered.length < 2 ? (
+        <p className="mt-4 text-sm text-slate-600">{TOO_FEW_PERIODS.month}</p>
       ) : (
-        <>
-          <div className="mt-4 flex flex-wrap gap-4">
-            {(['from', 'to'] as const).map((end) => (
+        <div className="mt-4 flex flex-wrap gap-4">
+          <label className="flex w-fit flex-col gap-1 text-sm font-medium text-slate-700">
+            Granularity
+            <select
+              value={granularity}
+              onChange={(event) => chooseGranularity(event.target.value as Granularity)}
+              className="rounded-lg border border-slate-300 px-3 py-2 font-normal"
+            >
+              {GRANULARITIES.map(({ value, label }) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </label>
+          {span &&
+            (['from', 'to'] as const).map((end) => (
               <label key={end} className="flex w-fit flex-col gap-1 text-sm font-medium text-slate-700">
                 {end === 'from' ? 'From' : 'To'}
                 <select
@@ -143,7 +186,15 @@ export function SpendingTrend({ months, categories }: { months: TransactionMonth
                 </select>
               </label>
             ))}
-          </div>
+        </div>
+      )}
+
+      {offered.length >= 2 && !span && (
+        <p className="mt-4 text-sm text-slate-600">{TOO_FEW_PERIODS[granularity]}</p>
+      )}
+
+      {span && (
+        <>
 
           <label className="mt-3 flex w-fit items-center gap-2 text-sm font-medium text-slate-700">
             <input

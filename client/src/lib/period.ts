@@ -9,6 +9,9 @@ export const GRANULARITIES: { value: Granularity; label: string }[] = [
   { value: 'month', label: 'Month' },
 ]
 
+// How many months a Period of each granularity holds.
+export const MONTHS_IN: Record<Granularity, number> = { year: 12, quarter: 3, month: 1 }
+
 // A calendar year, a calendar quarter (Q1 = January–March) or a month.
 export type Period =
   | { granularity: 'year'; year: number }
