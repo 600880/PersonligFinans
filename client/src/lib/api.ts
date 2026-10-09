@@ -45,6 +45,29 @@ export async function fetchTransactionsOfMonth({ year, month }: TransactionMonth
   return (await response.json()) as Transaction[]
 }
 
+export type ChangeCategoryResult = { ok: true; transaction: Transaction } | { ok: false; message: string }
+
+// Categorizes the Transaction manually: for an imported one, rules never change it again.
+export async function changeTransactionCategory(
+  id: number,
+  categoryId: number,
+): Promise<ChangeCategoryResult> {
+  let response: Response
+  try {
+    response = await fetch(`/api/transactions/${id}/category`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ categoryId }),
+    })
+  } catch {
+    return { ok: false, message: 'Could not reach the server.' }
+  }
+
+  if (response.ok) return { ok: true, transaction: (await response.json()) as Transaction }
+
+  return { ok: false, message: `Saving failed (${response.status}).` }
+}
+
 export async function createTransaction(
   request: CreateTransactionRequest,
 ): Promise<CreateTransactionResult> {

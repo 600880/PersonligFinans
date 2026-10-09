@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using PersonligFinans.Api.CategorizationRules;
 using PersonligFinans.Api.Data;
 
 namespace PersonligFinans.Api.Transactions;
@@ -9,6 +10,8 @@ public record CreateTransactionRequest(
     decimal? Amount,
     string? Reference,
     int? CategoryId);
+
+public record ChangeCategoryRequest(int? CategoryId);
 
 public record TransactionResponse(
     int Id,
@@ -51,6 +54,7 @@ public static class TransactionEndpoints
 
         api.MapGet("/transactions", ListMonth);
         api.MapPost("/transactions", CreateTransaction);
+        api.MapPut("/transactions/{id:int}/category", ChangeCategory);
     }
 
     // A month's Transactions, imported and manual, newest first with the id as a stable tie-break.
@@ -123,6 +127,33 @@ public static class TransactionEndpoints
 
         return Results.Created($"/api/transactions/{transaction.Id}", ToResponse(transaction));
     }
+
+    // Categorizes one Transaction manually: an imported Transaction loses its rule link, so rules never
+    // change it again. Never creates, changes or deletes a Categorization Rule.
+    private static async Task<IResult> ChangeCategory(int id, ChangeCategoryRequest request, AppDbContext db)
+    {
+        await using var dbTransaction = await Categorizer.BeginManualCategorizationAsync(db);
+
+        var transaction = await db.Transactions.FindAsync(id);
+        if (transaction is null)
+            return Results.NotFound();
+
+        // A Category is required, so a Transaction can never be made Uncategorized.
+        if (request.CategoryId is null)
+            return CategoryProblem("Category is required.");
+        if (!await db.Categories.AnyAsync(c => c.Id == request.CategoryId))
+            return CategoryProblem("Category does not exist.");
+
+        transaction.CategoryId = request.CategoryId;
+        transaction.CategorizationRuleId = null;
+        await db.SaveChangesAsync();
+        await dbTransaction.CommitAsync();
+
+        return Results.Ok(ToResponse(transaction));
+    }
+
+    private static IResult CategoryProblem(string message) =>
+        Results.ValidationProblem(new Dictionary<string, string[]> { ["categoryId"] = [message] });
 
     private static TransactionResponse ToResponse(Transaction transaction) =>
         new(

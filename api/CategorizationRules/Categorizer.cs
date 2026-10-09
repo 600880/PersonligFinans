@@ -52,6 +52,18 @@ public static class Categorizer
         return transaction;
     }
 
+    // Opens the database transaction for categorizing a Transaction manually, and takes a lock that
+    // conflicts with the rule-change lock but not with itself. A rule change re-matches the
+    // rule-eligible Transactions it loaded, so a Category chosen manually and saved in between would
+    // be overwritten; instead this waits for a rule change in progress, and a rule change waits for
+    // this. Load the Transaction after this, so it is read as the last rule change left it.
+    public static async Task<IDbContextTransaction> BeginManualCategorizationAsync(AppDbContext db)
+    {
+        var transaction = await db.Database.BeginTransactionAsync();
+        await db.Database.ExecuteSqlRawAsync("LOCK TABLE categorization_rules IN SHARE MODE");
+        return transaction;
+    }
+
     // Adds an AI-generated rule for each proposal, one at a time in order, and returns all rules,
     // including the added ones. Each proposal is checked against the rules as they stand at its
     // turn, including the ones added before it, and dropped unless:

@@ -20,9 +20,14 @@ let handleEditRule: (id: number, body: unknown) => Response
 let handleDeleteRule: (id: number) => Response
 let months: { year: number; month: number }[] | Response
 let handleListMonth: (year: number, month: number) => Response
+let handleChangeCategory: (id: number, body: unknown) => Response | Promise<Response>
 const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
   const monthUrl = /^\/api\/transactions\?year=(\d+)&month=(\d+)$/.exec(url)
   if (monthUrl) return handleListMonth(Number(monthUrl[1]), Number(monthUrl[2]))
+  const categoryUrl = /^\/api\/transactions\/(\d+)\/category$/.exec(url)
+  if (categoryUrl && init?.method === 'PUT') {
+    return handleChangeCategory(Number(categoryUrl[1]), JSON.parse(init.body as string))
+  }
   if (url === '/api/transactions/months') {
     return months instanceof Response ? months : Response.json(months)
   }
@@ -61,6 +66,7 @@ beforeEach(() => {
   handleDeleteRule = () => Response.json({ transactionsChanged: 0 })
   months = []
   handleListMonth = () => Response.json([])
+  handleChangeCategory = () => new Response(null, { status: 500 })
   vi.stubGlobal('fetch', fetchMock)
 })
 
@@ -671,11 +677,37 @@ describe('Transactions page', () => {
       .filter((url) => url.startsWith('/api/transactions?'))
   }
 
+  // Each row's cells as shown: a select shows its chosen option.
   function rowCells() {
     return screen
       .getAllByRole('row')
       .slice(1)
-      .map((row) => within(row).getAllByRole('cell').map((cell) => cell.textContent))
+      .map((row) =>
+        within(row)
+          .getAllByRole('cell')
+          .map((cell) => {
+            const select = within(cell).queryByRole<HTMLSelectElement>('combobox')
+            return select ? select.selectedOptions[0].textContent : cell.textContent
+          }),
+      )
+  }
+
+  function categorySelect(description: string) {
+    return screen.getByRole<HTMLSelectElement>('combobox', { name: `Category for ${description}` })
+  }
+
+  function optionsOf(select: HTMLSelectElement) {
+    return within(select)
+      .getAllByRole<HTMLOptionElement>('option')
+      .map((option) => ({ name: option.textContent, disabled: option.disabled }))
+  }
+
+  async function openSeptember() {
+    months = [{ year: 2026, month: 9 }]
+    handleListMonth = () => Response.json(septemberTransactions)
+    const user = await openTransactionsPage()
+    await screen.findByRole('cell', { name: 'Rema 1000' })
+    return user
   }
 
   it('opens on the newest month with Transactions and lists its rows', async () => {
@@ -765,5 +797,60 @@ describe('Transactions page', () => {
     await openTransactionsPage()
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Could not load the transactions.')
+  })
+
+  it('offers every Category for each row, with a disabled Uncategorized placeholder only when Uncategorized', async () => {
+    await openSeptember()
+
+    expect(categorySelect('Rema 1000')).toHaveValue('1')
+    expect(optionsOf(categorySelect('Rema 1000'))).toEqual([
+      { name: 'Groceries', disabled: false },
+      { name: 'Other', disabled: false },
+    ])
+    expect(categorySelect('Lønn Fra: Testfirma AS').selectedOptions[0]).toHaveTextContent('Uncategorized')
+    expect(optionsOf(categorySelect('Lønn Fra: Testfirma AS'))).toEqual([
+      { name: 'Uncategorized', disabled: true },
+      { name: 'Groceries', disabled: false },
+      { name: 'Other', disabled: false },
+    ])
+  })
+
+  it('saves a chosen Category at once and says the Category changed', async () => {
+    let changed: { id: number; body: unknown } | undefined
+    handleChangeCategory = (id, body) => {
+      changed = { id, body }
+      return Response.json({ ...septemberTransactions[1], categoryId: 13 })
+    }
+    const user = await openSeptember()
+
+    await user.selectOptions(categorySelect('Lønn Fra: Testfirma AS'), 'Other')
+
+    expect(await screen.findByRole('status')).toHaveTextContent('Category changed')
+    expect(changed).toEqual({ id: 4, body: { categoryId: 13 } })
+    expect(categorySelect('Lønn Fra: Testfirma AS')).toHaveValue('13')
+    expect(optionsOf(categorySelect('Lønn Fra: Testfirma AS')).map((option) => option.name)).toEqual([
+      'Groceries',
+      'Other',
+    ])
+  })
+
+  it('goes back to the previous Category and shows an error when saving fails', async () => {
+    handleChangeCategory = () => new Response(null, { status: 500 })
+    const user = await openSeptember()
+
+    await user.selectOptions(categorySelect('Rema 1000'), 'Other')
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Saving failed (500).')
+    expect(categorySelect('Rema 1000')).toHaveValue('1')
+  })
+
+  it('shows an error when changing a Category cannot reach the server', async () => {
+    handleChangeCategory = () => Promise.reject(new TypeError('Failed to fetch'))
+    const user = await openSeptember()
+
+    await user.selectOptions(categorySelect('Lønn Fra: Testfirma AS'), 'Groceries')
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Could not reach the server.')
+    expect(categorySelect('Lønn Fra: Testfirma AS').selectedOptions[0]).toHaveTextContent('Uncategorized')
   })
 })

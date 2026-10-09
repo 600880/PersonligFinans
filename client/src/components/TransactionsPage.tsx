@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import {
+  changeTransactionCategory,
   fetchCategories,
   fetchTransactionMonths,
   fetchTransactionsOfMonth,
@@ -28,6 +29,8 @@ const MONTH_NAMES = [
 const LOAD_ERROR = 'Could not load the transactions.'
 
 const inputClass = 'rounded-lg border border-slate-300 px-3 py-2 font-normal'
+const categorySelectClass =
+  'rounded-lg border border-slate-300 px-2 py-1 disabled:cursor-not-allowed disabled:bg-slate-100'
 
 function currentMonth(): TransactionMonth {
   const today = new Date()
@@ -45,7 +48,11 @@ export function TransactionsPage() {
   // Null until the months are loaded, which decides the month the page opens on.
   const [selected, setSelected] = useState<TransactionMonth | null>(null)
   const [loaded, setLoaded] = useState<LoadedMonth | null>(null)
+  const [statusMessage, setStatusMessage] = useState<string | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  // The Transactions whose Category is being saved. Their selects are disabled until it is, so a
+  // failed save never goes back over a later choice.
+  const [savingIds, setSavingIds] = useState<ReadonlySet<number>>(new Set())
 
   useEffect(() => {
     let ignore = false
@@ -86,12 +93,52 @@ export function TransactionsPage() {
     loaded && loaded.year === selected?.year && loaded.month === selected.month
       ? loaded.transactions
       : null
-  const categoryName = (id: number | null) => categories.find((c) => c.id === id)?.name
 
   function chooseMonth(change: Partial<TransactionMonth>) {
     if (!selected) return
+    setStatusMessage(null)
     setErrorMessage(null)
     setSelected({ ...selected, ...change })
+  }
+
+  function showCategory(id: number, categoryId: number | null) {
+    setLoaded(
+      (current) =>
+        current && {
+          ...current,
+          transactions: current.transactions.map((t) => (t.id === id ? { ...t, categoryId } : t)),
+        },
+    )
+  }
+
+  function setSaving(id: number, saving: boolean) {
+    setSavingIds((current) => {
+      const next = new Set(current)
+      if (saving) next.add(id)
+      else next.delete(id)
+      return next
+    })
+  }
+
+  // Shows the chosen Category at once, and goes back to the previous one when saving fails, so the
+  // page never keeps a Category that wasn't saved.
+  async function changeCategory(transaction: Transaction, categoryId: number) {
+    setStatusMessage(null)
+    setErrorMessage(null)
+    setSaving(transaction.id, true)
+    showCategory(transaction.id, categoryId)
+
+    const result = await changeTransactionCategory(transaction.id, categoryId).finally(() =>
+      setSaving(transaction.id, false),
+    )
+
+    if (result.ok) {
+      showCategory(transaction.id, result.transaction.categoryId)
+      setStatusMessage('Category changed')
+    } else {
+      showCategory(transaction.id, transaction.categoryId)
+      setErrorMessage(result.message)
+    }
   }
 
   return (
@@ -131,9 +178,13 @@ export function TransactionsPage() {
         </div>
       )}
 
-      {errorMessage && (
+      {errorMessage ? (
         <p role="alert" className="mt-3 min-h-5 text-sm text-red-700">
           {errorMessage}
+        </p>
+      ) : (
+        <p role="status" className="mt-3 h-5 text-sm text-emerald-700">
+          {statusMessage}
         </p>
       )}
 
@@ -159,9 +210,26 @@ export function TransactionsPage() {
                 <td className="py-2 pr-3 whitespace-nowrap">{formatNorwegianDate(transaction.date)}</td>
                 <td className="py-2 pr-3">{transaction.description}</td>
                 <td className="py-2 pr-3">
-                  {categoryName(transaction.categoryId) ?? (
-                    <span className="text-slate-400">Uncategorized</span>
-                  )}
+                  <select
+                    aria-label={`Category for ${transaction.description}`}
+                    value={transaction.categoryId ?? ''}
+                    disabled={savingIds.has(transaction.id)}
+                    onChange={(event) => changeCategory(transaction, Number(event.target.value))}
+                    className={`${categorySelectClass} ${
+                      transaction.categoryId === null ? 'text-slate-400' : 'text-slate-900'
+                    }`}
+                  >
+                    {transaction.categoryId === null && (
+                      <option value="" disabled>
+                        Uncategorized
+                      </option>
+                    )}
+                    {categories.map((category) => (
+                      <option key={category.id} value={category.id} className="text-slate-900">
+                        {category.name}
+                      </option>
+                    ))}
+                  </select>
                 </td>
                 <td className="py-2 text-right whitespace-nowrap tabular-nums">
                   {formatAmount(transaction.amount)}
