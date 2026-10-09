@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -18,6 +19,10 @@ public class TransactionEndpointsTests
 
     private readonly PostgresApiFactory _factory;
     private readonly HttpClient _client;
+
+    // The tests share one database, so the listing tests use years no other test uses and put a
+    // token of their own in each description.
+    private readonly string _token = "t" + Guid.NewGuid().ToString("N")[..8];
 
     public TransactionEndpointsTests(PostgresApiFactory factory)
     {
@@ -124,5 +129,105 @@ public class TransactionEndpointsTests
 
         Assert.Contains("description", errors.Keys);
         Assert.Contains("reference", errors.Keys);
+    }
+
+    private async Task AddManualTransaction(string date, string description)
+    {
+        var response = await _client.PostAsJsonAsync(
+            "/api/transactions",
+            ValidRequest(date: date, description: description));
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+    }
+
+    // Imports a statement of one month with a purchase of 10,00 per row. Each row is a booked date
+    // (DDMM) and a description no rule matches, so the imported Transactions are Uncategorized.
+    private async Task ImportStatement(string period, params (string BookedDate, string Description)[] rows)
+    {
+        var digits = Random.Shared.NextInt64(0, 100_000_000_000).ToString("D11");
+        var pdf = StatementPdf.Create(
+            accountNumber: $"{digits[..4]}.{digits[4..6]}.{digits[6..]}",
+            period,
+            openingBalance: "1.000,00",
+            rows: rows.Select(r => new StatementPdfRow(r.Description, r.BookedDate, "10,00", null, r.BookedDate, "21", "12345678")),
+            closingBalance: $"{1000 - 10 * rows.Length},00");
+        var file = new ByteArrayContent(pdf);
+        file.Headers.ContentType = new MediaTypeHeaderValue("application/pdf");
+        using var form = new MultipartFormDataContent { { file, "file", "kontoutskrift.pdf" } };
+
+        var response = await _client.PostAsync("/api/bank-statements", form);
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+    }
+
+    private async Task<List<TransactionResponse>> OwnTransactionsOf(int year, int month)
+    {
+        var transactions = await _client.GetFromJsonAsync<List<TransactionResponse>>(
+            $"/api/transactions?year={year}&month={month}");
+        return transactions!.Where(t => t.Description.StartsWith(_token)).ToList();
+    }
+
+    [Fact]
+    public async Task Get_Months_ListsEachMonthWithTransactionsOnceNewestFirst()
+    {
+        await AddManualTransaction("2041-03-05", $"{_token} manual");
+        await AddManualTransaction("2041-03-20", $"{_token} manual again");
+        await ImportStatement("01.05.2041 - 31.05.2041", ("0405", $"{_token} imported"));
+
+        var months = (await _client.GetFromJsonAsync<List<TransactionMonthResponse>>("/api/transactions/months"))!;
+
+        Assert.Contains(new TransactionMonthResponse(2041, 5), months);
+        Assert.Contains(new TransactionMonthResponse(2041, 3), months);
+        Assert.DoesNotContain(new TransactionMonthResponse(2041, 4), months);
+        Assert.Equal(months.Distinct(), months);
+        Assert.Equal(months.OrderByDescending(m => m.Year).ThenByDescending(m => m.Month), months);
+    }
+
+    [Fact]
+    public async Task Get_Month_ListsImportedAndManualTransactionsOfThatMonthNewestFirst()
+    {
+        await AddManualTransaction("2042-01-31", $"{_token} day before");
+        await AddManualTransaction("2042-02-01", $"{_token} first day");
+        await AddManualTransaction("2042-02-14", $"{_token} manual mid");
+        await AddManualTransaction("2042-03-01", $"{_token} day after");
+        // Imported after the manual one on the same date, so it has the higher id.
+        await ImportStatement(
+            "01.02.2042 - 28.02.2042",
+            ("1402", $"{_token} imported mid"),
+            ("2802", $"{_token} last day"));
+
+        var transactions = await OwnTransactionsOf(2042, 2);
+
+        Assert.Equal(
+            [
+                (new DateOnly(2042, 2, 28), $"{_token} last day", -10m, (int?)null),
+                (new DateOnly(2042, 2, 14), $"{_token} imported mid", -10m, null),
+                (new DateOnly(2042, 2, 14), $"{_token} manual mid", -249.90m, OtherCategoryId),
+                (new DateOnly(2042, 2, 1), $"{_token} first day", -249.90m, OtherCategoryId),
+            ],
+            transactions.Select(t => (t.Date, t.Description, t.Amount, t.CategoryId)));
+    }
+
+    [Fact]
+    public async Task Get_MonthWithoutTransactions_ReturnsEmptyList()
+    {
+        var transactions = await _client.GetFromJsonAsync<List<TransactionResponse>>(
+            "/api/transactions?year=2043&month=7");
+
+        Assert.Empty(transactions!);
+    }
+
+    [Theory]
+    [InlineData("year=2026&month=0", "month")]
+    [InlineData("year=2026&month=13", "month")]
+    [InlineData("year=2026", "month")]
+    [InlineData("year=1899&month=1", "year")]
+    [InlineData("year=3000&month=1", "year")]
+    [InlineData("month=1", "year")]
+    public async Task Get_InvalidYearOrMonth_IsRejected(string query, string field)
+    {
+        var response = await _client.GetAsync($"/api/transactions?{query}");
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var problem = await response.Content.ReadFromJsonAsync<ValidationProblemDetails>();
+        Assert.Contains(field, problem!.Errors.Keys);
     }
 }

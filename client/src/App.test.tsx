@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
@@ -18,7 +18,14 @@ let rules: { id: number; keyword: string; categoryId: number; aiGenerated: boole
 let handleAddRule: PostHandler
 let handleEditRule: (id: number, body: unknown) => Response
 let handleDeleteRule: (id: number) => Response
+let months: { year: number; month: number }[] | Response
+let handleListMonth: (year: number, month: number) => Response
 const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+  const monthUrl = /^\/api\/transactions\?year=(\d+)&month=(\d+)$/.exec(url)
+  if (monthUrl) return handleListMonth(Number(monthUrl[1]), Number(monthUrl[2]))
+  if (url === '/api/transactions/months') {
+    return months instanceof Response ? months : Response.json(months)
+  }
   const ruleUrl = /^\/api\/categorization-rules\/(\d+)$/.exec(url)
   if (ruleUrl && init?.method === 'PUT') {
     return handleEditRule(Number(ruleUrl[1]), JSON.parse(init.body as string))
@@ -52,6 +59,8 @@ beforeEach(() => {
   handleEditRule = (id, body) =>
     Response.json({ id, ...(body as object), aiGenerated: false, transactionsChanged: 0 })
   handleDeleteRule = () => Response.json({ transactionsChanged: 0 })
+  months = []
+  handleListMonth = () => Response.json([])
   vi.stubGlobal('fetch', fetchMock)
 })
 
@@ -338,14 +347,6 @@ describe('Rules page', () => {
     ])
   })
 
-  it('goes back to the transactions view', async () => {
-    const user = await openRulesPage()
-
-    await user.click(screen.getByRole('button', { name: 'Back' }))
-
-    expect(screen.getByRole('button', { name: /add transaction/i })).toBeInTheDocument()
-  })
-
   it('adds a rule and says how many transactions changed category', async () => {
     let posted: unknown
     handleAddRule = (body) => {
@@ -599,5 +600,170 @@ describe('Rules page', () => {
     expect(keywords()).toEqual(['nille AI'])
     await user.click(screen.getByRole('checkbox', { name: 'AI only' }))
     expect(keywords()).toEqual(['bakeriet', 'kiwi', 'nille AI'])
+  })
+})
+
+describe('Header', () => {
+  function navItems() {
+    return within(screen.getByRole('navigation')).getAllByRole('button')
+  }
+
+  function currentPage() {
+    return navItems()
+      .filter((item) => item.getAttribute('aria-current') === 'page')
+      .map((item) => item.textContent)
+  }
+
+  it('shows Transactions then Rules, with no Back button', () => {
+    render(<App />)
+
+    expect(navItems().map((item) => item.textContent)).toEqual(['Transactions', 'Rules'])
+    expect(screen.queryByRole('button', { name: 'Back' })).not.toBeInTheDocument()
+  })
+
+  it('highlights the page being shown', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+    expect(currentPage()).toEqual([])
+
+    await user.click(screen.getByRole('button', { name: 'Transactions' }))
+    expect(currentPage()).toEqual(['Transactions'])
+
+    await user.click(screen.getByRole('button', { name: 'Rules' }))
+    expect(currentPage()).toEqual(['Rules'])
+    expect(screen.queryByRole('button', { name: 'Back' })).not.toBeInTheDocument()
+  })
+
+  it('goes to the home page when the app name is clicked', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+    await user.click(screen.getByRole('button', { name: 'Rules' }))
+
+    await user.click(screen.getByRole('button', { name: 'PersonligFinans' }))
+
+    expect(screen.getByRole('button', { name: /add transaction/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /upload transactions/i })).toBeInTheDocument()
+    expect(currentPage()).toEqual([])
+  })
+})
+
+describe('Transactions page', () => {
+  const monthNames = [
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December',
+  ]
+
+  const septemberTransactions = [
+    { id: 5, date: '2026-09-24', description: 'Rema 1000', amount: -1249.9, reference: null, categoryId: 1 },
+    { id: 4, date: '2026-09-03', description: 'Lønn Fra: Testfirma AS', amount: 24500, reference: null, categoryId: null },
+  ]
+
+  async function openTransactionsPage() {
+    const user = userEvent.setup()
+    render(<App />)
+    await user.click(screen.getByRole('button', { name: 'Transactions' }))
+    return user
+  }
+
+  function requestedMonths() {
+    return fetchMock.mock.calls
+      .map(([url]) => url)
+      .filter((url) => url.startsWith('/api/transactions?'))
+  }
+
+  function rowCells() {
+    return screen
+      .getAllByRole('row')
+      .slice(1)
+      .map((row) => within(row).getAllByRole('cell').map((cell) => cell.textContent))
+  }
+
+  it('opens on the newest month with Transactions and lists its rows', async () => {
+    months = [
+      { year: 2026, month: 9 },
+      { year: 2026, month: 8 },
+      { year: 2025, month: 12 },
+    ]
+    handleListMonth = (year, month) =>
+      Response.json(year === 2026 && month === 9 ? septemberTransactions : [])
+
+    await openTransactionsPage()
+
+    await screen.findByRole('cell', { name: 'Rema 1000' })
+    expect(screen.getByLabelText('Year')).toHaveValue('2026')
+    expect(screen.getByLabelText('Month')).toHaveValue('9')
+    expect(requestedMonths()).toEqual(['/api/transactions?year=2026&month=9'])
+  })
+
+  it('shows the date, Description, Category or Uncategorized, and the Amount in NOK', async () => {
+    months = [{ year: 2026, month: 9 }]
+    handleListMonth = () => Response.json(septemberTransactions)
+
+    await openTransactionsPage()
+
+    await screen.findByRole('cell', { name: 'Rema 1000' })
+    expect(rowCells()).toEqual([
+      ['24.09.2026', 'Rema 1000', 'Groceries', '-1\u00a0249,90\u00a0kr'],
+      ['03.09.2026', 'Lønn Fra: Testfirma AS', 'Uncategorized', '24\u00a0500,00\u00a0kr'],
+    ])
+  })
+
+  it('offers the years with Transactions plus the current year, and all twelve months', async () => {
+    months = [
+      { year: 2024, month: 3 },
+      { year: 2022, month: 1 },
+    ]
+
+    await openTransactionsPage()
+
+    const currentYear = new Date().getFullYear()
+    const expectedYears = [...new Set([currentYear, 2024, 2022])].sort((a, b) => b - a).map(String)
+    await waitFor(() => expect(screen.getByLabelText('Year')).toHaveValue('2024'))
+    const yearOptions = within(screen.getByLabelText('Year')).getAllByRole('option')
+    expect(yearOptions.map((option) => option.textContent)).toEqual(expectedYears)
+    const monthOptions = within(screen.getByLabelText('Month')).getAllByRole('option')
+    expect(monthOptions.map((option) => option.textContent)).toEqual(monthNames)
+  })
+
+  it('opens on the current month and says it is empty when there are no Transactions', async () => {
+    await openTransactionsPage()
+
+    const today = new Date()
+    expect(
+      await screen.findByText(`No transactions in ${monthNames[today.getMonth()]} ${today.getFullYear()}`),
+    ).toBeInTheDocument()
+    expect(screen.getByLabelText('Year')).toHaveValue(String(today.getFullYear()))
+    expect(screen.getByLabelText('Month')).toHaveValue(String(today.getMonth() + 1))
+    expect(screen.queryByRole('table')).not.toBeInTheDocument()
+  })
+
+  it('reloads the list when the month or year changes', async () => {
+    months = [
+      { year: 2026, month: 9 },
+      { year: 2025, month: 9 },
+    ]
+    handleListMonth = (year, month) =>
+      Response.json(year === 2026 && month === 9 ? septemberTransactions : [])
+    const user = await openTransactionsPage()
+    await screen.findByRole('cell', { name: 'Rema 1000' })
+
+    await user.selectOptions(screen.getByLabelText('Month'), 'August')
+    expect(await screen.findByText('No transactions in August 2026')).toBeInTheDocument()
+
+    await user.selectOptions(screen.getByLabelText('Year'), '2025')
+    expect(await screen.findByText('No transactions in August 2025')).toBeInTheDocument()
+    expect(requestedMonths()).toEqual([
+      '/api/transactions?year=2026&month=9',
+      '/api/transactions?year=2026&month=8',
+      '/api/transactions?year=2025&month=8',
+    ])
+  })
+
+  it('says when the Transactions could not be loaded', async () => {
+    months = new Response(null, { status: 500 })
+
+    await openTransactionsPage()
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Could not load the transactions.')
   })
 })

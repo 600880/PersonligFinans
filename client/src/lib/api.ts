@@ -17,6 +17,34 @@ export async function fetchCategories(): Promise<Category[]> {
   return (await response.json()) as Category[]
 }
 
+// categoryId is null for an Uncategorized Transaction.
+export interface Transaction {
+  id: number
+  date: string
+  description: string
+  amount: number
+  reference: string | null
+  categoryId: number | null
+}
+
+export interface TransactionMonth {
+  year: number
+  month: number
+}
+
+// The months that have at least one Transaction, newest first.
+export async function fetchTransactionMonths(): Promise<TransactionMonth[]> {
+  const response = await fetch('/api/transactions/months')
+  if (!response.ok) throw new Error(`Loading months failed (${response.status})`)
+  return (await response.json()) as TransactionMonth[]
+}
+
+export async function fetchTransactionsOfMonth({ year, month }: TransactionMonth): Promise<Transaction[]> {
+  const response = await fetch(`/api/transactions?year=${year}&month=${month}`)
+  if (!response.ok) throw new Error(`Loading transactions failed (${response.status})`)
+  return (await response.json()) as Transaction[]
+}
+
 export async function createTransaction(
   request: CreateTransactionRequest,
 ): Promise<CreateTransactionResult> {
