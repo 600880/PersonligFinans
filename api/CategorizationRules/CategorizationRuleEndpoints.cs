@@ -15,9 +15,6 @@ public record DeletedCategorizationRuleResponse(int TransactionsChanged);
 
 public static class CategorizationRuleEndpoints
 {
-    // A one-letter keyword would match nearly every description.
-    private const int KeywordMinLength = 2;
-
     public static void MapCategorizationRuleEndpoints(this IEndpointRouteBuilder app)
     {
         var api = app.MapGroup("/api/categorization-rules");
@@ -99,8 +96,8 @@ public static class CategorizationRuleEndpoints
 
         if (keyword.Length == 0)
             Fail("keyword", "Keyword is required.");
-        else if (keyword.Length < KeywordMinLength)
-            Fail("keyword", $"Keyword must be at least {KeywordMinLength} characters.");
+        else if (keyword.Length < Categorizer.KeywordMinLength)
+            Fail("keyword", $"Keyword must be at least {Categorizer.KeywordMinLength} characters.");
         else if (keyword.Length > AppDbContext.KeywordMaxLength)
             Fail("keyword", $"Keyword must be at most {AppDbContext.KeywordMaxLength} characters.");
         else if (await FindByKeyword(db, keyword, editedRuleId) is { } existing)
