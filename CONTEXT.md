@@ -48,6 +48,10 @@ _Avoid_: Range, interval, timeframe
 The length of a Period: Year, Quarter or Month. Changing it keeps the user in the same span of time, moving to the Period that contains the current one or to the latest one with Transactions inside it.
 _Avoid_: Resolution, period type, interval
 
+**Span**:
+A run of consecutive whole months, from a start month to an end month, both included, such as February 2025 – June 2026. At least two months long. Unlike a Period, it need not line up with a calendar year or quarter.
+_Avoid_: Interval, range, Period
+
 **Dashboard**:
-The view summarizing Spending by Category over a chosen Period.
+The view summarizing Spending by Category over a chosen Period, and how Spending changed over a chosen Span.
 _Avoid_: Report, overview
