@@ -456,7 +456,10 @@ public class BankStatementEndpointsTests
         Assert.Equal(
             [new UnmatchedRow($"{_token} Kafé", AmountSign.Negative), new UnmatchedRow($"{_token} Lønn", AmountSign.Positive)],
             call.Rows);
-        Assert.Equal(SeedCategories.All.Select(c => c.Name).Order(), call.CategoryNames.Order());
+        // "Other" is a deliberate choice of the user's, never offered to the rule generator.
+        Assert.Equal(
+            SeedCategories.All.Select(c => c.Name).Where(n => n != "Other").Order(),
+            call.CategoryNames.Order());
     }
 
     [Fact]
@@ -507,6 +510,10 @@ public class BankStatementEndpointsTests
     [Fact]
     public async Task Post_ProposalWithUnknownCategory_IsDropped() =>
         await AssertDropped($"{_token} kafé", "Cafés");
+
+    [Fact]
+    public async Task Post_ProposalWithCategoryOther_IsDropped() =>
+        await AssertDropped($"{_token} kafé", "Other");
 
     [Fact]
     public async Task Post_ProposalWithKeywordShorterThanTwoCharactersAfterTrimming_IsDropped() =>

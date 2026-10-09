@@ -156,7 +156,11 @@ public static class BankStatementEndpoints
         if (unmatched.Count == 0)
             return ([], false);
 
-        var categoryNames = await db.Categories.OrderBy(c => c.Name).Select(c => c.Name).ToListAsync();
+        var categoryNames = await db.Categories
+            .Where(c => c.Name != Categorizer.OtherCategoryName)
+            .OrderBy(c => c.Name)
+            .Select(c => c.Name)
+            .ToListAsync();
         return await ruleGenerator.GenerateAsync(unmatched, categoryNames) switch
         {
             RuleGeneration.Generated generated =>

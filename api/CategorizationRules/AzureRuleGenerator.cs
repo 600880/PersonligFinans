@@ -10,8 +10,9 @@ namespace PersonligFinans.Api.CategorizationRules;
 public class AzureRuleGenerator(ChatClient chat, ILogger<AzureRuleGenerator> logger, TimeSpan? timeLimit = null)
     : IRuleGenerator
 {
-    // Long enough for a statement's worth of rows, short enough that an upload never hangs on it.
-    private static readonly TimeSpan DefaultTimeLimit = TimeSpan.FromSeconds(20);
+    // A month's statement of unmatched rows can take 10–20 s to answer, plus a slow first token
+    // locally; still short enough that an upload never hangs on it.
+    private static readonly TimeSpan DefaultTimeLimit = TimeSpan.FromSeconds(60);
 
     private const string Instructions = """
         You create categorization rules for a personal finance app's bank transactions. You get the

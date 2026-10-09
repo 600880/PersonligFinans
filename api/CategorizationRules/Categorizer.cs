@@ -13,6 +13,9 @@ public static class Categorizer
     // A one-letter keyword would match nearly every description.
     public const int KeywordMinLength = 2;
 
+    // "Other" is a deliberate choice of the user's, never a fallback, so no AI-generated rule gets it.
+    public const string OtherCategoryName = "Other";
+
     // Imported, and not categorized manually: categorized by a rule, or Uncategorized.
     private static readonly Expression<Func<Transaction, bool>> IsRuleEligible =
         t => t.BankStatementId != null && (t.CategorizationRuleId != null || t.CategoryId == null);
@@ -53,7 +56,7 @@ public static class Categorizer
     // including the added ones. Each proposal is checked against the rules as they stand at its
     // turn, including the ones added before it, and dropped unless:
     // - no rule matches its row's description;
-    // - its Category exists;
+    // - its Category exists and is not "Other";
     // - its keyword, trimmed and lowercased, is within the length limits, appears in the row's
     //   description ignoring case, and is unique ignoring case;
     // - it would change the Category of nothing that has one: no rule-eligible Transaction, and none
@@ -68,7 +71,9 @@ public static class Categorizer
     {
         await db.CategorizationRules.LoadAsync();
         var rules = db.CategorizationRules.Local.ToList();
-        var categoryIdByName = await db.Categories.ToDictionaryAsync(c => c.Name, c => c.Id);
+        var categoryIdByName = await db.Categories
+            .Where(c => c.Name != OtherCategoryName)
+            .ToDictionaryAsync(c => c.Name, c => c.Id);
         var eligibleDescriptions = await db.Transactions.Where(IsRuleEligible).Select(t => t.Description).ToListAsync();
         var descriptions = eligibleDescriptions.Concat(importedDescriptions).Distinct().ToList();
         var now = DateTimeOffset.UtcNow;
