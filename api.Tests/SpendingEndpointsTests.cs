@@ -60,6 +60,14 @@ public class SpendingEndpointsTests
     private async Task<SpendingResponse> SpendingOf(string query) =>
         (await _client.GetFromJsonAsync<SpendingResponse>($"/api/spending?{query}"))!;
 
+    // The Span runs from the month (fromYear, fromMonth) to the month (toYear, toMonth), both included.
+    // includeTransfers is left out of the request when null.
+    private async Task<List<MonthlySpendingResponse>> MonthlySpendingOf(
+        int fromYear, int fromMonth, int toYear, int toMonth, bool? includeTransfers = null) =>
+        (await _client.GetFromJsonAsync<List<MonthlySpendingResponse>>(
+            $"/api/spending/monthly?fromYear={fromYear}&fromMonth={fromMonth}&toYear={toYear}&toMonth={toMonth}"
+            + (includeTransfers is { } include ? $"&includeTransfers={include}" : "")))!;
+
     [Fact]
     public async Task Get_Spending_SumsTheNegativeAmountsOfEachCategoryAsPositiveFiguresLargestFirst()
     {
@@ -243,6 +251,128 @@ public class SpendingEndpointsTests
     public async Task Get_InvalidYearOrMonth_IsRejected(string query, string field)
     {
         var response = await _client.GetAsync($"/api/spending?{query}");
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var problem = await response.Content.ReadFromJsonAsync<ValidationProblemDetails>();
+        Assert.Contains(field, problem!.Errors.Keys);
+    }
+
+    [Fact]
+    public async Task Get_MonthlySpending_HasOneEntryPerMonthOfTheSpanInOrder_WithEmptyMonthsAsNoSlices()
+    {
+        await AddManualTransaction("2081-11-10", -100m, GroceriesCategoryId);
+        await AddManualTransaction("2082-02-10", -40m, RestaurantsCategoryId);
+
+        var monthly = await MonthlySpendingOf(2081, 11, 2082, 2);
+
+        Assert.Equal(
+            [(2081, 11), (2081, 12), (2082, 1), (2082, 2)],
+            monthly.Select(m => (m.Year, m.Month)));
+        Assert.Equal([new SpendingSliceResponse(GroceriesCategoryId, 100m)], monthly[0].Slices);
+        Assert.Empty(monthly[1].Slices);
+        Assert.Empty(monthly[2].Slices);
+        Assert.Equal([new SpendingSliceResponse(RestaurantsCategoryId, 40m)], monthly[3].Slices);
+    }
+
+    [Fact]
+    public async Task Get_MonthlySpending_IncludesTheFirstAndLastDayOfTheSpanButNotTheNeighbouringDays()
+    {
+        await AddManualTransaction("2083-02-28", -1m, GroceriesCategoryId);
+        await AddManualTransaction("2083-03-01", -10m, GroceriesCategoryId);
+        await AddManualTransaction("2083-03-31", -100m, GroceriesCategoryId);
+        await AddManualTransaction("2083-04-01", -1000m, GroceriesCategoryId);
+        await AddManualTransaction("2083-04-30", -10000m, GroceriesCategoryId);
+        await AddManualTransaction("2083-05-01", -100000m, GroceriesCategoryId);
+
+        var monthly = await MonthlySpendingOf(2083, 3, 2083, 4);
+
+        Assert.Equal([new SpendingSliceResponse(GroceriesCategoryId, 110m)], monthly[0].Slices);
+        Assert.Equal([new SpendingSliceResponse(GroceriesCategoryId, 11000m)], monthly[1].Slices);
+    }
+
+    [Fact]
+    public async Task Get_MonthlySpending_SumsTheNegativeAmountsOfEachCategoryAsPositiveFigures_NotReducedByRefunds()
+    {
+        await AddManualTransaction("2084-06-02", -100m, GroceriesCategoryId);
+        await AddManualTransaction("2084-06-15", -50.50m, GroceriesCategoryId);
+        await AddManualTransaction("2084-06-16", 40m, GroceriesCategoryId);
+        await AddManualTransaction("2084-06-10", -300m, RestaurantsCategoryId);
+        await AddManualTransaction("2084-06-25", 30000m, IncomeCategoryId);
+        await AddManualTransaction("2084-07-03", 25m, ShoppingCategoryId);
+
+        var monthly = await MonthlySpendingOf(2084, 6, 2084, 7);
+
+        Assert.Equal(
+            [
+                new SpendingSliceResponse(RestaurantsCategoryId, 300m),
+                new SpendingSliceResponse(GroceriesCategoryId, 150.50m),
+            ],
+            monthly[0].Slices);
+        Assert.Empty(monthly[1].Slices);
+    }
+
+    [Fact]
+    public async Task Get_MonthlySpending_CountsImportedAndManualTransactions_WithUncategorizedAsItsOwnSlice()
+    {
+        await ImportStatement("01.08.2085 - 30.09.2085", "0308", "1708", "0209");
+        await AddManualTransaction("2085-08-20", -5m, GroceriesCategoryId);
+
+        var monthly = await MonthlySpendingOf(2085, 8, 2085, 9);
+
+        Assert.Equal(
+            [new SpendingSliceResponse(null, 20m), new SpendingSliceResponse(GroceriesCategoryId, 5m)],
+            monthly[0].Slices);
+        Assert.Equal([new SpendingSliceResponse(null, 10m)], monthly[1].Slices);
+    }
+
+    [Fact]
+    public async Task Get_MonthlySpending_IgnoresTransactionsInTheTransfersCategoryByDefault()
+    {
+        await AddManualTransaction("2086-05-03", -5000m, TransfersCategoryId);
+        await AddManualTransaction("2086-05-04", -10m, GroceriesCategoryId);
+        await AddManualTransaction("2086-06-03", -700m, TransfersCategoryId);
+
+        var byDefault = await MonthlySpendingOf(2086, 5, 2086, 6);
+        var excludingTransfers = await MonthlySpendingOf(2086, 5, 2086, 6, includeTransfers: false);
+
+        foreach (var monthly in new[] { byDefault, excludingTransfers })
+        {
+            Assert.Equal([new SpendingSliceResponse(GroceriesCategoryId, 10m)], monthly[0].Slices);
+            Assert.Empty(monthly[1].Slices);
+        }
+    }
+
+    [Fact]
+    public async Task Get_MonthlySpendingIncludingTransfers_CountsNegativeAmountsInTheTransfersCategoryAsTheirOwnSlice()
+    {
+        await AddManualTransaction("2087-05-03", -5000m, TransfersCategoryId);
+        await AddManualTransaction("2087-05-04", 2000m, TransfersCategoryId);
+        await AddManualTransaction("2087-05-05", -10m, GroceriesCategoryId);
+        await AddManualTransaction("2087-06-03", -700m, TransfersCategoryId);
+
+        var monthly = await MonthlySpendingOf(2087, 5, 2087, 6, includeTransfers: true);
+
+        Assert.Equal(
+            [new SpendingSliceResponse(TransfersCategoryId, 5000m), new SpendingSliceResponse(GroceriesCategoryId, 10m)],
+            monthly[0].Slices);
+        Assert.Equal([new SpendingSliceResponse(TransfersCategoryId, 700m)], monthly[1].Slices);
+    }
+
+    [Theory]
+    [InlineData("fromYear=2026&fromMonth=0&toYear=2026&toMonth=6", "fromMonth")]
+    [InlineData("fromYear=2026&fromMonth=1&toYear=2026&toMonth=13", "toMonth")]
+    [InlineData("fromYear=1899&fromMonth=1&toYear=2026&toMonth=6", "fromYear")]
+    [InlineData("fromYear=2026&fromMonth=1&toYear=3000&toMonth=6", "toYear")]
+    [InlineData("fromMonth=1&toYear=2026&toMonth=6", "fromYear")]
+    [InlineData("fromYear=2026&toYear=2026&toMonth=6", "fromMonth")]
+    [InlineData("fromYear=2026&fromMonth=1&toMonth=6", "toYear")]
+    [InlineData("fromYear=2026&fromMonth=1&toYear=2026", "toMonth")]
+    [InlineData("fromYear=2026&fromMonth=6&toYear=2026&toMonth=6", "toMonth")]
+    [InlineData("fromYear=2026&fromMonth=6&toYear=2026&toMonth=5", "toMonth")]
+    [InlineData("fromYear=2026&fromMonth=1&toYear=2025&toMonth=12", "toMonth")]
+    public async Task Get_MonthlySpendingOfInvalidSpan_IsRejected(string query, string field)
+    {
+        var response = await _client.GetAsync($"/api/spending/monthly?{query}");
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         var problem = await response.Content.ReadFromJsonAsync<ValidationProblemDetails>();
