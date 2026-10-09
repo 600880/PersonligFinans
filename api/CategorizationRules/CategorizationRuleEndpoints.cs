@@ -62,6 +62,8 @@ public static class CategorizationRuleEndpoints
 
         rule.Keyword = keyword;
         rule.CategoryId = request.CategoryId!.Value;
+        // Saving an AI-generated rule, even unchanged, makes it the user's own.
+        rule.AiGenerated = false;
 
         if (await SaveRuleChange(db) is not { } transactionsChanged)
             return await KeywordAlreadyExists(db, keyword);

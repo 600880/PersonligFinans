@@ -13,7 +13,7 @@ public class CategorizationRule
     // Breaks ties between equally long matching keywords: the oldest rule wins.
     public DateTimeOffset CreatedAt { get; set; }
 
-    // Created by an LLM during import rather than by hand. Only records where the rule came from:
-    // set once at creation and kept through edits.
+    // Created by an LLM during import and not yet edited by the user, so the user can find it to
+    // review. Set at creation and cleared by the first edit; changes nothing about matching.
     public bool AiGenerated { get; set; }
 }

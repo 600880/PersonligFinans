@@ -33,7 +33,7 @@ A keyword paired with a Category: an imported Transaction whose description cont
 _Avoid_: Mapping, pattern
 
 **AI-generated rule**:
-A Categorization Rule created by an LLM during import, for an imported Transaction that no existing rule matched. It behaves exactly like any other rule; the mark only records where it came from, so the user can find and review it among the rules. It is never given the "Other" Category, and is only created when it categorizes nothing that already has a Category; the LLM sees only the cleaned description and whether the Amount is negative or positive, and may decline, leaving the Transaction Uncategorized.
+A Categorization Rule created by an LLM during import, for an imported Transaction that no existing rule matched. It behaves exactly like any other rule; the mark only lets the user find and review it among the rules, and is removed once the user edits the rule (even saving it unchanged), after which it is an ordinary rule. It is never given the "Other" Category, and is only created when it categorizes nothing that already has a Category; the LLM sees only the cleaned description and whether the Amount is negative or positive, and may decline, leaving the Transaction Uncategorized.
 _Avoid_: Suggested rule, suggestion, unconfirmed rule
 
 **Dashboard**:

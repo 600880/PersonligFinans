@@ -574,22 +574,30 @@ describe('Rules page', () => {
       { id: 4, keyword: 'nille', categoryId: 13, aiGenerated: true },
       { id: 2, keyword: 'overføring mellom egne kontoer', categoryId: 13, aiGenerated: false },
     ]
-    handleEditRule = (id, body) =>
-      Response.json({ id, ...(body as object), aiGenerated: true, transactionsChanged: 0 })
     const user = await openRulesPage()
 
     await user.click(screen.getByRole('checkbox', { name: 'AI only' }))
     expect(keywords()).toEqual(['bakeriet AI', 'nille AI'])
 
-    await user.click(within(ruleRow('bakeriet AI')).getByRole('button', { name: 'Edit' }))
-    const editing = within(screen.getByRole('button', { name: 'Save' }).closest('tr')!)
-    await user.clear(editing.getByLabelText('Keyword'))
-    await user.type(editing.getByLabelText('Keyword'), 'zbakeriet')
-    await user.click(editing.getByRole('button', { name: 'Save' }))
-    await screen.findByRole('status')
-    expect(keywords()).toEqual(['nille AI', 'zbakeriet AI'])
-
     await user.click(screen.getByRole('checkbox', { name: 'AI only' }))
-    expect(keywords()).toEqual(['kiwi', 'nille AI', 'overføring mellom egne kontoer', 'zbakeriet AI'])
+    expect(keywords()).toEqual(['bakeriet AI', 'kiwi', 'nille AI', 'overføring mellom egne kontoer'])
+  })
+
+  it('drops the AI badge once an AI-generated rule is saved, even unchanged', async () => {
+    rules = [
+      { id: 3, keyword: 'bakeriet', categoryId: 13, aiGenerated: true },
+      { id: 1, keyword: 'kiwi', categoryId: 1, aiGenerated: false },
+      { id: 4, keyword: 'nille', categoryId: 13, aiGenerated: true },
+    ]
+    const user = await openRulesPage()
+    await user.click(screen.getByRole('checkbox', { name: 'AI only' }))
+
+    await user.click(within(ruleRow('bakeriet AI')).getByRole('button', { name: 'Edit' }))
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+    await screen.findByRole('status')
+
+    expect(keywords()).toEqual(['nille AI'])
+    await user.click(screen.getByRole('checkbox', { name: 'AI only' }))
+    expect(keywords()).toEqual(['bakeriet', 'kiwi', 'nille AI'])
   })
 })
