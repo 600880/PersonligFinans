@@ -54,6 +54,7 @@ export interface ImportedBankStatement {
   periodEnd: string
   transactionCount: number
   uncategorizedCount: number
+  aiCategorizationUnavailable: boolean
 }
 
 export type UploadBankStatementResult =

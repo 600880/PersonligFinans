@@ -67,6 +67,7 @@ const importedStatement = {
   periodEnd: '2026-08-31',
   transactionCount: 38,
   uncategorizedCount: 7,
+  aiCategorizationUnavailable: false,
 }
 
 const statementPdf = new File(['%PDF-1.7'], 'kontoutskrift.pdf', { type: 'application/pdf' })
@@ -210,13 +211,28 @@ describe('App', () => {
     )
   })
 
+  it('says when AI categorization was unavailable during the import', async () => {
+    handleUpload = () =>
+      Response.json({ ...importedStatement, aiCategorizationUnavailable: true }, { status: 201 })
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.upload(screen.getByLabelText(/bank statement pdf/i), statementPdf)
+
+    const status = await screen.findByRole('status')
+    expect(status).toHaveTextContent(
+      'Imported 38 transactions from statement 01.08.2026–31.08.2026: 31 categorized, 7 Uncategorized',
+    )
+    expect(status).toHaveTextContent('AI categorization unavailable — 7 rows left Uncategorized')
+  })
+
   it('only accepts PDF files', () => {
     render(<App />)
 
     expect(screen.getByLabelText(/bank statement pdf/i)).toHaveAttribute('accept', 'application/pdf')
   })
 
-  it('disables the upload button while the upload is in progress', async () => {
+  it('shows a disabled Categorizing… button with a spinner while the upload is in progress', async () => {
     let respond: (response: Response) => void = () => {}
     handleUpload = () => new Promise((resolve) => (respond = resolve))
     const user = userEvent.setup()
@@ -224,11 +240,14 @@ describe('App', () => {
 
     await user.upload(screen.getByLabelText(/bank statement pdf/i), statementPdf)
 
-    const button = screen.getByRole('button', { name: /uploading/i })
+    const button = screen.getByRole('button', { name: 'Categorizing…' })
     expect(button).toBeDisabled()
+    expect(button).toHaveAttribute('aria-busy', 'true')
 
     respond(Response.json(importedStatement, { status: 201 }))
-    expect(await screen.findByRole('button', { name: /upload transactions/i })).toBeEnabled()
+    const idle = await screen.findByRole('button', { name: /upload transactions/i })
+    expect(idle).toBeEnabled()
+    expect(idle).not.toHaveAttribute('aria-busy', 'true')
   })
 
   it('shows why the server rejected the statement and re-enables the button', async () => {
