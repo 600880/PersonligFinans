@@ -1,4 +1,4 @@
-import type { Period } from './period'
+import { periodQuery, type Period } from './period'
 import type { CreateTransactionRequest } from './transactionForm'
 
 export interface Category {
@@ -56,17 +56,6 @@ export interface SpendingSlice {
 export interface Spending {
   total: number
   slices: SpendingSlice[]
-}
-
-function periodQuery(period: Period) {
-  switch (period.granularity) {
-    case 'year':
-      return `year=${period.year}`
-    case 'quarter':
-      return `year=${period.year}&quarter=${period.quarter}`
-    case 'month':
-      return `year=${period.year}&month=${period.month}`
-  }
 }
 
 export async function fetchSpending(period: Period): Promise<Spending> {

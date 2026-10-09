@@ -47,6 +47,18 @@ export function periodValue(period: Period) {
   }
 }
 
+// The Period as the Spending endpoint's query parameters.
+export function periodQuery(period: Period) {
+  switch (period.granularity) {
+    case 'year':
+      return `year=${period.year}`
+    case 'quarter':
+      return `year=${period.year}&quarter=${period.quarter}`
+    case 'month':
+      return `year=${period.year}&month=${period.month}`
+  }
+}
+
 // "2026", "Q3 2026" or "September 2026".
 export function periodLabel(period: Period) {
   switch (period.granularity) {

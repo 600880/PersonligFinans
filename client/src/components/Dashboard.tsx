@@ -94,7 +94,8 @@ export function Dashboard() {
   // The months with Transactions, newest first, or the current month when there are none. The
   // Periods offered are worked out from them.
   const [months, setMonths] = useState<TransactionMonth[]>([])
-  // Null until the months are loaded, which decides the month the Dashboard opens on.
+  // Null until the months are loaded, which decide the Period the Dashboard opens on: the latest
+  // month with Transactions.
   const [selected, setSelected] = useState<Period | null>(null)
   const [loaded, setLoaded] = useState<LoadedSpending | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
@@ -136,7 +137,7 @@ export function Dashboard() {
   const slices = spending ? toSliceViews(spending, categories) : []
   const periodOptions = selected ? periodsOfMonths(months, selected.granularity) : []
 
-  function choose(period: Period) {
+  function choosePeriod(period: Period) {
     setErrorMessage(null)
     setSelected(period)
   }
@@ -154,7 +155,7 @@ export function Dashboard() {
             <select
               value={selected.granularity}
               onChange={(event) =>
-                choose(switchGranularity(selected, event.target.value as Granularity, months))
+                choosePeriod(switchGranularity(selected, event.target.value as Granularity, months))
               }
               className="rounded-lg border border-slate-300 px-3 py-2 font-normal"
             >
@@ -170,7 +171,7 @@ export function Dashboard() {
             <select
               value={periodValue(selected)}
               onChange={(event) =>
-                choose(periodOptions.find((option) => periodValue(option) === event.target.value)!)
+                choosePeriod(periodOptions.find((option) => periodValue(option) === event.target.value)!)
               }
               className="rounded-lg border border-slate-300 px-3 py-2 font-normal"
             >
