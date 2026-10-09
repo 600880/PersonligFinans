@@ -34,8 +34,8 @@ public class SpendingEndpointsTests
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
     }
 
-    // Imports a statement with one purchase of 10,00 per booked date (DDMM). No rule matches the
-    // descriptions, so the imported Transactions are Uncategorized.
+    // Imports a Bank Statement with one Transaction of -10,00 per booked date (DDMM). No rule matches
+    // the descriptions, so the imported Transactions are Uncategorized.
     private async Task ImportStatement(string period, params string[] bookedDates)
     {
         var digits = Random.Shared.NextInt64(0, 100_000_000_000).ToString("D11");

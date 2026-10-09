@@ -963,6 +963,32 @@ describe('Dashboard', () => {
     expect(requestedSpending()).toEqual(['/api/spending?year=2026&month=9', '/api/spending?year=2026&month=8'])
   })
 
+  // The legend swatch of the named slice, as a CSS colour.
+  function swatchColour(name: string) {
+    const row = within(dashboard()).getByRole('row', { name: new RegExp(`^${name}`) })
+    return (row.querySelector('[aria-hidden="true"]') as HTMLElement).style.backgroundColor
+  }
+
+  it('shows Uncategorized in grey and keeps each Category in its colour across months', async () => {
+    months = [
+      { year: 2026, month: 9 },
+      { year: 2026, month: 8 },
+    ]
+    handleSpending = (_year, month) =>
+      Response.json(month === 8 ? { total: 80, slices: [{ categoryId: 1, amount: 80 }] } : septemberSpending)
+    const user = userEvent.setup()
+    render(<App />)
+    await waitFor(() => expect(legendRows()).toHaveLength(3))
+    const groceries = swatchColour('Groceries')
+
+    expect(swatchColour('Uncategorized')).toBe('rgb(148, 163, 184)')
+    expect(groceries).not.toBe(swatchColour('Other'))
+
+    await user.selectOptions(screen.getByLabelText('Period'), 'August 2026')
+    await waitFor(() => expect(legendRows()).toHaveLength(1))
+    expect(swatchColour('Groceries')).toBe(groceries)
+  })
+
   it('says when the Spending could not be loaded', async () => {
     handleSpending = () => new Response(null, { status: 500 })
 

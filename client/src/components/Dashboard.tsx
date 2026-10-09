@@ -33,9 +33,14 @@ const CATEGORY_COLOURS: Record<number, string> = {
   14: '#b8336a',
   15: '#6b8e23',
 }
-// Neutral grey, so Uncategorized reads as pending rather than as a Category.
+// Neutral grey, so Uncategorized stands apart from the Categories.
 const UNCATEGORIZED_COLOUR = '#94a3b8'
+// For a Category added after this list; never the Uncategorized grey.
+const FALLBACK_COLOUR = '#475569'
 const EMPTY_RING_COLOUR = '#e2e8f0'
+
+// Shared by the Spending ring and the empty ring.
+const RING = { innerRadius: 76, outerRadius: 116, isAnimationActive: false } as const
 
 const percent = new Intl.NumberFormat('nb-NO', {
   style: 'percent',
@@ -44,7 +49,7 @@ const percent = new Intl.NumberFormat('nb-NO', {
 })
 
 // One slice as the chart and the legend show it.
-interface Row {
+interface SliceView {
   key: string
   name: string
   amount: number
@@ -61,7 +66,7 @@ function monthValue({ year, month }: TransactionMonth) {
   return `${year}-${month}`
 }
 
-function toRows(spending: Spending, categories: Category[]): Row[] {
+function toSliceViews(spending: Spending, categories: Category[]): SliceView[] {
   return spending.slices.map(({ categoryId, amount }) => ({
     key: String(categoryId),
     name:
@@ -70,7 +75,7 @@ function toRows(spending: Spending, categories: Category[]): Row[] {
         : (categories.find((c) => c.id === categoryId)?.name ?? `Category ${categoryId}`),
     amount,
     share: amount / spending.total,
-    colour: categoryId === null ? UNCATEGORIZED_COLOUR : (CATEGORY_COLOURS[categoryId] ?? UNCATEGORIZED_COLOUR),
+    colour: categoryId === null ? UNCATEGORIZED_COLOUR : (CATEGORY_COLOURS[categoryId] ?? FALLBACK_COLOUR),
   }))
 }
 
@@ -119,7 +124,7 @@ export function Dashboard() {
 
   const spending =
     loaded && loaded.year === selected?.year && loaded.month === selected.month ? loaded.spending : null
-  const rows = spending ? toRows(spending, categories) : []
+  const slices = spending ? toSliceViews(spending, categories) : []
   const monthOptions = monthsWithTransactions.length > 0 ? monthsWithTransactions : selected ? [selected] : []
 
   function chooseMonth(value: string) {
@@ -160,42 +165,38 @@ export function Dashboard() {
       <div className="mt-6 flex flex-col items-center gap-8 sm:flex-row sm:items-start">
         <div className="relative shrink-0" style={{ width: CHART_SIZE, height: CHART_SIZE }}>
           <PieChart width={CHART_SIZE} height={CHART_SIZE}>
-            {rows.length > 0 ? (
+            {slices.length > 0 ? (
               <Pie
-                data={rows}
+                data={slices}
                 dataKey="amount"
                 nameKey="name"
-                innerRadius={76}
-                outerRadius={116}
+                {...RING}
                 stroke="#ffffff"
                 strokeWidth={2}
-                isAnimationActive={false}
               >
-                {rows.map((row) => (
-                  <Cell key={row.key} fill={row.colour} />
+                {slices.map((slice) => (
+                  <Cell key={slice.key} fill={slice.colour} />
                 ))}
               </Pie>
             ) : (
               <Pie
                 data={[{ amount: 1 }]}
                 dataKey="amount"
-                innerRadius={76}
-                outerRadius={116}
+                {...RING}
                 fill={EMPTY_RING_COLOUR}
                 stroke="none"
-                isAnimationActive={false}
               />
             )}
-            {rows.length > 0 && (
+            {slices.length > 0 && (
               <Tooltip
                 content={({ active, payload }) => {
-                  const row = active ? (payload?.[0]?.payload as Row | undefined) : undefined
-                  if (!row) return null
+                  const slice = active ? (payload?.[0]?.payload as SliceView | undefined) : undefined
+                  if (!slice) return null
                   return (
                     <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm">
-                      <p className="font-medium text-slate-900">{row.name}</p>
+                      <p className="font-medium text-slate-900">{slice.name}</p>
                       <p className="text-slate-600 tabular-nums">
-                        {formatAmount(row.amount)} · {percent.format(row.share)}
+                        {formatAmount(slice.amount)} · {percent.format(slice.share)}
                       </p>
                     </div>
                   )
@@ -211,26 +212,26 @@ export function Dashboard() {
           )}
         </div>
 
-        {rows.length > 0 && (
+        {slices.length > 0 && (
           <table className="w-full text-sm">
             <tbody className="divide-y divide-slate-200 text-slate-900">
-              {rows.map((row) => (
-                <tr key={row.key}>
+              {slices.map((slice) => (
+                <tr key={slice.key}>
                   <td className="py-2 pr-3">
                     <span className="flex items-center gap-2">
                       <span
                         aria-hidden="true"
                         className="size-3 shrink-0 rounded-sm"
-                        style={{ backgroundColor: row.colour }}
+                        style={{ backgroundColor: slice.colour }}
                       />
-                      {row.name}
+                      {slice.name}
                     </span>
                   </td>
                   <td className="py-2 pr-3 text-right whitespace-nowrap tabular-nums">
-                    {formatAmount(row.amount)}
+                    {formatAmount(slice.amount)}
                   </td>
                   <td className="py-2 text-right whitespace-nowrap text-slate-500 tabular-nums">
-                    {percent.format(row.share)}
+                    {percent.format(slice.share)}
                   </td>
                 </tr>
               ))}

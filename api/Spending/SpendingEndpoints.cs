@@ -19,17 +19,11 @@ public static class SpendingEndpoints
         app.MapGet("/api/spending", SpendingOfMonth);
     }
 
-    // A month's Spending: one slice per Category with negative Amounts, plus one for Uncategorized,
-    // largest first.
+    // A month's Spending: one slice per Category with negative Amounts, and one for Uncategorized
+    // when it has any, largest first.
     private static async Task<IResult> SpendingOfMonth(int? year, int? month, AppDbContext db)
     {
-        var errors = new Dictionary<string, string[]>();
-
-        if (year is not (>= TransactionEndpoints.MinYear and <= TransactionEndpoints.MaxYear))
-            errors["year"] = [$"Year must be between {TransactionEndpoints.MinYear} and {TransactionEndpoints.MaxYear}."];
-        if (month is not (>= 1 and <= 12))
-            errors["month"] = ["Month must be between 1 and 12."];
-
+        var errors = TransactionEndpoints.ValidateMonth(year, month);
         if (errors.Count > 0)
             return Results.ValidationProblem(errors);
 

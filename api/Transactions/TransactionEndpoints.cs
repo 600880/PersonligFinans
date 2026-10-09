@@ -30,8 +30,8 @@ public static class TransactionEndpoints
     // numeric(12,2) holds at most 10 digits before the decimal point.
     private const decimal MaxAbsoluteAmount = 9_999_999_999.99m;
 
-    internal const int MinYear = 1900;
-    internal const int MaxYear = 2999;
+    private const int MinYear = 1900;
+    private const int MaxYear = 2999;
 
     public static void MapTransactionEndpoints(this IEndpointRouteBuilder app)
     {
@@ -60,13 +60,7 @@ public static class TransactionEndpoints
     // A month's Transactions, imported and manual, newest first with the id as a stable tie-break.
     private static async Task<IResult> ListMonth(int? year, int? month, AppDbContext db)
     {
-        var errors = new Dictionary<string, string[]>();
-
-        if (year is not (>= MinYear and <= MaxYear))
-            errors["year"] = [$"Year must be between {MinYear} and {MaxYear}."];
-        if (month is not (>= 1 and <= 12))
-            errors["month"] = ["Month must be between 1 and 12."];
-
+        var errors = ValidateMonth(year, month);
         if (errors.Count > 0)
             return Results.ValidationProblem(errors);
 
@@ -78,6 +72,19 @@ public static class TransactionEndpoints
             .ThenByDescending(t => t.Id)
             .Select(t => ToResponse(t))
             .ToListAsync());
+    }
+
+    // The errors per field of a month given as a year and a month; empty when both are valid.
+    internal static Dictionary<string, string[]> ValidateMonth(int? year, int? month)
+    {
+        var errors = new Dictionary<string, string[]>();
+
+        if (year is not (>= MinYear and <= MaxYear))
+            errors["year"] = [$"Year must be between {MinYear} and {MaxYear}."];
+        if (month is not (>= 1 and <= 12))
+            errors["month"] = ["Month must be between 1 and 12."];
+
+        return errors;
     }
 
     private static async Task<IResult> CreateTransaction(CreateTransactionRequest request, AppDbContext db)
