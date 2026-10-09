@@ -14,7 +14,7 @@ type UploadHandler = (body: FormData) => Response | Promise<Response>
 
 let handlePost: PostHandler
 let handleUpload: UploadHandler
-let rules: { id: number; keyword: string; categoryId: number }[] | Response
+let rules: { id: number; keyword: string; categoryId: number; aiGenerated: boolean }[] | Response
 let handleAddRule: PostHandler
 let handleEditRule: (id: number, body: unknown) => Response
 let handleDeleteRule: (id: number) => Response
@@ -44,11 +44,13 @@ beforeEach(() => {
   handlePost = () => Response.json({ id: 1 }, { status: 201 })
   handleUpload = () => Response.json(importedStatement, { status: 201 })
   rules = [
-    { id: 1, keyword: 'kiwi', categoryId: 1 },
-    { id: 2, keyword: 'overføring mellom egne kontoer', categoryId: 13 },
+    { id: 1, keyword: 'kiwi', categoryId: 1, aiGenerated: false },
+    { id: 2, keyword: 'overføring mellom egne kontoer', categoryId: 13, aiGenerated: false },
   ]
-  handleAddRule = (body) => Response.json({ id: 3, ...(body as object), transactionsChanged: 0 }, { status: 201 })
-  handleEditRule = (id, body) => Response.json({ id, ...(body as object), transactionsChanged: 0 })
+  handleAddRule = (body) =>
+    Response.json({ id: 3, ...(body as object), aiGenerated: false, transactionsChanged: 0 }, { status: 201 })
+  handleEditRule = (id, body) =>
+    Response.json({ id, ...(body as object), aiGenerated: false, transactionsChanged: 0 })
   handleDeleteRule = () => Response.json({ transactionsChanged: 0 })
   vi.stubGlobal('fetch', fetchMock)
 })
@@ -65,6 +67,7 @@ const importedStatement = {
   periodEnd: '2026-08-31',
   transactionCount: 38,
   uncategorizedCount: 7,
+  aiCategorizationUnavailable: false,
 }
 
 const statementPdf = new File(['%PDF-1.7'], 'kontoutskrift.pdf', { type: 'application/pdf' })
@@ -208,13 +211,28 @@ describe('App', () => {
     )
   })
 
+  it('says when AI categorization was unavailable during the import', async () => {
+    handleUpload = () =>
+      Response.json({ ...importedStatement, aiCategorizationUnavailable: true }, { status: 201 })
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.upload(screen.getByLabelText(/bank statement pdf/i), statementPdf)
+
+    const status = await screen.findByRole('status')
+    expect(status).toHaveTextContent(
+      'Imported 38 transactions from statement 01.08.2026–31.08.2026: 31 categorized, 7 Uncategorized',
+    )
+    expect(status).toHaveTextContent('AI categorization unavailable — 7 rows left Uncategorized')
+  })
+
   it('only accepts PDF files', () => {
     render(<App />)
 
     expect(screen.getByLabelText(/bank statement pdf/i)).toHaveAttribute('accept', 'application/pdf')
   })
 
-  it('disables the upload button while the upload is in progress', async () => {
+  it('shows a disabled Categorizing… button with a spinner while the upload is in progress', async () => {
     let respond: (response: Response) => void = () => {}
     handleUpload = () => new Promise((resolve) => (respond = resolve))
     const user = userEvent.setup()
@@ -222,11 +240,14 @@ describe('App', () => {
 
     await user.upload(screen.getByLabelText(/bank statement pdf/i), statementPdf)
 
-    const button = screen.getByRole('button', { name: /uploading/i })
+    const button = screen.getByRole('button', { name: 'Categorizing…' })
     expect(button).toBeDisabled()
+    expect(button).toHaveAttribute('aria-busy', 'true')
 
     respond(Response.json(importedStatement, { status: 201 }))
-    expect(await screen.findByRole('button', { name: /upload transactions/i })).toBeEnabled()
+    const idle = await screen.findByRole('button', { name: /upload transactions/i })
+    expect(idle).toBeEnabled()
+    expect(idle).not.toHaveAttribute('aria-busy', 'true')
   })
 
   it('shows why the server rejected the statement and re-enables the button', async () => {
@@ -330,7 +351,7 @@ describe('Rules page', () => {
     handleAddRule = (body) => {
       posted = body
       return Response.json(
-        { id: 3, keyword: 'rema', categoryId: 1, transactionsChanged: 3 },
+        { id: 3, keyword: 'rema', categoryId: 1, aiGenerated: false, transactionsChanged: 3 },
         { status: 201 },
       )
     }
@@ -419,7 +440,13 @@ describe('Rules page', () => {
     let edited: { id: number; body: unknown } | undefined
     handleEditRule = (id, body) => {
       edited = { id, body }
-      return Response.json({ id, keyword: 'kiwi minipris', categoryId: 13, transactionsChanged: 1 })
+      return Response.json({
+        id,
+        keyword: 'kiwi minipris',
+        categoryId: 13,
+        aiGenerated: false,
+        transactionsChanged: 1,
+      })
     }
     const user = await openRulesPage()
 
@@ -521,5 +548,56 @@ describe('Rules page', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Could not reach the server.')
     expect(screen.getByRole('cell', { name: 'kiwi' })).toBeInTheDocument()
+  })
+  function keywords() {
+    return screen
+      .getAllByRole('row')
+      .slice(1)
+      .map((row) => within(row).getAllByRole('cell')[0].textContent)
+  }
+
+  it('shows an AI badge next to the keyword of AI-generated rules only', async () => {
+    rules = [
+      { id: 3, keyword: 'café løkka', categoryId: 13, aiGenerated: true },
+      { id: 1, keyword: 'kiwi', categoryId: 1, aiGenerated: false },
+    ]
+    await openRulesPage()
+
+    expect(within(ruleRow('café løkka AI')).getByText('AI')).toBeInTheDocument()
+    expect(within(ruleRow('kiwi')).queryByText('AI')).not.toBeInTheDocument()
+  })
+
+  it('shows only AI-generated rules, still sorted by keyword, while AI only is on', async () => {
+    rules = [
+      { id: 3, keyword: 'bakeriet', categoryId: 13, aiGenerated: true },
+      { id: 1, keyword: 'kiwi', categoryId: 1, aiGenerated: false },
+      { id: 4, keyword: 'nille', categoryId: 13, aiGenerated: true },
+      { id: 2, keyword: 'overføring mellom egne kontoer', categoryId: 13, aiGenerated: false },
+    ]
+    const user = await openRulesPage()
+
+    await user.click(screen.getByRole('checkbox', { name: 'AI only' }))
+    expect(keywords()).toEqual(['bakeriet AI', 'nille AI'])
+
+    await user.click(screen.getByRole('checkbox', { name: 'AI only' }))
+    expect(keywords()).toEqual(['bakeriet AI', 'kiwi', 'nille AI', 'overføring mellom egne kontoer'])
+  })
+
+  it('drops the AI badge once an AI-generated rule is saved, even unchanged', async () => {
+    rules = [
+      { id: 3, keyword: 'bakeriet', categoryId: 13, aiGenerated: true },
+      { id: 1, keyword: 'kiwi', categoryId: 1, aiGenerated: false },
+      { id: 4, keyword: 'nille', categoryId: 13, aiGenerated: true },
+    ]
+    const user = await openRulesPage()
+    await user.click(screen.getByRole('checkbox', { name: 'AI only' }))
+
+    await user.click(within(ruleRow('bakeriet AI')).getByRole('button', { name: 'Edit' }))
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+    await screen.findByRole('status')
+
+    expect(keywords()).toEqual(['nille AI'])
+    await user.click(screen.getByRole('checkbox', { name: 'AI only' }))
+    expect(keywords()).toEqual(['bakeriet', 'kiwi', 'nille AI'])
   })
 })

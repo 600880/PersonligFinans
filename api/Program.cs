@@ -6,6 +6,7 @@ using PersonligFinans.Api.Transactions;
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddDatabase(builder.Configuration);
+builder.Services.AddRuleGenerator(builder.Configuration);
 
 var app = builder.Build();
 

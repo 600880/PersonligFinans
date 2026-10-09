@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 using PersonligFinans.Api.CategorizationRules;
@@ -11,7 +12,8 @@ public record BankStatementResponse(
     DateOnly PeriodStart,
     DateOnly PeriodEnd,
     int TransactionCount,
-    int UncategorizedCount);
+    int UncategorizedCount,
+    bool AiCategorizationUnavailable);
 
 public static class BankStatementEndpoints
 {
@@ -27,7 +29,9 @@ public static class BankStatementEndpoints
 
     // The form is read by hand rather than bound to an IFormFile, so that a missing or oversized
     // file gets the same validation problem as every other rejected upload.
-    private static async Task<IResult> ImportBankStatement(HttpRequest request, AppDbContext db)
+    // The rule generator is optional: without one, unmatched rows simply stay Uncategorized.
+    private static async Task<IResult> ImportBankStatement(
+        HttpRequest request, AppDbContext db, [FromServices] IRuleGenerator? ruleGenerator, ILoggerFactory loggerFactory)
     {
         IFormFile? file;
         try
@@ -71,6 +75,14 @@ public static class BankStatementEndpoints
                 s.PeriodEnd == parsed.PeriodEnd))
             return AlreadyImported(parsed);
 
+        // Asked before the database transaction is opened, since the rule generator may be a slow
+        // network call and must not hold the lock while it runs.
+        var (proposals, aiCategorizationUnavailable) = await ProposeRules(parsed.Rows, db, ruleGenerator);
+        if (aiCategorizationUnavailable)
+            loggerFactory.CreateLogger(typeof(BankStatementEndpoints)).LogWarning(
+                "AI categorization was unavailable for a Bank Statement of {RowCount} rows; its unmatched rows stay Uncategorized.",
+                parsed.Rows.Count);
+
         var statement = new BankStatement
         {
             AccountNumber = parsed.AccountNumber,
@@ -80,11 +92,10 @@ public static class BankStatementEndpoints
             ClosingBalance = parsed.ClosingBalance,
             ImportedAt = DateTimeOffset.UtcNow,
         };
-        // A share lock lets imports run side by side but waits for any rule change, so a rule change
-        // can't miss these rows while they are being categorized against the rules it is replacing.
-        await using var transaction = await db.Database.BeginTransactionAsync();
-        await db.Database.ExecuteSqlRawAsync("LOCK TABLE categorization_rules IN SHARE MODE");
-        var rules = await db.CategorizationRules.ToListAsync();
+        // The import may add rules, so it takes the rule-change lock: imports and rule changes run one
+        // after another, and a rule change can't miss these rows while they are being categorized.
+        await using var transaction = await Categorizer.BeginRuleChangeAsync(db);
+        var rules = await Categorizer.AddAiGeneratedRulesAsync(db, proposals, parsed.Rows.Select(row => row.Description));
         statement.Transactions.AddRange(parsed.Rows.Select(row =>
         {
             var rule = Categorizer.ChooseRule(row.Description, rules);
@@ -97,8 +108,10 @@ public static class BankStatementEndpoints
                 CategorizationRule = rule,
             };
         }));
+        // New AI-generated rules may also match Uncategorized Transactions from earlier imports.
+        await Categorizer.RematchAsync(db);
 
-        // One database transaction: the statement and all its rows, or nothing.
+        // One database transaction: the statement, all its rows and the rules they brought, or nothing.
         db.BankStatements.Add(statement);
         try
         {
@@ -119,7 +132,45 @@ public static class BankStatementEndpoints
                 statement.PeriodStart,
                 statement.PeriodEnd,
                 statement.Transactions.Count,
-                statement.Transactions.Count(t => t.CategoryId is null)));
+                statement.Transactions.Count(t => t.CategoryId is null),
+                aiCategorizationUnavailable));
+    }
+
+    // The rule generator's proposals for the rows no current rule matches, in row order, each with
+    // the description it was made for. Each distinct description and sign is asked about once.
+    // Empty when there is no rule generator, every row is matched, or the generator is unavailable;
+    // only the last sets Unavailable.
+    private static async Task<(List<(string Description, RuleProposal Proposal)> Proposals, bool Unavailable)> ProposeRules(
+        IReadOnlyList<StatementRow> rows, AppDbContext db, IRuleGenerator? ruleGenerator)
+    {
+        if (ruleGenerator is null)
+            return ([], false);
+
+        // Not tracked, so the rules loaded again under the lock are the current ones.
+        var rules = await db.CategorizationRules.AsNoTracking().ToListAsync();
+        var unmatched = rows
+            .Where(row => Categorizer.ChooseRule(row.Description, rules) is null)
+            .Select(row => new UnmatchedRow(row.Description, row.Amount < 0 ? AmountSign.Negative : AmountSign.Positive))
+            .Distinct()
+            .ToList();
+        if (unmatched.Count == 0)
+            return ([], false);
+
+        var categoryNames = await db.Categories
+            .Where(c => c.Name != Categorizer.OtherCategoryName)
+            .OrderBy(c => c.Name)
+            .Select(c => c.Name)
+            .ToListAsync();
+        return await ruleGenerator.GenerateAsync(unmatched, categoryNames) switch
+        {
+            RuleGeneration.Generated generated =>
+                (unmatched
+                    .Where(generated.Proposals.ContainsKey)
+                    .Select(row => (row.Description, generated.Proposals[row]))
+                    .ToList(), false),
+            // Unavailable: the unmatched rows stay Uncategorized.
+            _ => ([], true),
+        };
     }
 
     private static IResult FileProblem(string message) =>

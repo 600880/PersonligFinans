@@ -32,6 +32,10 @@ _Avoid_: Unreviewed, pending
 A keyword paired with a Category: an imported Transaction whose description contains the keyword (ignoring case) is automatically assigned that Category, and reassigned whenever the rules change unless its Category was chosen manually; when several match, the longest keyword wins. Keywords are unique. Seeded with common merchants, visible to the user, and extended whenever a Transaction is manually corrected. Never applied to manually-entered Transactions.
 _Avoid_: Mapping, pattern
 
+**AI-generated rule**:
+A Categorization Rule created by an LLM during import, for an imported Transaction that no existing rule matched. It behaves exactly like any other rule; the mark only lets the user find and review it among the rules, and is removed once the user edits the rule (even saving it unchanged), after which it is an ordinary rule. It is never given the "Other" Category, and is only created when it categorizes nothing that already has a Category; the LLM sees only the cleaned description and whether the Amount is negative or positive, and may decline, leaving the Transaction Uncategorized.
+_Avoid_: Suggested rule, suggestion, unconfirmed rule
+
 **Dashboard**:
 The view summarizing spending aggregated by Category and month.
 _Avoid_: Report, overview

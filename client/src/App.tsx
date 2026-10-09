@@ -37,11 +37,15 @@ function App() {
 
     const result = await uploadBankStatement(file).finally(() => setIsUploading(false))
     if (result.ok) {
-      const { transactionCount, uncategorizedCount, periodStart, periodEnd } = result.statement
+      const { transactionCount, uncategorizedCount, aiCategorizationUnavailable, periodStart, periodEnd } =
+        result.statement
       setImportMessage(
         `Imported ${transactionCount} transactions from statement ` +
           `${formatNorwegianDate(periodStart)}–${formatNorwegianDate(periodEnd)}: ` +
-          `${transactionCount - uncategorizedCount} categorized, ${uncategorizedCount} Uncategorized`,
+          `${transactionCount - uncategorizedCount} categorized, ${uncategorizedCount} Uncategorized` +
+          (aiCategorizationUnavailable
+            ? `. AI categorization unavailable — ${uncategorizedCount} rows left Uncategorized`
+            : ''),
       )
     } else {
       setUploadError(result.message)
@@ -74,9 +78,16 @@ function App() {
               type="button"
               onClick={() => fileInputRef.current?.click()}
               disabled={isUploading}
-              className="rounded-lg border border-slate-300 bg-white px-5 py-2.5 text-sm font-medium text-slate-900 shadow-sm hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
+              aria-busy={isUploading}
+              className="flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-5 py-2.5 text-sm font-medium text-slate-900 shadow-sm hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {isUploading ? 'Uploading…' : 'Upload transactions'}
+              {isUploading && (
+                <span
+                  aria-hidden="true"
+                  className="size-4 animate-spin rounded-full border-2 border-slate-300 border-t-slate-900"
+                />
+              )}
+              {isUploading ? 'Categorizing…' : 'Upload transactions'}
             </button>
             <input
               ref={fileInputRef}

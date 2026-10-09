@@ -2,11 +2,13 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using PersonligFinans.Api.BankStatements;
 using PersonligFinans.Api.CategorizationRules;
 using PersonligFinans.Api.Data;
+using PersonligFinans.Api.Transactions;
 using UglyToad.PdfPig.Content;
 using UglyToad.PdfPig.Core;
 using UglyToad.PdfPig.Fonts.Standard14Fonts;
@@ -23,6 +25,7 @@ public class BankStatementEndpointsTests
     private const int GroceriesId = 1;
     private const int RestaurantsId = 2;
     private const int TransfersId = 12;
+    private const int OtherId = 13;
 
     // The tests share one database and rules match every imported Transaction, so the tests that
     // add rules put a token of their own in each keyword and description.
@@ -34,12 +37,24 @@ public class BankStatementEndpointsTests
         _client = factory.CreateClient();
     }
 
-    private async Task<HttpResponseMessage> Upload(byte[] pdf)
+    // Uploads to the API as configured by default, with no rule generator.
+    private Task<HttpResponseMessage> Upload(byte[] pdf) => Upload(pdf, _client);
+
+    // Uploads to an API that has the given rule generator.
+    private async Task<HttpResponseMessage> Upload(byte[] pdf, IRuleGenerator ruleGenerator)
+    {
+        await using var api = _factory.WithWebHostBuilder(builder =>
+            builder.ConfigureTestServices(services => services.AddSingleton(ruleGenerator)));
+        using var client = api.CreateClient();
+        return await Upload(pdf, client);
+    }
+
+    private static async Task<HttpResponseMessage> Upload(byte[] pdf, HttpClient client)
     {
         var file = new ByteArrayContent(pdf);
         file.Headers.ContentType = new MediaTypeHeaderValue("application/pdf");
         using var form = new MultipartFormDataContent { { file, "file", "kontoutskrift.pdf" } };
-        return await _client.PostAsync("/api/bank-statements", form);
+        return await client.PostAsync("/api/bank-statements", form);
     }
 
     [Fact]
@@ -355,5 +370,302 @@ public class BankStatementEndpointsTests
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         var created = await response.Content.ReadFromJsonAsync<BankStatementResponse>();
         Assert.Equal((4, 2), (created!.TransactionCount, created.UncategorizedCount));
+    }
+
+    private async Task<List<CategorizationRuleResponse>> RulesWithToken()
+    {
+        var rules = await _client.GetFromJsonAsync<List<CategorizationRuleResponse>>("/api/categorization-rules");
+        return rules!.Where(r => r.Keyword.Contains(_token)).ToList();
+    }
+
+    private static async Task<BankStatementResponse> Created(HttpResponseMessage response)
+    {
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        return (await response.Content.ReadFromJsonAsync<BankStatementResponse>())!;
+    }
+
+    [Fact]
+    public async Task Post_UnmatchedRowWithValidProposal_CreatesAiGeneratedRuleThatCategorizesTheRow()
+    {
+        var generator = new FakeRuleGenerator()
+            .Proposing($"{_token} Kafé Bryggen", $"  {_token.ToUpperInvariant()} KAFÉ ", "Restaurants");
+
+        var created = await Created(await Upload(
+            StatementWithPurchasesFrom($"{_token} Kafé Bryggen", $"{_token} Frisør"), generator));
+
+        var rule = Assert.Single(await RulesWithToken());
+        Assert.Equal(($"{_token} kafé", RestaurantsId, true), (rule.Keyword, rule.CategoryId, rule.AiGenerated));
+        Assert.Equal(
+            [($"{_token} Kafé Bryggen", (int?)RestaurantsId, (int?)rule.Id), ($"{_token} Frisør", null, null)],
+            (await StoredTransactions(created.Id)).Select(t => (t.Description, t.CategoryId, t.CategorizationRuleId)));
+        Assert.Equal((2, 1), (created.TransactionCount, created.UncategorizedCount));
+    }
+
+    [Fact]
+    public async Task Post_DeclinedRow_StaysUncategorizedAndCreatesNoRule()
+    {
+        var created = await Created(await Upload(StatementWithPurchasesFrom($"{_token} Frisør"), new FakeRuleGenerator()));
+
+        Assert.Empty(await RulesWithToken());
+        Assert.Null(Assert.Single(await StoredTransactions(created.Id)).CategoryId);
+        Assert.Equal(1, created.UncategorizedCount);
+    }
+
+    [Fact]
+    public async Task Post_Statement_SendsOnlyTheDistinctUnmatchedRowsToTheGenerator()
+    {
+        await AddRule($"{_token} butikk", GroceriesId);
+        var generator = new FakeRuleGenerator();
+
+        await Created(await Upload(
+            StatementWithPurchasesFrom($"{_token} Butikk Sentrum", $"{_token} Kafé", $"{_token} Kafé"), generator));
+
+        var call = Assert.Single(generator.Calls);
+        Assert.Equal([new UnmatchedRow($"{_token} Kafé", AmountSign.Negative)], call.Rows);
+    }
+
+    [Fact]
+    public async Task Post_StatementWhoseRowsAllMatchRules_DoesNotCallTheGenerator()
+    {
+        await AddRule($"{_token} butikk", GroceriesId);
+        var generator = new FakeRuleGenerator();
+
+        await Created(await Upload(StatementWithPurchasesFrom($"{_token} Butikk Sentrum", $"{_token} Butikk Nord"), generator));
+
+        Assert.Empty(generator.Calls);
+    }
+
+    [Fact]
+    public async Task Post_Statement_GeneratorReceivesOnlyEachRowsDescriptionAndSignAndTheCategoryNames()
+    {
+        var pdf = StatementPdf.Create(
+            UniqueAccountNumber(),
+            period: "01.08.2026 - 31.08.2026",
+            openingBalance: "1.000,00",
+            rows:
+            [
+                new($"Varer 03.08 {_token} Kafé", "0408", "10,00", null, "0408", "21", "12345678"),
+                new($"{_token} Lønn", "0508", null, "50,00", "0508", "21", "12345678"),
+            ],
+            closingBalance: "1.040,00");
+        var generator = new FakeRuleGenerator();
+
+        await Created(await Upload(pdf, generator));
+
+        var call = Assert.Single(generator.Calls);
+        Assert.Equal(
+            [new UnmatchedRow($"{_token} Kafé", AmountSign.Negative), new UnmatchedRow($"{_token} Lønn", AmountSign.Positive)],
+            call.Rows);
+        // "Other" is a deliberate choice of the user's, never offered to the rule generator.
+        Assert.Equal(
+            SeedCategories.All.Select(c => c.Name).Where(n => n != "Other").Order(),
+            call.CategoryNames.Order());
+    }
+
+    [Fact]
+    public async Task Post_AiGeneratedRule_AlsoCategorizesAnUncategorizedTransactionFromAnEarlierImport()
+    {
+        var earlier = await Created(await Upload(StatementWithPurchasesFrom($"{_token} Kafé Nord")));
+        var generator = new FakeRuleGenerator().Proposing($"{_token} Kafé Sør", $"{_token} kafé", "Restaurants");
+
+        await Created(await Upload(StatementWithPurchasesFrom($"{_token} Kafé Sør"), generator));
+
+        Assert.Equal(RestaurantsId, Assert.Single(await StoredTransactions(earlier.Id)).CategoryId);
+    }
+
+    [Fact]
+    public async Task Post_AiGeneratedRule_NeverChangesManuallyEnteredTransactions()
+    {
+        var response = await _client.PostAsJsonAsync("/api/transactions", new
+        {
+            date = "2026-08-03",
+            description = $"{_token} Kafé",
+            amount = -100m,
+            categoryId = OtherId,
+        });
+        var manual = await response.Content.ReadFromJsonAsync<TransactionResponse>();
+        var generator = new FakeRuleGenerator().Proposing($"{_token} Kafé Sør", $"{_token} kafé", "Restaurants");
+
+        await Created(await Upload(StatementWithPurchasesFrom($"{_token} Kafé Sør"), generator));
+
+        Assert.Single(await RulesWithToken());
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        Assert.Equal(OtherId, (await db.Transactions.SingleAsync(t => t.Id == manual!.Id)).CategoryId);
+    }
+
+    // Uploads a statement whose one row gets the given proposal, and checks that the proposal was
+    // dropped: the row stays Uncategorized and no AI-generated rule is created.
+    private async Task AssertDropped(string keyword, string categoryName)
+    {
+        var generator = new FakeRuleGenerator().Proposing($"{_token} Kafé", keyword, categoryName);
+
+        var created = await Created(await Upload(StatementWithPurchasesFrom($"{_token} Kafé"), generator));
+
+        Assert.Null(Assert.Single(await StoredTransactions(created.Id)).CategoryId);
+        Assert.Equal(1, created.UncategorizedCount);
+        Assert.DoesNotContain(await RulesWithToken(), r => r.AiGenerated);
+    }
+
+    [Fact]
+    public async Task Post_ProposalWithUnknownCategory_IsDropped() =>
+        await AssertDropped($"{_token} kafé", "Cafés");
+
+    [Fact]
+    public async Task Post_ProposalWithCategoryOther_IsDropped() =>
+        await AssertDropped($"{_token} kafé", "Other");
+
+    [Fact]
+    public async Task Post_ProposalWithKeywordShorterThanTwoCharactersAfterTrimming_IsDropped() =>
+        await AssertDropped(" k ", "Restaurants");
+
+    [Fact]
+    public async Task Post_ProposalWithKeywordLongerThanOneHundredCharacters_IsDropped() =>
+        await AssertDropped(_token + new string('x', 100), "Restaurants");
+
+    [Fact]
+    public async Task Post_ProposalWithKeywordThatExistsIgnoringCase_IsDropped()
+    {
+        await AddRule($"{_token} bakeri", GroceriesId);
+
+        await AssertDropped($"{_token.ToUpperInvariant()} BAKERI", "Restaurants");
+
+        var rule = Assert.Single(await RulesWithToken());
+        Assert.Equal(($"{_token} bakeri", GroceriesId), (rule.Keyword, rule.CategoryId));
+    }
+
+    [Fact]
+    public async Task Post_ProposalWithKeywordNotInItsDescription_IsDropped() =>
+        await AssertDropped($"{_token} kaffe", "Restaurants");
+
+    [Fact]
+    public async Task Post_ProposalThatWouldChangeTheCategoryOfAStoredTransaction_IsDropped()
+    {
+        await AddRule($"rema {_token}", GroceriesId);
+        var earlier = await Created(await Upload(StatementWithPurchasesFrom($"Rema {_token} Bergen Storsenter")));
+        var generator = new FakeRuleGenerator()
+            .Proposing($"{_token} Bergen Storsenter P-hus", $"{_token} bergen storsenter", "Transport");
+
+        var created = await Created(await Upload(StatementWithPurchasesFrom($"{_token} Bergen Storsenter P-hus"), generator));
+
+        Assert.DoesNotContain(await RulesWithToken(), r => r.AiGenerated);
+        Assert.Equal(GroceriesId, Assert.Single(await StoredTransactions(earlier.Id)).CategoryId);
+        Assert.Null(Assert.Single(await StoredTransactions(created.Id)).CategoryId);
+    }
+
+    [Fact]
+    public async Task Post_ProposalThatWouldChangeTheCategoryOfARowInTheSameStatement_IsDropped()
+    {
+        await AddRule($"rema {_token}", GroceriesId);
+        var generator = new FakeRuleGenerator()
+            .Proposing($"{_token} Bergen Storsenter P-hus", $"{_token} bergen storsenter", "Transport");
+
+        var created = await Created(await Upload(
+            StatementWithPurchasesFrom($"{_token} Bergen Storsenter P-hus", $"Rema {_token} Bergen Storsenter"), generator));
+
+        Assert.DoesNotContain(await RulesWithToken(), r => r.AiGenerated);
+        Assert.Equal([null, (int?)GroceriesId], (await StoredTransactions(created.Id)).Select(t => t.CategoryId));
+    }
+
+    [Fact]
+    public async Task Post_TwoConflictingProposals_TheFirstInRowOrderWins()
+    {
+        // The second keyword is longer and also in the first row's description, so it would take
+        // that row from the first rule.
+        var generator = new FakeRuleGenerator()
+            .Proposing($"Kafé {_token} Sentrum Bergen", $"kafé {_token}", "Restaurants")
+            .Proposing($"{_token} Sentrum Bergen P-hus", $"{_token} sentrum bergen", "Transport");
+
+        var created = await Created(await Upload(
+            StatementWithPurchasesFrom($"Kafé {_token} Sentrum Bergen", $"{_token} Sentrum Bergen P-hus"), generator));
+
+        var rule = Assert.Single(await RulesWithToken());
+        Assert.Equal(($"kafé {_token}", RestaurantsId, true), (rule.Keyword, rule.CategoryId, rule.AiGenerated));
+        Assert.Equal([(int?)RestaurantsId, null], (await StoredTransactions(created.Id)).Select(t => t.CategoryId));
+    }
+
+    [Fact]
+    public async Task Post_RowMatchedByAnAiGeneratedRuleCreatedEarlierInTheUpload_GetsNoRuleOfItsOwn()
+    {
+        var generator = new FakeRuleGenerator()
+            .Proposing($"{_token} Kaffebrenneriet Torget", $"{_token} kaffebrenneriet", "Restaurants")
+            .Proposing($"{_token} Kaffebrenneriet Bryggen", $"{_token} kaffebrenneriet bryggen", "Shopping");
+
+        var created = await Created(await Upload(
+            StatementWithPurchasesFrom($"{_token} Kaffebrenneriet Torget", $"{_token} Kaffebrenneriet Bryggen"), generator));
+
+        var rule = Assert.Single(await RulesWithToken());
+        Assert.Equal($"{_token} kaffebrenneriet", rule.Keyword);
+        Assert.Equal([(int?)RestaurantsId, RestaurantsId], (await StoredTransactions(created.Id)).Select(t => t.CategoryId));
+    }
+
+    [Fact]
+    public async Task Post_TwoRowsWithTheSameDescription_ProduceOneRule()
+    {
+        // One spent and one received, so the generator is asked about each of them.
+        var pdf = StatementPdf.Create(
+            UniqueAccountNumber(),
+            period: "01.08.2026 - 31.08.2026",
+            openingBalance: "1.000,00",
+            rows:
+            [
+                new($"Varer 03.08 {_token} Sport", "0408", "10,00", null, "0408", "21", "12345678"),
+                new($"Varer 05.08 {_token} Sport", "0508", null, "10,00", "0508", "21", "12345678"),
+            ],
+            closingBalance: "1.000,00");
+        var generator = new FakeRuleGenerator().Proposing($"{_token} Sport", $"{_token} sport", "Shopping");
+
+        var created = await Created(await Upload(pdf, generator));
+
+        Assert.Equal(2, Assert.Single(generator.Calls).Rows.Count);
+        Assert.Single(await RulesWithToken());
+        Assert.Equal(0, created.UncategorizedCount);
+    }
+
+    [Fact]
+    public async Task Post_GeneratorUnavailable_ImportsTheStatementWithUnmatchedRowsUncategorized()
+    {
+        await AddRule($"{_token} butikk", GroceriesId);
+
+        var created = await Created(await Upload(
+            StatementWithPurchasesFrom($"{_token} Butikk Sentrum", $"{_token} Kafé"),
+            new FakeRuleGenerator { Unavailable = true }));
+
+        Assert.Equal([(int?)GroceriesId, null], (await StoredTransactions(created.Id)).Select(t => t.CategoryId));
+        Assert.Equal((2, 1), (created.TransactionCount, created.UncategorizedCount));
+        Assert.True(created.AiCategorizationUnavailable);
+    }
+
+    [Fact]
+    public async Task Post_GeneratorDeclinesEveryRow_DoesNotReportAiCategorizationUnavailable()
+    {
+        var created = await Created(await Upload(
+            StatementWithPurchasesFrom($"{_token} Kafé", $"{_token} Frisør"), new FakeRuleGenerator()));
+
+        Assert.Equal(2, created.UncategorizedCount);
+        Assert.False(created.AiCategorizationUnavailable);
+    }
+
+    [Fact]
+    public async Task Post_StatementWhoseRowsAllMatchRules_DoesNotReportAiCategorizationUnavailable()
+    {
+        await AddRule($"{_token} butikk", GroceriesId);
+
+        var created = await Created(await Upload(
+            StatementWithPurchasesFrom($"{_token} Butikk Sentrum"), new FakeRuleGenerator { Unavailable = true }));
+
+        Assert.Equal(0, created.UncategorizedCount);
+        Assert.False(created.AiCategorizationUnavailable);
+    }
+
+    [Fact]
+    public async Task Post_NoGeneratorConfigured_LeavesUnmatchedRowsUncategorizedAndCreatesNoRules()
+    {
+        var created = await Created(await Upload(StatementWithPurchasesFrom($"{_token} Kafé")));
+
+        Assert.Null(Assert.Single(await StoredTransactions(created.Id)).CategoryId);
+        Assert.Equal(1, created.UncategorizedCount);
+        Assert.False(created.AiCategorizationUnavailable);
+        Assert.Empty(await RulesWithToken());
     }
 }
