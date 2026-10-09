@@ -88,8 +88,9 @@ function toSliceViews(spending: Spending, categories: Category[]): SliceView[] {
 }
 
 // Spending by Category for one Period. Opens on the latest month with Transactions and the Transfers
-// Category left out, and remembers nothing between visits.
-export function Dashboard() {
+// Category left out, and remembers nothing between visits. A new version reloads it in place,
+// keeping the chosen Period and Include transfers.
+export function Dashboard({ version }: { version: number }) {
   const headingId = useId()
   const [categories, setCategories] = useState<Category[]>([])
   // The months with Transactions, newest first, or the current month when there are none. The
@@ -110,7 +111,13 @@ export function Dashboard() {
         setCategories(loadedCategories)
         const available = loadedMonths.length > 0 ? loadedMonths : [currentMonth()]
         setMonths(available)
-        setSelected(periodOfMonth(available[0], 'month'))
+        // A fresh copy of a kept Period, so its Spending is fetched again. The current month stands
+        // in when there are no Transactions, so it may no longer be offered.
+        setSelected((kept) =>
+          kept && periodsOfMonths(available, kept.granularity).some((p) => periodValue(p) === periodValue(kept))
+            ? { ...kept }
+            : periodOfMonth(available[0], 'month'),
+        )
       })
       .catch(() => {
         if (!ignore) setErrorMessage(LOAD_ERROR)
@@ -118,7 +125,7 @@ export function Dashboard() {
     return () => {
       ignore = true
     }
-  }, [])
+  }, [version])
 
   useEffect(() => {
     if (!selected) return
