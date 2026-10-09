@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using PersonligFinans.Api.CategorizationRules;
 using PersonligFinans.Api.Data;
 using Testcontainers.PostgreSql;
 
@@ -16,6 +17,8 @@ public class PostgresApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
         builder.UseSetting(
             $"ConnectionStrings:{DatabaseSetup.ConnectionStringName}",
             _postgres.GetConnectionString());
+        // Never Azure, even when the developer has configured the rule generator in user secrets.
+        builder.UseSetting($"{RuleGeneratorSetup.SectionName}:Endpoint", "");
     }
 
     public Task InitializeAsync() => _postgres.StartAsync();
