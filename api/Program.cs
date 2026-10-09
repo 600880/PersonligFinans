@@ -1,6 +1,7 @@
 using PersonligFinans.Api.BankStatements;
 using PersonligFinans.Api.CategorizationRules;
 using PersonligFinans.Api.Data;
+using PersonligFinans.Api.Spending;
 using PersonligFinans.Api.Transactions;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -23,6 +24,7 @@ app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 app.MapTransactionEndpoints();
 app.MapBankStatementEndpoints();
 app.MapCategorizationRuleEndpoints();
+app.MapSpendingEndpoints();
 app.MapFallback("/api/{**path}", () => Results.NotFound());
 app.MapFallbackToFile("index.html");
 

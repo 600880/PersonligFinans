@@ -30,8 +30,8 @@ public static class TransactionEndpoints
     // numeric(12,2) holds at most 10 digits before the decimal point.
     private const decimal MaxAbsoluteAmount = 9_999_999_999.99m;
 
-    private const int MinYear = 1900;
-    private const int MaxYear = 2999;
+    internal const int MinYear = 1900;
+    internal const int MaxYear = 2999;
 
     public static void MapTransactionEndpoints(this IEndpointRouteBuilder app)
     {

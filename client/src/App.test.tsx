@@ -21,7 +21,10 @@ let handleDeleteRule: (id: number) => Response
 let months: { year: number; month: number }[] | Response
 let handleListMonth: (year: number, month: number) => Response
 let handleChangeCategory: (id: number, body: unknown) => Response | Promise<Response>
+let handleSpending: (year: number, month: number) => Response
 const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+  const spendingUrl = /^\/api\/spending\?year=(\d+)&month=(\d+)$/.exec(url)
+  if (spendingUrl) return handleSpending(Number(spendingUrl[1]), Number(spendingUrl[2]))
   const monthUrl = /^\/api\/transactions\?year=(\d+)&month=(\d+)$/.exec(url)
   if (monthUrl) return handleListMonth(Number(monthUrl[1]), Number(monthUrl[2]))
   const categoryUrl = /^\/api\/transactions\/(\d+)\/category$/.exec(url)
@@ -67,6 +70,7 @@ beforeEach(() => {
   months = []
   handleListMonth = () => Response.json([])
   handleChangeCategory = () => new Response(null, { status: 500 })
+  handleSpending = () => Response.json({ total: 0, slices: [] })
   vi.stubGlobal('fetch', fetchMock)
 })
 
@@ -123,7 +127,9 @@ describe('App', () => {
   it('offers the categories loaded from the API', async () => {
     await openModal()
 
-    const options = screen.getAllByRole('option').map((option) => option.textContent)
+    const options = within(screen.getByRole('dialog'))
+      .getAllByRole('option')
+      .map((option) => option.textContent)
     expect(options).toEqual(['Choose…', 'Groceries', 'Other'])
   })
 
@@ -852,5 +858,167 @@ describe('Transactions page', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Could not reach the server.')
     expect(categorySelect('Lønn Fra: Testfirma AS').selectedOptions[0]).toHaveTextContent('Uncategorized')
+  })
+})
+
+describe('Dashboard', () => {
+  const monthNames = [
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December',
+  ]
+
+  const septemberSpending = {
+    total: 1570.5,
+    slices: [
+      { categoryId: 13, amount: 1000 },
+      { categoryId: null, amount: 450.5 },
+      { categoryId: 1, amount: 120 },
+    ],
+  }
+
+  function dashboard() {
+    return screen.getByRole('region', { name: 'Spending' })
+  }
+
+  function centreTotal() {
+    return within(dashboard()).getByText('Total').parentElement?.textContent
+  }
+
+  // Each legend row as shown: Category, amount and percentage.
+  function legendRows() {
+    return within(dashboard())
+      .queryAllByRole('row')
+      .map((row) => within(row).getAllByRole('cell').map((cell) => cell.textContent))
+  }
+
+  function monthOptions() {
+    return within(screen.getByLabelText('Period'))
+      .getAllByRole('option')
+      .map((option) => option.textContent)
+  }
+
+  function requestedSpending() {
+    return fetchMock.mock.calls.map(([url]) => url).filter((url) => url.startsWith('/api/spending?'))
+  }
+
+  it("opens on the latest month with Transactions and shows its Spending by Category, largest first", async () => {
+    months = [
+      { year: 2026, month: 9 },
+      { year: 2026, month: 8 },
+      { year: 2025, month: 12 },
+    ]
+    handleSpending = (year, month) =>
+      Response.json(year === 2026 && month === 9 ? septemberSpending : { total: 0, slices: [] })
+
+    render(<App />)
+
+    await waitFor(() => expect(legendRows()).toHaveLength(3))
+    expect(legendRows()).toEqual([
+      ['Other', '1 000,00 kr', '63,7 %'],
+      ['Uncategorized', '450,50 kr', '28,7 %'],
+      ['Groceries', '120,00 kr', '7,6 %'],
+    ])
+    expect(centreTotal()).toBe('Total 1 570,50 kr')
+    expect(screen.getByLabelText('Period')).toHaveValue('2026-9')
+    expect(monthOptions()).toEqual(['September 2026', 'August 2026', 'December 2025'])
+    expect(requestedSpending()).toEqual(['/api/spending?year=2026&month=9'])
+  })
+
+  it('sits below the upload and Add transaction buttons', async () => {
+    render(<App />)
+
+    const addTransaction = screen.getByRole('button', { name: /add transaction/i })
+    expect(addTransaction.compareDocumentPosition(dashboard())).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+    await waitFor(() => expect(centreTotal()).toBe('Total 0,00 kr'))
+  })
+
+  it('opens on the current month with an empty chart and a total of 0 when there are no Transactions', async () => {
+    render(<App />)
+
+    await waitFor(() => expect(centreTotal()).toBe('Total 0,00 kr'))
+    const today = new Date()
+    expect(monthOptions()).toEqual([`${monthNames[today.getMonth()]} ${today.getFullYear()}`])
+    expect(requestedSpending()).toEqual([
+      `/api/spending?year=${today.getFullYear()}&month=${today.getMonth() + 1}`,
+    ])
+    expect(legendRows()).toEqual([])
+    expect(within(dashboard()).queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it("shows the chosen month's Spending", async () => {
+    months = [
+      { year: 2026, month: 9 },
+      { year: 2026, month: 8 },
+    ]
+    handleSpending = (_year, month) =>
+      Response.json(month === 8 ? { total: 80, slices: [{ categoryId: 1, amount: 80 }] } : septemberSpending)
+    const user = userEvent.setup()
+    render(<App />)
+    await waitFor(() => expect(legendRows()).toHaveLength(3))
+
+    await user.selectOptions(screen.getByLabelText('Period'), 'August 2026')
+
+    await waitFor(() => expect(legendRows()).toEqual([['Groceries', '80,00 kr', '100,0 %']]))
+    expect(centreTotal()).toBe('Total 80,00 kr')
+    expect(requestedSpending()).toEqual(['/api/spending?year=2026&month=9', '/api/spending?year=2026&month=8'])
+  })
+
+  it('says when the Spending could not be loaded', async () => {
+    handleSpending = () => new Response(null, { status: 500 })
+
+    render(<App />)
+
+    expect(await within(dashboard()).findByRole('alert')).toHaveTextContent('Could not load the Spending.')
+  })
+
+  it('says when the months could not be loaded', async () => {
+    months = new Response(null, { status: 500 })
+
+    render(<App />)
+
+    expect(await within(dashboard()).findByRole('alert')).toHaveTextContent('Could not load the Spending.')
+  })
+
+  it('reloads after a Bank Statement is uploaded', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+    await waitFor(() => expect(centreTotal()).toBe('Total 0,00 kr'))
+    months = [{ year: 2026, month: 9 }]
+    handleSpending = () => Response.json(septemberSpending)
+
+    await user.upload(screen.getByLabelText(/bank statement pdf/i), statementPdf)
+
+    await waitFor(() => expect(centreTotal()).toBe('Total 1 570,50 kr'))
+    expect(screen.getByLabelText('Period')).toHaveValue('2026-9')
+  })
+
+  it('reloads after a Transaction is added', async () => {
+    const user = await openModal()
+    await waitFor(() => expect(centreTotal()).toBe('Total 0,00 kr'))
+    await fillValidForm(user)
+    months = [{ year: 2026, month: 9 }]
+    handleSpending = () => Response.json(septemberSpending)
+
+    await user.click(screen.getByRole('button', { name: /^save$/i }))
+
+    await waitFor(() => expect(centreTotal()).toBe('Total 1 570,50 kr'))
+  })
+
+  it('loads afresh, on the latest month, when coming back to the home view', async () => {
+    months = [
+      { year: 2026, month: 9 },
+      { year: 2026, month: 8 },
+    ]
+    const user = userEvent.setup()
+    render(<App />)
+    await waitFor(() => expect(centreTotal()).toBe('Total 0,00 kr'))
+    await user.selectOptions(screen.getByLabelText('Period'), 'August 2026')
+    await user.click(screen.getByRole('button', { name: 'Transactions' }))
+    handleSpending = () => Response.json(septemberSpending)
+
+    await user.click(screen.getByRole('button', { name: 'PersonligFinans' }))
+
+    await waitFor(() => expect(centreTotal()).toBe('Total 1 570,50 kr'))
+    expect(screen.getByLabelText('Period')).toHaveValue('2026-9')
   })
 })

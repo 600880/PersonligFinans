@@ -45,6 +45,24 @@ export async function fetchTransactionsOfMonth({ year, month }: TransactionMonth
   return (await response.json()) as Transaction[]
 }
 
+// categoryId is null for the Uncategorized slice. Amounts are positive.
+export interface SpendingSlice {
+  categoryId: number | null
+  amount: number
+}
+
+// A Period's Spending: the total and one slice per group with Spending, largest first.
+export interface Spending {
+  total: number
+  slices: SpendingSlice[]
+}
+
+export async function fetchSpendingOfMonth({ year, month }: TransactionMonth): Promise<Spending> {
+  const response = await fetch(`/api/spending?year=${year}&month=${month}`)
+  if (!response.ok) throw new Error(`Loading spending failed (${response.status})`)
+  return (await response.json()) as Spending
+}
+
 export type ChangeCategoryResult = { ok: true; transaction: Transaction } | { ok: false; message: string }
 
 // Categorizes the Transaction manually: for an imported one, rules never change it again.
