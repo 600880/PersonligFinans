@@ -67,9 +67,10 @@ interface SliceView {
   colour: string
 }
 
-// A Period's Spending, remembered with the Period it was loaded for.
+// A Period's Spending, remembered with the Period and Include transfers setting it was loaded for.
 interface LoadedSpending {
   period: Period
+  includeTransfers: boolean
   spending: Spending
 }
 
@@ -86,8 +87,8 @@ function toSliceViews(spending: Spending, categories: Category[]): SliceView[] {
   }))
 }
 
-// Spending by Category for one Period. Opens on the latest month with Transactions, and remembers
-// nothing between visits.
+// Spending by Category for one Period. Opens on the latest month with Transactions and the Transfers
+// Category left out, and remembers nothing between visits.
 export function Dashboard() {
   const headingId = useId()
   const [categories, setCategories] = useState<Category[]>([])
@@ -97,6 +98,7 @@ export function Dashboard() {
   // Null until the months are loaded, which decide the Period the Dashboard opens on: the latest
   // month with Transactions.
   const [selected, setSelected] = useState<Period | null>(null)
+  const [includeTransfers, setIncludeTransfers] = useState(false)
   const [loaded, setLoaded] = useState<LoadedSpending | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
@@ -121,9 +123,9 @@ export function Dashboard() {
   useEffect(() => {
     if (!selected) return
     let ignore = false
-    fetchSpending(selected)
+    fetchSpending(selected, includeTransfers)
       .then((spending) => {
-        if (!ignore) setLoaded({ period: selected, spending })
+        if (!ignore) setLoaded({ period: selected, includeTransfers, spending })
       })
       .catch(() => {
         if (!ignore) setErrorMessage(LOAD_ERROR)
@@ -131,15 +133,23 @@ export function Dashboard() {
     return () => {
       ignore = true
     }
-  }, [selected])
+  }, [selected, includeTransfers])
 
-  const spending = loaded && selected && loaded.period === selected ? loaded.spending : null
+  const spending =
+    loaded && selected && loaded.period === selected && loaded.includeTransfers === includeTransfers
+      ? loaded.spending
+      : null
   const slices = spending ? toSliceViews(spending, categories) : []
   const periodOptions = selected ? periodsOfMonths(months, selected.granularity) : []
 
   function choosePeriod(period: Period) {
     setErrorMessage(null)
     setSelected(period)
+  }
+
+  function chooseIncludeTransfers(include: boolean) {
+    setErrorMessage(null)
+    setIncludeTransfers(include)
   }
 
   return (
@@ -184,6 +194,16 @@ export function Dashboard() {
           </label>
         </div>
       )}
+
+      <label className="mt-3 flex w-fit items-center gap-2 text-sm font-medium text-slate-700">
+        <input
+          type="checkbox"
+          checked={includeTransfers}
+          onChange={(event) => chooseIncludeTransfers(event.target.checked)}
+          className="size-4 rounded border-slate-300"
+        />
+        Include transfers
+      </label>
 
       {errorMessage && (
         <p role="alert" className="mt-3 text-sm text-red-700">

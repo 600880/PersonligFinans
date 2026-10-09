@@ -21,13 +21,20 @@ let handleDeleteRule: (id: number) => Response
 let months: { year: number; month: number }[] | Response
 let handleListMonth: (year: number, month: number) => Response
 let handleChangeCategory: (id: number, body: unknown) => Response | Promise<Response>
+// What the categories endpoint returns: `categories` unless a test adds to it.
+let categoriesServed: { id: number; name: string }[]
 // The month or quarter is undefined when the Spending of a whole year, or of a quarter, is asked for.
-let handleSpending: (year: number, month?: number, quarter?: number) => Response
+let handleSpending: (year: number, month: number | undefined, quarter: number | undefined, includeTransfers: boolean) => Response
 const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
-  const spendingUrl = /^\/api\/spending\?year=(\d+)(?:&quarter=(\d+))?(?:&month=(\d+))?/.exec(url)
+  const spendingUrl = /^\/api\/spending\?year=(\d+)(?:&quarter=(\d+))?(?:&month=(\d+))?(&includeTransfers=true)?$/.exec(url)
   if (spendingUrl) {
-    const [, year, quarter, month] = spendingUrl
-    return handleSpending(Number(year), month ? Number(month) : undefined, quarter ? Number(quarter) : undefined)
+    const [, year, quarter, month, transfers] = spendingUrl
+    return handleSpending(
+      Number(year),
+      month ? Number(month) : undefined,
+      quarter ? Number(quarter) : undefined,
+      transfers !== undefined,
+    )
   }
   const monthUrl = /^\/api\/transactions\?year=(\d+)&month=(\d+)$/.exec(url)
   if (monthUrl) return handleListMonth(Number(monthUrl[1]), Number(monthUrl[2]))
@@ -43,7 +50,7 @@ const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
     return handleEditRule(Number(ruleUrl[1]), JSON.parse(init.body as string))
   }
   if (ruleUrl && init?.method === 'DELETE') return handleDeleteRule(Number(ruleUrl[1]))
-  if (url === '/api/categories') return Response.json(categories)
+  if (url === '/api/categories') return Response.json(categoriesServed)
   if (url === '/api/transactions' && init?.method === 'POST') {
     return handlePost(JSON.parse(init.body as string))
   }
@@ -75,6 +82,7 @@ beforeEach(() => {
   handleListMonth = () => Response.json([])
   handleChangeCategory = () => new Response(null, { status: 500 })
   handleSpending = () => Response.json({ total: 0, slices: [] })
+  categoriesServed = categories
   vi.stubGlobal('fetch', fetchMock)
 })
 
@@ -993,6 +1001,66 @@ describe('Dashboard', () => {
     expect(swatchColour('Groceries')).toBe(groceries)
   })
 
+  it('adds a Transfers slice, counted in the total and percentages, while Include transfers is on', async () => {
+    categoriesServed = [...categories, { id: 12, name: 'Transfers' }]
+    months = [{ year: 2026, month: 9 }]
+    handleSpending = (_year, _month, _quarter, includeTransfers) =>
+      Response.json(
+        includeTransfers
+          ? {
+              total: 2000,
+              slices: [
+                { categoryId: 12, amount: 1500 },
+                { categoryId: 1, amount: 500 },
+              ],
+            }
+          : { total: 500, slices: [{ categoryId: 1, amount: 500 }] },
+      )
+    const user = userEvent.setup()
+    render(<App />)
+    await waitFor(() => expect(legendRows()).toEqual([['Groceries', '500,00 kr', '100,0 %']]))
+    const toggle = within(dashboard()).getByRole('checkbox', { name: 'Include transfers' })
+    expect(toggle).not.toBeChecked()
+
+    await user.click(toggle)
+
+    await waitFor(() =>
+      expect(legendRows()).toEqual([
+        ['Transfers', '1 500,00 kr', '75,0 %'],
+        ['Groceries', '500,00 kr', '25,0 %'],
+      ]),
+    )
+    expect(centreTotal()).toBe('Total 2 000,00 kr')
+
+    await user.click(toggle)
+
+    await waitFor(() => expect(legendRows()).toEqual([['Groceries', '500,00 kr', '100,0 %']]))
+    expect(centreTotal()).toBe('Total 500,00 kr')
+    expect(requestedSpending()).toEqual([
+      '/api/spending?year=2026&month=9',
+      '/api/spending?year=2026&month=9&includeTransfers=true',
+      '/api/spending?year=2026&month=9',
+    ])
+  })
+
+  it('shows an empty chart with a total of 0 and no hint when the Period has only Transfers', async () => {
+    categoriesServed = [...categories, { id: 12, name: 'Transfers' }]
+    months = [{ year: 2026, month: 9 }]
+    handleSpending = (_year, _month, _quarter, includeTransfers) =>
+      Response.json(
+        includeTransfers
+          ? { total: 1500, slices: [{ categoryId: 12, amount: 1500 }] }
+          : { total: 0, slices: [] },
+      )
+
+    render(<App />)
+
+    await waitFor(() => expect(centreTotal()).toBe('Total 0,00 kr'))
+    expect(legendRows()).toEqual([])
+    expect(within(dashboard()).queryByRole('alert')).not.toBeInTheDocument()
+    expect(within(dashboard()).queryByText(/transfer/i, { ignore: 'label, option' })).toBeNull()
+  })
+
   it('says when the Spending could not be loaded', async () => {
     handleSpending = () => new Response(null, { status: 500 })
 
@@ -1168,6 +1236,24 @@ describe('Dashboard', () => {
           '/api/spending?year=2025&month=2',
           '/api/spending?year=2025',
           '/api/spending?year=2025&month=12',
+        ]),
+      )
+    })
+
+    it('keeps Include transfers on when the Period or granularity changes', async () => {
+      const user = await openDashboard()
+      await user.click(within(dashboard()).getByRole('checkbox', { name: 'Include transfers' }))
+
+      await choosePeriod(user, 'April 2026')
+      await chooseGranularity(user, 'Quarter')
+
+      expect(within(dashboard()).getByRole('checkbox', { name: 'Include transfers' })).toBeChecked()
+      await waitFor(() =>
+        expect(requestedSpending()).toEqual([
+          '/api/spending?year=2026&month=9',
+          '/api/spending?year=2026&month=9&includeTransfers=true',
+          '/api/spending?year=2026&month=4&includeTransfers=true',
+          '/api/spending?year=2026&quarter=2&includeTransfers=true',
         ]),
       )
     })
