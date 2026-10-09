@@ -13,6 +13,8 @@ namespace PersonligFinans.Api.Tests;
 public class TransactionEndpointsTests
 {
     private const int OtherCategoryId = 13;
+    private const int ClothingCategoryId = 14;
+    private const int ElectronicsCategoryId = 15;
 
     private readonly PostgresApiFactory _factory;
     private readonly HttpClient _client;
@@ -44,9 +46,11 @@ public class TransactionEndpointsTests
     {
         var categories = await _client.GetFromJsonAsync<List<CategoryResponse>>("/api/categories");
 
-        Assert.Equal(13, categories!.Count);
+        Assert.Equal(15, categories!.Count);
         Assert.Contains(categories, c => c.Name == "Groceries");
         Assert.Contains(categories, c => c is { Id: OtherCategoryId, Name: "Other" });
+        Assert.Contains(categories, c => c is { Id: ClothingCategoryId, Name: "Clothing" });
+        Assert.Contains(categories, c => c is { Id: ElectronicsCategoryId, Name: "Electronics" });
     }
 
     [Fact]

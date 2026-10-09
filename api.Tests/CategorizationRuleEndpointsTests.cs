@@ -14,9 +14,12 @@ public class CategorizationRuleEndpointsTests
 {
     private const int GroceriesId = 1;
     private const int RestaurantsId = 2;
+    private const int ShoppingId = 8;
     private const int TravelId = 10;
     private const int TransfersId = 12;
     private const int OtherId = 13;
+    private const int ClothingId = 14;
+    private const int ElectronicsId = 15;
 
     private readonly PostgresApiFactory _factory;
     private readonly HttpClient _client;
@@ -71,6 +74,22 @@ public class CategorizationRuleEndpointsTests
         Assert.Equal(GroceriesId, categoryByKeyword["rema"]);
         Assert.Equal(TransfersId, categoryByKeyword["overføring mellom egne kontoer"]);
         Assert.Equal(TravelId, categoryByKeyword["widerøe"]);
+    }
+
+    [Fact]
+    public async Task Get_FreshDatabase_ListsTheSeededClothingAndElectronicsRules()
+    {
+        var rules = await _client.GetFromJsonAsync<List<CategorizationRuleResponse>>("/api/categorization-rules");
+
+        var categoryByKeyword = rules!.ToDictionary(r => r.Keyword, r => r.CategoryId);
+        Assert.All(
+            ["zalando", "cubus", "dressmann", "lindex", "bik bok", "carlings", "kappahl", "h&m"],
+            keyword => Assert.Equal(ClothingId, categoryByKeyword[keyword]));
+        Assert.All(
+            ["elkjøp", "komplett", "proshop", "netonnet"],
+            keyword => Assert.Equal(ElectronicsId, categoryByKeyword[keyword]));
+        Assert.Equal(ShoppingId, categoryByKeyword["xxl"]);
+        Assert.False(rules!.Single(r => r.Keyword == "cubus").AiGenerated);
     }
 
     // Stores Transactions as if imported from a Bank Statement, all Uncategorized.
