@@ -53,8 +53,8 @@ public class SpendingEndpointsTests
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
     }
 
-    private async Task<SpendingResponse> SpendingOf(int year, int month) =>
-        (await _client.GetFromJsonAsync<SpendingResponse>($"/api/spending?year={year}&month={month}"))!;
+    private async Task<SpendingResponse> SpendingOf(int year, int month, string extraQuery = "") =>
+        (await _client.GetFromJsonAsync<SpendingResponse>($"/api/spending?year={year}&month={month}{extraQuery}"))!;
 
     [Fact]
     public async Task Get_Spending_SumsTheNegativeAmountsOfEachCategoryAsPositiveFiguresLargestFirst()
@@ -77,12 +77,39 @@ public class SpendingEndpointsTests
     }
 
     [Fact]
-    public async Task Get_Spending_IgnoresTransactionsInTheTransfersCategory()
+    public async Task Get_Spending_IgnoresTransactionsInTheTransfersCategoryByDefault()
     {
         await AddManualTransaction("2052-05-03", -5000m, TransfersCategoryId);
         await AddManualTransaction("2052-05-04", -10m, GroceriesCategoryId);
 
         var spending = await SpendingOf(2052, 5);
+
+        Assert.Equal([new SpendingSliceResponse(GroceriesCategoryId, 10m)], spending.Slices);
+        Assert.Equal(10m, spending.Total);
+    }
+
+    [Fact]
+    public async Task Get_SpendingIncludingTransfers_CountsNegativeTransfersAsTheirOwnSlice()
+    {
+        await AddManualTransaction("2061-05-03", -5000m, TransfersCategoryId);
+        await AddManualTransaction("2061-05-04", 2000m, TransfersCategoryId);
+        await AddManualTransaction("2061-05-05", -10m, GroceriesCategoryId);
+
+        var spending = await SpendingOf(2061, 5, "&includeTransfers=true");
+
+        Assert.Equal(
+            [new SpendingSliceResponse(TransfersCategoryId, 5000m), new SpendingSliceResponse(GroceriesCategoryId, 10m)],
+            spending.Slices);
+        Assert.Equal(5010m, spending.Total);
+    }
+
+    [Fact]
+    public async Task Get_SpendingExcludingTransfers_IgnoresTransactionsInTheTransfersCategory()
+    {
+        await AddManualTransaction("2062-05-03", -5000m, TransfersCategoryId);
+        await AddManualTransaction("2062-05-04", -10m, GroceriesCategoryId);
+
+        var spending = await SpendingOf(2062, 5, "&includeTransfers=false");
 
         Assert.Equal([new SpendingSliceResponse(GroceriesCategoryId, 10m)], spending.Slices);
         Assert.Equal(10m, spending.Total);

@@ -11,7 +11,7 @@ public record SpendingResponse(decimal Total, IReadOnlyList<SpendingSliceRespons
 
 public static class SpendingEndpoints
 {
-    // Moving money between the user's own accounts is not Spending.
+    // Moving money between the user's own accounts is not Spending, unless the user asks to include it.
     private const string TransfersCategoryName = "Transfers";
 
     public static void MapSpendingEndpoints(this IEndpointRouteBuilder app)
@@ -20,8 +20,9 @@ public static class SpendingEndpoints
     }
 
     // A month's Spending: one slice per Category with negative Amounts, and one for Uncategorized
-    // when it has any, largest first.
-    private static async Task<IResult> SpendingOfMonth(int? year, int? month, AppDbContext db)
+    // when it has any, largest first. Transfers are left out unless includeTransfers is set.
+    private static async Task<IResult> SpendingOfMonth(
+        int? year, int? month, AppDbContext db, bool includeTransfers = false)
     {
         var errors = TransactionEndpoints.ValidateMonth(year, month);
         if (errors.Count > 0)
@@ -31,7 +32,7 @@ public static class SpendingEndpoints
         var next = first.AddMonths(1);
         var slices = await db.Transactions
             .Where(t => t.PostedDate >= first && t.PostedDate < next && t.Amount < 0)
-            .Where(t => t.Category == null || t.Category.Name != TransfersCategoryName)
+            .Where(t => includeTransfers || t.Category == null || t.Category.Name != TransfersCategoryName)
             .GroupBy(t => t.CategoryId)
             .Select(g => new { CategoryId = g.Key, Amount = -g.Sum(t => t.Amount) })
             .OrderByDescending(s => s.Amount)

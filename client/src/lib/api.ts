@@ -57,8 +57,13 @@ export interface Spending {
   slices: SpendingSlice[]
 }
 
-export async function fetchSpendingOfMonth({ year, month }: TransactionMonth): Promise<Spending> {
-  const response = await fetch(`/api/spending?year=${year}&month=${month}`)
+// Transactions in the Transfers Category count only when includeTransfers is set.
+export async function fetchSpendingOfMonth(
+  { year, month }: TransactionMonth,
+  includeTransfers: boolean,
+): Promise<Spending> {
+  const transfers = includeTransfers ? '&includeTransfers=true' : ''
+  const response = await fetch(`/api/spending?year=${year}&month=${month}${transfers}`)
   if (!response.ok) throw new Error(`Loading spending failed (${response.status})`)
   return (await response.json()) as Spending
 }

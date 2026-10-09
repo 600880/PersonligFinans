@@ -21,10 +21,13 @@ let handleDeleteRule: (id: number) => Response
 let months: { year: number; month: number }[] | Response
 let handleListMonth: (year: number, month: number) => Response
 let handleChangeCategory: (id: number, body: unknown) => Response | Promise<Response>
-let handleSpending: (year: number, month: number) => Response
+let categoryList: { id: number; name: string }[]
+let handleSpending: (year: number, month: number, includeTransfers: boolean) => Response
 const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
-  const spendingUrl = /^\/api\/spending\?year=(\d+)&month=(\d+)$/.exec(url)
-  if (spendingUrl) return handleSpending(Number(spendingUrl[1]), Number(spendingUrl[2]))
+  const spendingUrl = /^\/api\/spending\?year=(\d+)&month=(\d+)(&includeTransfers=true)?$/.exec(url)
+  if (spendingUrl) {
+    return handleSpending(Number(spendingUrl[1]), Number(spendingUrl[2]), spendingUrl[3] !== undefined)
+  }
   const monthUrl = /^\/api\/transactions\?year=(\d+)&month=(\d+)$/.exec(url)
   if (monthUrl) return handleListMonth(Number(monthUrl[1]), Number(monthUrl[2]))
   const categoryUrl = /^\/api\/transactions\/(\d+)\/category$/.exec(url)
@@ -39,7 +42,7 @@ const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
     return handleEditRule(Number(ruleUrl[1]), JSON.parse(init.body as string))
   }
   if (ruleUrl && init?.method === 'DELETE') return handleDeleteRule(Number(ruleUrl[1]))
-  if (url === '/api/categories') return Response.json(categories)
+  if (url === '/api/categories') return Response.json(categoryList)
   if (url === '/api/transactions' && init?.method === 'POST') {
     return handlePost(JSON.parse(init.body as string))
   }
@@ -71,6 +74,7 @@ beforeEach(() => {
   handleListMonth = () => Response.json([])
   handleChangeCategory = () => new Response(null, { status: 500 })
   handleSpending = () => Response.json({ total: 0, slices: [] })
+  categoryList = categories
   vi.stubGlobal('fetch', fetchMock)
 })
 
@@ -987,6 +991,66 @@ describe('Dashboard', () => {
     await user.selectOptions(screen.getByLabelText('Period'), 'August 2026')
     await waitFor(() => expect(legendRows()).toHaveLength(1))
     expect(swatchColour('Groceries')).toBe(groceries)
+  })
+
+  it('adds a Transfers slice, counted in the total and percentages, while Include transfers is on', async () => {
+    categoryList = [...categories, { id: 12, name: 'Transfers' }]
+    months = [{ year: 2026, month: 9 }]
+    handleSpending = (_year, _month, includeTransfers) =>
+      Response.json(
+        includeTransfers
+          ? {
+              total: 2000,
+              slices: [
+                { categoryId: 12, amount: 1500 },
+                { categoryId: 1, amount: 500 },
+              ],
+            }
+          : { total: 500, slices: [{ categoryId: 1, amount: 500 }] },
+      )
+    const user = userEvent.setup()
+    render(<App />)
+    await waitFor(() => expect(legendRows()).toEqual([['Groceries', '500,00 kr', '100,0 %']]))
+    const toggle = within(dashboard()).getByRole('checkbox', { name: 'Include transfers' })
+    expect(toggle).not.toBeChecked()
+
+    await user.click(toggle)
+
+    await waitFor(() =>
+      expect(legendRows()).toEqual([
+        ['Transfers', '1 500,00 kr', '75,0 %'],
+        ['Groceries', '500,00 kr', '25,0 %'],
+      ]),
+    )
+    expect(centreTotal()).toBe('Total 2 000,00 kr')
+
+    await user.click(toggle)
+
+    await waitFor(() => expect(legendRows()).toEqual([['Groceries', '500,00 kr', '100,0 %']]))
+    expect(centreTotal()).toBe('Total 500,00 kr')
+    expect(requestedSpending()).toEqual([
+      '/api/spending?year=2026&month=9',
+      '/api/spending?year=2026&month=9&includeTransfers=true',
+      '/api/spending?year=2026&month=9',
+    ])
+  })
+
+  it('shows an empty chart with a total of 0 and no hint when the Period has only Transfers', async () => {
+    categoryList = [...categories, { id: 12, name: 'Transfers' }]
+    months = [{ year: 2026, month: 9 }]
+    handleSpending = (_year, _month, includeTransfers) =>
+      Response.json(
+        includeTransfers
+          ? { total: 1500, slices: [{ categoryId: 12, amount: 1500 }] }
+          : { total: 0, slices: [] },
+      )
+
+    render(<App />)
+
+    await waitFor(() => expect(centreTotal()).toBe('Total 0,00 kr'))
+    expect(legendRows()).toEqual([])
+    expect(within(dashboard()).queryByRole('alert')).not.toBeInTheDocument()
+    expect(within(dashboard()).queryByText(/transfer/i, { ignore: 'label, option' })).toBeNull()
   })
 
   it('says when the Spending could not be loaded', async () => {
