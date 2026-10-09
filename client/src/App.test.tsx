@@ -9,6 +9,24 @@ const categories = [
   { id: 13, name: 'Other' },
 ]
 
+type Month = { year: number; month: number }
+
+// Every month from `from` to `to`, both included, as the monthly Spending endpoint returns them:
+// with the slices given for "year-month" and none for the other months.
+function monthlySpending(
+  from: Month,
+  to: Month,
+  slices: Record<string, { categoryId: number | null; amount: number }[]> = {},
+) {
+  const entries = []
+  for (let index = from.year * 12 + from.month - 1; index <= to.year * 12 + to.month - 1; index++) {
+    const year = Math.floor(index / 12)
+    const month = (index % 12) + 1
+    entries.push({ year, month, slices: slices[`${year}-${month}`] ?? [] })
+  }
+  return entries
+}
+
 type PostHandler = (body: unknown) => Response
 type UploadHandler = (body: FormData) => Response | Promise<Response>
 
@@ -25,7 +43,19 @@ let handleChangeCategory: (id: number, body: unknown) => Response | Promise<Resp
 let categoriesServed: { id: number; name: string }[]
 // The month or quarter is undefined when the Spending of a whole year, or of a quarter, is asked for.
 let handleSpending: (year: number, month: number | undefined, quarter: number | undefined, includeTransfers: boolean) => Response
+// The Spending of each month of the Span from `from` to `to`.
+let handleMonthlySpending: (from: Month, to: Month, includeTransfers: boolean) => Response
 const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+  const monthlyUrl =
+    /^\/api\/spending\/monthly\?fromYear=(\d+)&fromMonth=(\d+)&toYear=(\d+)&toMonth=(\d+)(&includeTransfers=true)?$/.exec(url)
+  if (monthlyUrl) {
+    const [, fromYear, fromMonth, toYear, toMonth, transfers] = monthlyUrl
+    return handleMonthlySpending(
+      { year: Number(fromYear), month: Number(fromMonth) },
+      { year: Number(toYear), month: Number(toMonth) },
+      transfers !== undefined,
+    )
+  }
   const spendingUrl = /^\/api\/spending\?year=(\d+)(?:&quarter=(\d+))?(?:&month=(\d+))?(&includeTransfers=true)?$/.exec(url)
   if (spendingUrl) {
     const [, year, quarter, month, transfers] = spendingUrl
@@ -82,6 +112,7 @@ beforeEach(() => {
   handleListMonth = () => Response.json([])
   handleChangeCategory = () => new Response(null, { status: 500 })
   handleSpending = () => Response.json({ total: 0, slices: [] })
+  handleMonthlySpending = (from, to) => Response.json(monthlySpending(from, to))
   categoriesServed = categories
   vi.stubGlobal('fetch', fetchMock)
 })
@@ -1276,6 +1307,272 @@ describe('Dashboard', () => {
           '/api/spending?year=2026&quarter=2&includeTransfers=true',
         ]),
       )
+    })
+  })
+
+  describe('Trend', () => {
+    function trend() {
+      return screen.getByRole('region', { name: 'Spending trend' })
+    }
+
+    // The trend table as shown, header first: each row's cells.
+    function trendTable() {
+      return within(trend())
+        .queryAllByRole('row')
+        .map((row) => [...row.children].map((cell) => cell.textContent))
+    }
+
+    function spanOptions(label: 'From' | 'To') {
+      return within(within(trend()).getByLabelText(label))
+        .getAllByRole('option')
+        .map((option) => option.textContent)
+    }
+
+    function selectedMonth(label: 'From' | 'To') {
+      return (within(trend()).getByLabelText(label) as HTMLSelectElement).selectedOptions[0].textContent
+    }
+
+    function requestedMonthlySpending() {
+      return fetchMock.mock.calls
+        .map(([url]) => url)
+        .filter((url) => url.startsWith('/api/spending/monthly?'))
+    }
+
+    it('sits below the Spending by Category', async () => {
+      months = [
+        { year: 2026, month: 9 },
+        { year: 2026, month: 8 },
+      ]
+
+      render(<App />)
+
+      await waitFor(() => expect(trendTable()).toHaveLength(2))
+      expect(dashboard().compareDocumentPosition(trend())).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+    })
+
+    it('opens on the 12 months ending at the latest month with Transactions, offering every month from the earliest', async () => {
+      months = [
+        { year: 2026, month: 9 },
+        { year: 2026, month: 8 },
+        { year: 2025, month: 4 },
+        { year: 2025, month: 1 },
+      ]
+      handleMonthlySpending = (from, to) =>
+        Response.json(
+          monthlySpending(from, to, {
+            '2025-10': [
+              { categoryId: 1, amount: 600 },
+              { categoryId: null, amount: 400 },
+            ],
+            '2026-9': [{ categoryId: 13, amount: 1123 }],
+          }),
+        )
+
+      render(<App />)
+
+      await waitFor(() =>
+        expect(trendTable()).toEqual([
+          ['', 'October 2025', 'September 2026', 'Change'],
+          ['Total', '1 000,00 kr', '1 123,00 kr', '▲ +12,3 %'],
+        ]),
+      )
+      expect(selectedMonth('From')).toBe('10.2025')
+      expect(selectedMonth('To')).toBe('09.2026')
+      const offered = [
+        '01.2025', '02.2025', '03.2025', '04.2025', '05.2025', '06.2025', '07.2025',
+        '08.2025', '09.2025', '10.2025', '11.2025', '12.2025', '01.2026', '02.2026',
+        '03.2026', '04.2026', '05.2026', '06.2026', '07.2026', '08.2026', '09.2026',
+      ]
+      expect(spanOptions('From')).toEqual(offered)
+      expect(spanOptions('To')).toEqual(offered)
+      expect(requestedMonthlySpending()).toEqual([
+        '/api/spending/monthly?fromYear=2025&fromMonth=10&toYear=2026&toMonth=9',
+      ])
+    })
+
+    it('opens on all the months there are when there are fewer than 12', async () => {
+      months = [
+        { year: 2026, month: 9 },
+        { year: 2026, month: 6 },
+      ]
+
+      render(<App />)
+
+      await waitFor(() => expect(trendTable()).toHaveLength(2))
+      expect(selectedMonth('From')).toBe('06.2026')
+      expect(selectedMonth('To')).toBe('09.2026')
+      expect(spanOptions('From')).toEqual(['06.2026', '07.2026', '08.2026', '09.2026'])
+      expect(requestedMonthlySpending()).toEqual([
+        '/api/spending/monthly?fromYear=2026&fromMonth=6&toYear=2026&toMonth=9',
+      ])
+    })
+
+    it.each([
+      ['no months', []],
+      ['one month', [{ year: 2026, month: 9 }]],
+    ])('says trends need at least two months with Transactions when there are %s', async (_case, offered) => {
+      months = offered
+
+      render(<App />)
+
+      expect(await screen.findByText('Trends need at least two months with Transactions')).toBeVisible()
+      expect(within(trend()).queryByLabelText('From')).toBeNull()
+      expect(trendTable()).toEqual([])
+      expect(requestedMonthlySpending()).toEqual([])
+    })
+
+    it.each([
+      ['more Spending', 1000, 1123, '1 000,00 kr', '1 123,00 kr', '▲ +12,3 %'],
+      ['less Spending', 1000, 920, '1 000,00 kr', '920,00 kr', '▼ −8,0 %'],
+      ['the same Spending', 250, 250, '250,00 kr', '250,00 kr', '0,0 %'],
+      ['Spending that is new', 0, 500, '0,00 kr', '500,00 kr', 'New'],
+      ['Spending that stopped', 400, 0, '400,00 kr', '0,00 kr', '▼ −100 %'],
+      ['no Spending at either end', 0, 0, '0,00 kr', '0,00 kr', '–'],
+    ])('shows the first and last monthly totals and the change for %s', async (_case, first, last, firstShown, lastShown, change) => {
+      months = [
+        { year: 2026, month: 3 },
+        { year: 2026, month: 1 },
+      ]
+      handleMonthlySpending = (from, to) =>
+        Response.json(
+          monthlySpending(from, to, {
+            '2026-1': first > 0 ? [{ categoryId: 1, amount: first }] : [],
+            '2026-2': [{ categoryId: 1, amount: 9999 }],
+            '2026-3': last > 0 ? [{ categoryId: 1, amount: last }] : [],
+          }),
+        )
+
+      render(<App />)
+
+      await waitFor(() =>
+        expect(trendTable()).toEqual([
+          ['', 'January 2026', 'March 2026', 'Change'],
+          ['Total', firstShown, lastShown, change],
+        ]),
+      )
+    })
+
+    describe('Span picker', () => {
+      // Every month from January 2025 to September 2026 is offered.
+      async function openTrend() {
+        months = [
+          { year: 2026, month: 9 },
+          { year: 2025, month: 1 },
+        ]
+        const user = userEvent.setup()
+        render(<App />)
+        await waitFor(() => expect(trendTable()).toHaveLength(2))
+        return user
+      }
+
+      function chooseMonth(user: ReturnType<typeof userEvent.setup>, label: 'From' | 'To', month: string) {
+        return user.selectOptions(within(trend()).getByLabelText(label), month)
+      }
+
+      it("shows the chosen Span's Spending", async () => {
+        const user = await openTrend()
+        handleMonthlySpending = (from, to) =>
+          Response.json(
+            monthlySpending(from, to, {
+              '2025-3': [{ categoryId: 1, amount: 300 }],
+              '2025-6': [{ categoryId: 1, amount: 600 }],
+            }),
+          )
+
+        await chooseMonth(user, 'From', '03.2025')
+        await chooseMonth(user, 'To', '06.2025')
+
+        await waitFor(() =>
+          expect(trendTable()).toEqual([
+            ['', 'March 2025', 'June 2025', 'Change'],
+            ['Total', '300,00 kr', '600,00 kr', '▲ +100,0 %'],
+          ]),
+        )
+        expect(requestedMonthlySpending()).toEqual([
+          '/api/spending/monthly?fromYear=2025&fromMonth=10&toYear=2026&toMonth=9',
+          '/api/spending/monthly?fromYear=2025&fromMonth=3&toYear=2026&toMonth=9',
+          '/api/spending/monthly?fromYear=2025&fromMonth=3&toYear=2025&toMonth=6',
+        ])
+      })
+
+      it('moves To to the month after a From that is not before it', async () => {
+        const user = await openTrend()
+        await chooseMonth(user, 'To', '02.2026')
+
+        await chooseMonth(user, 'From', '05.2026')
+        expect([selectedMonth('From'), selectedMonth('To')]).toEqual(['05.2026', '06.2026'])
+
+        await chooseMonth(user, 'From', '06.2026')
+        expect([selectedMonth('From'), selectedMonth('To')]).toEqual(['06.2026', '07.2026'])
+        expect(within(trend()).queryByRole('alert')).toBeNull()
+      })
+
+      it('moves From back when the month after it would pass the latest month', async () => {
+        const user = await openTrend()
+
+        await chooseMonth(user, 'From', '09.2026')
+
+        expect([selectedMonth('From'), selectedMonth('To')]).toEqual(['08.2026', '09.2026'])
+        await waitFor(() =>
+          expect(requestedMonthlySpending().at(-1)).toBe(
+            '/api/spending/monthly?fromYear=2026&fromMonth=8&toYear=2026&toMonth=9',
+          ),
+        )
+      })
+
+      it('moves From to the month before a To that is not after it', async () => {
+        const user = await openTrend()
+
+        await chooseMonth(user, 'To', '03.2025')
+        expect([selectedMonth('From'), selectedMonth('To')]).toEqual(['02.2025', '03.2025'])
+
+        await chooseMonth(user, 'To', '02.2025')
+        expect([selectedMonth('From'), selectedMonth('To')]).toEqual(['01.2025', '02.2025'])
+      })
+
+      it('moves To forward when the month before it would come before the earliest month', async () => {
+        const user = await openTrend()
+
+        await chooseMonth(user, 'To', '01.2025')
+
+        expect([selectedMonth('From'), selectedMonth('To')]).toEqual(['01.2025', '02.2025'])
+        expect(within(trend()).queryByRole('alert')).toBeNull()
+      })
+    })
+
+    it('says when the trend could not be loaded, leaving the Spending by Category shown', async () => {
+      months = [
+        { year: 2026, month: 9 },
+        { year: 2026, month: 8 },
+      ]
+      handleSpending = () => Response.json(septemberSpending)
+      handleMonthlySpending = () => new Response(null, { status: 500 })
+
+      render(<App />)
+
+      await waitFor(() =>
+        expect(within(trend()).getByRole('alert')).toHaveTextContent('Could not load the Spending trend.'),
+      )
+      await waitFor(() => expect(centreTotal()).toBe('Total 1 570,50 kr'))
+      expect(within(dashboard()).queryByRole('alert')).toBeNull()
+      expect(trendTable()).toEqual([])
+    })
+
+    it('reloads after a Bank Statement is uploaded', async () => {
+      months = [
+        { year: 2026, month: 9 },
+        { year: 2026, month: 8 },
+      ]
+      const user = userEvent.setup()
+      render(<App />)
+      await waitFor(() => expect(trendTable()).toHaveLength(2))
+      handleMonthlySpending = (from, to) =>
+        Response.json(monthlySpending(from, to, { '2026-9': [{ categoryId: 1, amount: 75 }] }))
+
+      await user.upload(screen.getByLabelText(/bank statement pdf/i), statementPdf)
+
+      await waitFor(() => expect(trendTable()[1]).toEqual(['Total', '0,00 kr', '75,00 kr', 'New']))
+      expect(requestedMonthlySpending()).toHaveLength(2)
     })
   })
 })
