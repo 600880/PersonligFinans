@@ -53,8 +53,13 @@ public class SpendingEndpointsTests
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
     }
 
-    private async Task<SpendingResponse> SpendingOf(int year, int month, string extraQuery = "") =>
-        (await _client.GetFromJsonAsync<SpendingResponse>($"/api/spending?year={year}&month={month}{extraQuery}"))!;
+    // includeTransfers is left out of the request when null.
+    private async Task<SpendingResponse> SpendingOf(int year, int month, bool? includeTransfers = null)
+    {
+        var transfers = includeTransfers is { } include ? $"&includeTransfers={include}" : "";
+        return (await _client.GetFromJsonAsync<SpendingResponse>(
+            $"/api/spending?year={year}&month={month}{transfers}"))!;
+    }
 
     [Fact]
     public async Task Get_Spending_SumsTheNegativeAmountsOfEachCategoryAsPositiveFiguresLargestFirst()
@@ -89,13 +94,13 @@ public class SpendingEndpointsTests
     }
 
     [Fact]
-    public async Task Get_SpendingIncludingTransfers_CountsNegativeTransfersAsTheirOwnSlice()
+    public async Task Get_SpendingIncludingTransfers_CountsNegativeAmountsInTheTransfersCategoryAsTheirOwnSlice()
     {
         await AddManualTransaction("2061-05-03", -5000m, TransfersCategoryId);
         await AddManualTransaction("2061-05-04", 2000m, TransfersCategoryId);
         await AddManualTransaction("2061-05-05", -10m, GroceriesCategoryId);
 
-        var spending = await SpendingOf(2061, 5, "&includeTransfers=true");
+        var spending = await SpendingOf(2061, 5, includeTransfers: true);
 
         Assert.Equal(
             [new SpendingSliceResponse(TransfersCategoryId, 5000m), new SpendingSliceResponse(GroceriesCategoryId, 10m)],
@@ -109,7 +114,7 @@ public class SpendingEndpointsTests
         await AddManualTransaction("2062-05-03", -5000m, TransfersCategoryId);
         await AddManualTransaction("2062-05-04", -10m, GroceriesCategoryId);
 
-        var spending = await SpendingOf(2062, 5, "&includeTransfers=false");
+        var spending = await SpendingOf(2062, 5, includeTransfers: false);
 
         Assert.Equal([new SpendingSliceResponse(GroceriesCategoryId, 10m)], spending.Slices);
         Assert.Equal(10m, spending.Total);

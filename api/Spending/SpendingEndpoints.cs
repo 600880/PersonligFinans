@@ -20,7 +20,7 @@ public static class SpendingEndpoints
     }
 
     // A month's Spending: one slice per Category with negative Amounts, and one for Uncategorized
-    // when it has any, largest first. Transfers are left out unless includeTransfers is set.
+    // when it has any, largest first. The Transfers Category is left out unless includeTransfers is set.
     private static async Task<IResult> SpendingOfMonth(
         int? year, int? month, AppDbContext db, bool includeTransfers = false)
     {

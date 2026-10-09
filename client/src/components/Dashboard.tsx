@@ -57,7 +57,7 @@ interface SliceView {
   colour: string
 }
 
-// A month's Spending, remembered with the month and transfers setting it was loaded for.
+// A month's Spending, remembered with the month and Include transfers setting it was loaded for.
 interface LoadedSpending extends TransactionMonth {
   includeTransfers: boolean
   spending: Spending
@@ -80,8 +80,8 @@ function toSliceViews(spending: Spending, categories: Category[]): SliceView[] {
   }))
 }
 
-// Spending by Category for one month. Opens on the latest month with Transactions and transfers
-// left out, and remembers nothing between visits.
+// Spending by Category for one month. Opens on the latest month with Transactions and the Transfers
+// Category left out, and remembers nothing between visits.
 export function Dashboard() {
   const headingId = useId()
   const [categories, setCategories] = useState<Category[]>([])

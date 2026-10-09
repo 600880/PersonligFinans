@@ -21,7 +21,8 @@ let handleDeleteRule: (id: number) => Response
 let months: { year: number; month: number }[] | Response
 let handleListMonth: (year: number, month: number) => Response
 let handleChangeCategory: (id: number, body: unknown) => Response | Promise<Response>
-let categoryList: { id: number; name: string }[]
+// What the categories endpoint returns: `categories` unless a test adds to it.
+let categoriesServed: { id: number; name: string }[]
 let handleSpending: (year: number, month: number, includeTransfers: boolean) => Response
 const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
   const spendingUrl = /^\/api\/spending\?year=(\d+)&month=(\d+)(&includeTransfers=true)?$/.exec(url)
@@ -42,7 +43,7 @@ const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
     return handleEditRule(Number(ruleUrl[1]), JSON.parse(init.body as string))
   }
   if (ruleUrl && init?.method === 'DELETE') return handleDeleteRule(Number(ruleUrl[1]))
-  if (url === '/api/categories') return Response.json(categoryList)
+  if (url === '/api/categories') return Response.json(categoriesServed)
   if (url === '/api/transactions' && init?.method === 'POST') {
     return handlePost(JSON.parse(init.body as string))
   }
@@ -74,7 +75,7 @@ beforeEach(() => {
   handleListMonth = () => Response.json([])
   handleChangeCategory = () => new Response(null, { status: 500 })
   handleSpending = () => Response.json({ total: 0, slices: [] })
-  categoryList = categories
+  categoriesServed = categories
   vi.stubGlobal('fetch', fetchMock)
 })
 
@@ -994,7 +995,7 @@ describe('Dashboard', () => {
   })
 
   it('adds a Transfers slice, counted in the total and percentages, while Include transfers is on', async () => {
-    categoryList = [...categories, { id: 12, name: 'Transfers' }]
+    categoriesServed = [...categories, { id: 12, name: 'Transfers' }]
     months = [{ year: 2026, month: 9 }]
     handleSpending = (_year, _month, includeTransfers) =>
       Response.json(
@@ -1036,7 +1037,7 @@ describe('Dashboard', () => {
   })
 
   it('shows an empty chart with a total of 0 and no hint when the Period has only Transfers', async () => {
-    categoryList = [...categories, { id: 12, name: 'Transfers' }]
+    categoriesServed = [...categories, { id: 12, name: 'Transfers' }]
     months = [{ year: 2026, month: 9 }]
     handleSpending = (_year, _month, includeTransfers) =>
       Response.json(
