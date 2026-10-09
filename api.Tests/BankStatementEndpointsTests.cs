@@ -528,6 +528,94 @@ public class BankStatementEndpointsTests
     }
 
     [Fact]
+    public async Task Post_ProposalWithKeywordNotInItsDescription_IsDropped() =>
+        await AssertDropped($"{_token} kaffe", "Restaurants");
+
+    [Fact]
+    public async Task Post_ProposalThatWouldChangeTheCategoryOfAStoredTransaction_IsDropped()
+    {
+        await AddRule($"rema {_token}", GroceriesId);
+        var earlier = await Created(await Upload(StatementWithPurchasesFrom($"Rema {_token} Bergen Storsenter")));
+        var generator = new FakeRuleGenerator()
+            .Proposing($"{_token} Bergen Storsenter P-hus", $"{_token} bergen storsenter", "Transport");
+
+        var created = await Created(await Upload(StatementWithPurchasesFrom($"{_token} Bergen Storsenter P-hus"), generator));
+
+        Assert.DoesNotContain(await RulesWithToken(), r => r.AiGenerated);
+        Assert.Equal(GroceriesId, Assert.Single(await StoredTransactions(earlier.Id)).CategoryId);
+        Assert.Null(Assert.Single(await StoredTransactions(created.Id)).CategoryId);
+    }
+
+    [Fact]
+    public async Task Post_ProposalThatWouldChangeTheCategoryOfARowInTheSameStatement_IsDropped()
+    {
+        await AddRule($"rema {_token}", GroceriesId);
+        var generator = new FakeRuleGenerator()
+            .Proposing($"{_token} Bergen Storsenter P-hus", $"{_token} bergen storsenter", "Transport");
+
+        var created = await Created(await Upload(
+            StatementWithPurchasesFrom($"{_token} Bergen Storsenter P-hus", $"Rema {_token} Bergen Storsenter"), generator));
+
+        Assert.DoesNotContain(await RulesWithToken(), r => r.AiGenerated);
+        Assert.Equal([null, (int?)GroceriesId], (await StoredTransactions(created.Id)).Select(t => t.CategoryId));
+    }
+
+    [Fact]
+    public async Task Post_TwoConflictingProposals_TheFirstInRowOrderWins()
+    {
+        // The second keyword is longer and also in the first row's description, so it would take
+        // that row from the first rule.
+        var generator = new FakeRuleGenerator()
+            .Proposing($"Kafé {_token} Sentrum Bergen", $"kafé {_token}", "Restaurants")
+            .Proposing($"{_token} Sentrum Bergen P-hus", $"{_token} sentrum bergen", "Transport");
+
+        var created = await Created(await Upload(
+            StatementWithPurchasesFrom($"Kafé {_token} Sentrum Bergen", $"{_token} Sentrum Bergen P-hus"), generator));
+
+        var rule = Assert.Single(await RulesWithToken());
+        Assert.Equal(($"kafé {_token}", RestaurantsId, true), (rule.Keyword, rule.CategoryId, rule.AiGenerated));
+        Assert.Equal([(int?)RestaurantsId, null], (await StoredTransactions(created.Id)).Select(t => t.CategoryId));
+    }
+
+    [Fact]
+    public async Task Post_RowMatchedByAnAiGeneratedRuleCreatedEarlierInTheUpload_GetsNoRuleOfItsOwn()
+    {
+        var generator = new FakeRuleGenerator()
+            .Proposing($"{_token} Kaffebrenneriet Torget", $"{_token} kaffebrenneriet", "Restaurants")
+            .Proposing($"{_token} Kaffebrenneriet Bryggen", $"{_token} kaffebrenneriet bryggen", "Shopping");
+
+        var created = await Created(await Upload(
+            StatementWithPurchasesFrom($"{_token} Kaffebrenneriet Torget", $"{_token} Kaffebrenneriet Bryggen"), generator));
+
+        var rule = Assert.Single(await RulesWithToken());
+        Assert.Equal($"{_token} kaffebrenneriet", rule.Keyword);
+        Assert.Equal([(int?)RestaurantsId, RestaurantsId], (await StoredTransactions(created.Id)).Select(t => t.CategoryId));
+    }
+
+    [Fact]
+    public async Task Post_TwoRowsWithTheSameDescription_ProduceOneRule()
+    {
+        // One spent and one received, so the generator is asked about each of them.
+        var pdf = StatementPdf.Create(
+            UniqueAccountNumber(),
+            period: "01.08.2026 - 31.08.2026",
+            openingBalance: "1.000,00",
+            rows:
+            [
+                new($"Varer 03.08 {_token} Sport", "0408", "10,00", null, "0408", "21", "12345678"),
+                new($"Varer 05.08 {_token} Sport", "0508", null, "10,00", "0508", "21", "12345678"),
+            ],
+            closingBalance: "1.000,00");
+        var generator = new FakeRuleGenerator().Proposing($"{_token} Sport", $"{_token} sport", "Shopping");
+
+        var created = await Created(await Upload(pdf, generator));
+
+        Assert.Equal(2, Assert.Single(generator.Calls).Rows.Count);
+        Assert.Single(await RulesWithToken());
+        Assert.Equal(0, created.UncategorizedCount);
+    }
+
+    [Fact]
     public async Task Post_GeneratorUnavailable_ImportsTheStatementWithUnmatchedRowsUncategorized()
     {
         await AddRule($"{_token} butikk", GroceriesId);
