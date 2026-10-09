@@ -1731,5 +1731,107 @@ describe('Dashboard', () => {
         expect(switchedOn()).toEqual(['Other'])
       })
     })
+
+    describe('Include transfers', () => {
+      // August and September 2026, with Transfers in September that count only while included.
+      beforeEach(() => {
+        categoriesServed = [...categories, { id: 12, name: 'Transfers' }]
+        months = [
+          { year: 2026, month: 9 },
+          { year: 2026, month: 8 },
+        ]
+        handleMonthlySpending = (from, to, includeTransfers) =>
+          Response.json(
+            monthlySpending(from, to, {
+              '2026-8': [{ categoryId: 1, amount: 400 }],
+              '2026-9': includeTransfers
+                ? [
+                    { categoryId: 12, amount: 1500 },
+                    { categoryId: 1, amount: 500 },
+                  ]
+                : [{ categoryId: 1, amount: 500 }],
+            }),
+          )
+      })
+
+      function trendToggle() {
+        return within(trend()).getByRole('checkbox', { name: 'Include transfers' })
+      }
+
+      function donutToggle() {
+        return within(dashboard()).getByRole('checkbox', { name: 'Include transfers' })
+      }
+
+      it('counts Transfers in the Total for the same Span while ticked', async () => {
+        const user = userEvent.setup()
+        render(<App />)
+        await waitFor(() => expect(trendTable()[1]).toEqual(['Total', '400,00 kr', '500,00 kr', '▲ +25,0 %']))
+        expect(trendToggle()).not.toBeChecked()
+
+        await user.click(trendToggle())
+
+        await waitFor(() => expect(trendTable()[1]).toEqual(['Total', '400,00 kr', '2 000,00 kr', '▲ +400,0 %']))
+        expect(trendTable().map(([name]) => name)).toEqual(['', 'Total', 'Transfers', 'Groceries'])
+
+        await user.click(trendToggle())
+
+        await waitFor(() => expect(trendTable()[1]).toEqual(['Total', '400,00 kr', '500,00 kr', '▲ +25,0 %']))
+        expect(requestedMonthlySpending()).toEqual([
+          '/api/spending/monthly?fromYear=2026&fromMonth=8&toYear=2026&toMonth=9',
+          '/api/spending/monthly?fromYear=2026&fromMonth=8&toYear=2026&toMonth=9&includeTransfers=true',
+          '/api/spending/monthly?fromYear=2026&fromMonth=8&toYear=2026&toMonth=9',
+        ])
+      })
+
+      it('keeps Include transfers when the Span changes', async () => {
+        months = [
+          { year: 2026, month: 9 },
+          { year: 2026, month: 7 },
+        ]
+        const user = userEvent.setup()
+        render(<App />)
+        await waitFor(() => expect(trendTable()).toHaveLength(3))
+        await user.click(trendToggle())
+        await waitFor(() => expect(trendTable()[1][2]).toBe('2 000,00 kr'))
+
+        await user.selectOptions(within(trend()).getByLabelText('From'), '08.2026')
+
+        await waitFor(() => expect(trendTable()[1]).toEqual(['Total', '400,00 kr', '2 000,00 kr', '▲ +400,0 %']))
+        expect(trendToggle()).toBeChecked()
+        expect(requestedMonthlySpending().at(-1)).toBe(
+          '/api/spending/monthly?fromYear=2026&fromMonth=8&toYear=2026&toMonth=9&includeTransfers=true',
+        )
+      })
+
+      it("is left alone by the donut's Include transfers", async () => {
+        const user = userEvent.setup()
+        render(<App />)
+        await waitFor(() => expect(trendTable()).toHaveLength(3))
+        await waitFor(() => expect(requestedSpending()).toHaveLength(1))
+
+        await user.click(donutToggle())
+
+        await waitFor(() => expect(requestedSpending()).toHaveLength(2))
+        expect(requestedSpending()[1]).toBe('/api/spending?year=2026&month=9&includeTransfers=true')
+        expect(trendToggle()).not.toBeChecked()
+        expect(trendTable()[1]).toEqual(['Total', '400,00 kr', '500,00 kr', '▲ +25,0 %'])
+        expect(requestedMonthlySpending()).toEqual([
+          '/api/spending/monthly?fromYear=2026&fromMonth=8&toYear=2026&toMonth=9',
+        ])
+      })
+
+      it("leaves the donut's Include transfers alone", async () => {
+        const user = userEvent.setup()
+        render(<App />)
+        await waitFor(() => expect(trendTable()).toHaveLength(3))
+        await waitFor(() => expect(requestedSpending()).toHaveLength(1))
+
+        await user.click(trendToggle())
+
+        await waitFor(() => expect(trendTable()[1][2]).toBe('2 000,00 kr'))
+        expect(donutToggle()).not.toBeChecked()
+        expect(requestedSpending()).toEqual(['/api/spending?year=2026&month=9'])
+      })
+    })
   })
 })

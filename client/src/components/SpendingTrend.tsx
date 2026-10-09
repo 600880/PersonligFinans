@@ -22,9 +22,11 @@ const TOTAL_COLOUR = '#1e293b'
 
 const wholeKroner = new Intl.NumberFormat('nb-NO', { maximumFractionDigits: 0 })
 
-// A Span's monthly Spending, remembered with the Span it was loaded for; null when loading failed.
+// A Span's monthly Spending, remembered with the Span and Include transfers setting it was loaded
+// for; null when loading failed.
 interface LoadedTrend {
   span: Span
+  includeTransfers: boolean
   monthly: MonthSpending[] | null
 }
 
@@ -57,7 +59,8 @@ function trendRows(monthly: MonthSpending[], categories: Category[] | null): Tre
 // last points for Total and each Category. Each row switches its line on and off; Total starts on and
 // the Categories off, and they stay as switched when the Span changes. `months` are the months with
 // Transactions, newest first, which decide the months offered. Opens on the 12 months ending at the
-// latest of them, and does so again whenever they are reloaded. Transfers are always left out.
+// latest of them, and does so again whenever they are reloaded. Has its own Include transfers, off at
+// first and apart from the donut's.
 export function SpendingTrend({ months, categories }: { months: TransactionMonth[]; categories: Category[] | null }) {
   const headingId = useId()
   const offered = useMemo(() => offeredMonths(months), [months])
@@ -67,6 +70,7 @@ export function SpendingTrend({ months, categories }: { months: TransactionMonth
     () => (chosen && chosen.months === months ? chosen.span : defaultSpan(offered)),
     [chosen, months, offered],
   )
+  const [includeTransfers, setIncludeTransfers] = useState(false)
   const [loaded, setLoaded] = useState<LoadedTrend | null>(null)
   // The rows whose lines are drawn, by key. Kept for rows missing from the current Span, so they are
   // drawn again when a later Span includes them.
@@ -75,19 +79,19 @@ export function SpendingTrend({ months, categories }: { months: TransactionMonth
   useEffect(() => {
     if (!span) return
     let ignore = false
-    fetchMonthlySpending(span, false)
+    fetchMonthlySpending(span, includeTransfers)
       .then((monthly) => {
-        if (!ignore) setLoaded({ span, monthly })
+        if (!ignore) setLoaded({ span, includeTransfers, monthly })
       })
       .catch(() => {
-        if (!ignore) setLoaded({ span, monthly: null })
+        if (!ignore) setLoaded({ span, includeTransfers, monthly: null })
       })
     return () => {
       ignore = true
     }
-  }, [span])
+  }, [span, includeTransfers])
 
-  const current = loaded && loaded.span === span ? loaded : null
+  const current = loaded && loaded.span === span && loaded.includeTransfers === includeTransfers ? loaded : null
   const points = current?.monthly ? trendPoints(current.monthly) : []
   const first = points[0]
   const last = points[points.length - 1]
@@ -137,6 +141,16 @@ export function SpendingTrend({ months, categories }: { months: TransactionMonth
               </label>
             ))}
           </div>
+
+          <label className="mt-3 flex w-fit items-center gap-2 text-sm font-medium text-slate-700">
+            <input
+              type="checkbox"
+              checked={includeTransfers}
+              onChange={(event) => setIncludeTransfers(event.target.checked)}
+              className="size-4 rounded border-slate-300"
+            />
+            Include transfers
+          </label>
 
           {current && !current.monthly && (
             <p role="alert" className="mt-3 text-sm text-red-700">
