@@ -17,6 +17,57 @@ export async function fetchCategories(): Promise<Category[]> {
   return (await response.json()) as Category[]
 }
 
+// categoryId is null for an Uncategorized Transaction.
+export interface Transaction {
+  id: number
+  date: string
+  description: string
+  amount: number
+  reference: string | null
+  categoryId: number | null
+}
+
+export interface TransactionMonth {
+  year: number
+  month: number
+}
+
+// The months that have at least one Transaction, newest first.
+export async function fetchTransactionMonths(): Promise<TransactionMonth[]> {
+  const response = await fetch('/api/transactions/months')
+  if (!response.ok) throw new Error(`Loading months failed (${response.status})`)
+  return (await response.json()) as TransactionMonth[]
+}
+
+export async function fetchTransactionsOfMonth({ year, month }: TransactionMonth): Promise<Transaction[]> {
+  const response = await fetch(`/api/transactions?year=${year}&month=${month}`)
+  if (!response.ok) throw new Error(`Loading transactions failed (${response.status})`)
+  return (await response.json()) as Transaction[]
+}
+
+export type ChangeCategoryResult = { ok: true; transaction: Transaction } | { ok: false; message: string }
+
+// Categorizes the Transaction manually: for an imported one, rules never change it again.
+export async function changeTransactionCategory(
+  id: number,
+  categoryId: number,
+): Promise<ChangeCategoryResult> {
+  let response: Response
+  try {
+    response = await fetch(`/api/transactions/${id}/category`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ categoryId }),
+    })
+  } catch {
+    return { ok: false, message: 'Could not reach the server.' }
+  }
+
+  if (response.ok) return { ok: true, transaction: (await response.json()) as Transaction }
+
+  return { ok: false, message: `Saving failed (${response.status}).` }
+}
+
 export async function createTransaction(
   request: CreateTransactionRequest,
 ): Promise<CreateTransactionResult> {

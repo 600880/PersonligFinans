@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using PersonligFinans.Api.CategorizationRules;
 using PersonligFinans.Api.Data;
 
 namespace PersonligFinans.Api.Transactions;
@@ -10,6 +11,8 @@ public record CreateTransactionRequest(
     string? Reference,
     int? CategoryId);
 
+public record ChangeCategoryRequest(int? CategoryId);
+
 public record TransactionResponse(
     int Id,
     DateOnly Date,
@@ -20,10 +23,15 @@ public record TransactionResponse(
 
 public record CategoryResponse(int Id, string Name);
 
+public record TransactionMonthResponse(int Year, int Month);
+
 public static class TransactionEndpoints
 {
     // numeric(12,2) holds at most 10 digits before the decimal point.
     private const decimal MaxAbsoluteAmount = 9_999_999_999.99m;
+
+    private const int MinYear = 1900;
+    private const int MaxYear = 2999;
 
     public static void MapTransactionEndpoints(this IEndpointRouteBuilder app)
     {
@@ -35,7 +43,41 @@ public static class TransactionEndpoints
                 .Select(c => new CategoryResponse(c.Id, c.Name))
                 .ToListAsync());
 
+        api.MapGet("/transactions/months", async (AppDbContext db) =>
+            await db.Transactions
+                .Select(t => new { t.PostedDate.Year, t.PostedDate.Month })
+                .Distinct()
+                .OrderByDescending(m => m.Year)
+                .ThenByDescending(m => m.Month)
+                .Select(m => new TransactionMonthResponse(m.Year, m.Month))
+                .ToListAsync());
+
+        api.MapGet("/transactions", ListMonth);
         api.MapPost("/transactions", CreateTransaction);
+        api.MapPut("/transactions/{id:int}/category", ChangeCategory);
+    }
+
+    // A month's Transactions, imported and manual, newest first with the id as a stable tie-break.
+    private static async Task<IResult> ListMonth(int? year, int? month, AppDbContext db)
+    {
+        var errors = new Dictionary<string, string[]>();
+
+        if (year is not (>= MinYear and <= MaxYear))
+            errors["year"] = [$"Year must be between {MinYear} and {MaxYear}."];
+        if (month is not (>= 1 and <= 12))
+            errors["month"] = ["Month must be between 1 and 12."];
+
+        if (errors.Count > 0)
+            return Results.ValidationProblem(errors);
+
+        var first = new DateOnly(year!.Value, month!.Value, 1);
+        var next = first.AddMonths(1);
+        return Results.Ok(await db.Transactions
+            .Where(t => t.PostedDate >= first && t.PostedDate < next)
+            .OrderByDescending(t => t.PostedDate)
+            .ThenByDescending(t => t.Id)
+            .Select(t => ToResponse(t))
+            .ToListAsync());
     }
 
     private static async Task<IResult> CreateTransaction(CreateTransactionRequest request, AppDbContext db)
@@ -83,14 +125,42 @@ public static class TransactionEndpoints
         db.Transactions.Add(transaction);
         await db.SaveChangesAsync();
 
-        return Results.Created(
-            $"/api/transactions/{transaction.Id}",
-            new TransactionResponse(
-                transaction.Id,
-                transaction.PostedDate,
-                transaction.Description,
-                transaction.Amount,
-                transaction.Reference,
-                transaction.CategoryId));
+        return Results.Created($"/api/transactions/{transaction.Id}", ToResponse(transaction));
     }
+
+    // Categorizes one Transaction manually: an imported Transaction loses its rule link, so rules never
+    // change it again. Never creates, changes or deletes a Categorization Rule.
+    private static async Task<IResult> ChangeCategory(int id, ChangeCategoryRequest request, AppDbContext db)
+    {
+        await using var dbTransaction = await Categorizer.BeginManualCategorizationAsync(db);
+
+        var transaction = await db.Transactions.FindAsync(id);
+        if (transaction is null)
+            return Results.NotFound();
+
+        // A Category is required, so a Transaction can never be made Uncategorized.
+        if (request.CategoryId is null)
+            return CategoryProblem("Category is required.");
+        if (!await db.Categories.AnyAsync(c => c.Id == request.CategoryId))
+            return CategoryProblem("Category does not exist.");
+
+        transaction.CategoryId = request.CategoryId;
+        transaction.CategorizationRuleId = null;
+        await db.SaveChangesAsync();
+        await dbTransaction.CommitAsync();
+
+        return Results.Ok(ToResponse(transaction));
+    }
+
+    private static IResult CategoryProblem(string message) =>
+        Results.ValidationProblem(new Dictionary<string, string[]> { ["categoryId"] = [message] });
+
+    private static TransactionResponse ToResponse(Transaction transaction) =>
+        new(
+            transaction.Id,
+            transaction.PostedDate,
+            transaction.Description,
+            transaction.Amount,
+            transaction.Reference,
+            transaction.CategoryId);
 }

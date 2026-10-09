@@ -1,13 +1,21 @@
 import { useEffect, useRef, useState } from 'react'
 import { AddTransactionModal } from './components/AddTransactionModal'
 import { RulesPage } from './components/RulesPage'
+import { TransactionsPage } from './components/TransactionsPage'
 import { uploadBankStatement } from './lib/api'
 import { formatNorwegianDate } from './lib/date'
 
 const CONFIRMATION_MS = 3000
 
+type View = 'home' | 'transactions' | 'rules'
+
+const NAV_ITEMS: { view: View; label: string }[] = [
+  { view: 'transactions', label: 'Transactions' },
+  { view: 'rules', label: 'Rules' },
+]
+
 function App() {
-  const [view, setView] = useState<'home' | 'rules'>('home')
+  const [view, setView] = useState<View>('home')
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [showSavedMessage, setShowSavedMessage] = useState(false)
   const [isUploading, setIsUploading] = useState(false)
@@ -56,18 +64,32 @@ function App() {
     <div className="min-h-screen bg-slate-50">
       <header className="flex items-center justify-between border-b border-slate-200 bg-white px-6 py-4">
         <h1 className="text-xl font-semibold tracking-tight text-slate-900">
-          PersonligFinans
+          <button type="button" onClick={() => setView('home')}>
+            PersonligFinans
+          </button>
         </h1>
-        <button
-          type="button"
-          onClick={() => setView(view === 'home' ? 'rules' : 'home')}
-          className="rounded-lg px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-100"
-        >
-          {view === 'home' ? 'Rules' : 'Back'}
-        </button>
+        <nav className="flex gap-1">
+          {NAV_ITEMS.map((item) => (
+            <button
+              key={item.view}
+              type="button"
+              onClick={() => setView(item.view)}
+              aria-current={view === item.view ? 'page' : undefined}
+              className={`rounded-lg px-3 py-1.5 text-sm font-medium ${
+                view === item.view ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'
+              }`}
+            >
+              {item.label}
+            </button>
+          ))}
+        </nav>
       </header>
 
-      {view === 'rules' ? (
+      {view === 'transactions' ? (
+        <main className="flex flex-col items-center px-6 py-10">
+          <TransactionsPage />
+        </main>
+      ) : view === 'rules' ? (
         <main className="flex flex-col items-center px-6 py-10">
           <RulesPage />
         </main>
