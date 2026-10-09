@@ -53,8 +53,10 @@ public class SpendingEndpointsTests
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
     }
 
-    private async Task<SpendingResponse> SpendingOf(int year, int month) =>
-        (await _client.GetFromJsonAsync<SpendingResponse>($"/api/spending?year={year}&month={month}"))!;
+    private Task<SpendingResponse> SpendingOf(int year, int month) => SpendingOf($"year={year}&month={month}");
+
+    private async Task<SpendingResponse> SpendingOf(string query) =>
+        (await _client.GetFromJsonAsync<SpendingResponse>($"/api/spending?{query}"))!;
 
     [Fact]
     public async Task Get_Spending_SumsTheNegativeAmountsOfEachCategoryAsPositiveFiguresLargestFirst()
@@ -150,10 +152,62 @@ public class SpendingEndpointsTests
         Assert.Empty(spending.Slices);
     }
 
+    [Fact]
+    public async Task Get_SpendingOfQuarter_RunsFromTheFirstDayOfItsFirstMonthToTheLastDayOfItsThird()
+    {
+        await AddManualTransaction("2071-03-31", -1m, GroceriesCategoryId);
+        await AddManualTransaction("2071-04-01", -10m, GroceriesCategoryId);
+        await AddManualTransaction("2071-05-15", -100m, GroceriesCategoryId);
+        await AddManualTransaction("2071-06-30", -1000m, GroceriesCategoryId);
+        await AddManualTransaction("2071-07-01", -10000m, GroceriesCategoryId);
+
+        var q1 = await SpendingOf("year=2071&quarter=1");
+        var q2 = await SpendingOf("year=2071&quarter=2");
+
+        Assert.Equal([new SpendingSliceResponse(GroceriesCategoryId, 1m)], q1.Slices);
+        Assert.Equal([new SpendingSliceResponse(GroceriesCategoryId, 1110m)], q2.Slices);
+        Assert.Equal(1110m, q2.Total);
+    }
+
+    [Fact]
+    public async Task Get_SpendingOfYear_RunsFromTheFirstOfJanuaryToTheThirtyFirstOfDecember()
+    {
+        await AddManualTransaction("2072-12-31", -1m, GroceriesCategoryId);
+        await AddManualTransaction("2073-01-01", -10m, GroceriesCategoryId);
+        await AddManualTransaction("2073-06-15", -100m, RestaurantsCategoryId);
+        await AddManualTransaction("2073-12-31", -1000m, GroceriesCategoryId);
+        await AddManualTransaction("2074-01-01", -10000m, GroceriesCategoryId);
+
+        var spending = await SpendingOf("year=2073");
+
+        Assert.Equal(
+            [
+                new SpendingSliceResponse(GroceriesCategoryId, 1010m),
+                new SpendingSliceResponse(RestaurantsCategoryId, 100m),
+            ],
+            spending.Slices);
+        Assert.Equal(1110m, spending.Total);
+    }
+
+    [Theory]
+    [InlineData("year=2026&quarter=0", "quarter")]
+    [InlineData("year=2026&quarter=5", "quarter")]
+    [InlineData("year=2026&quarter=1&month=1", "quarter")]
+    [InlineData("year=1899&quarter=1", "year")]
+    [InlineData("year=3000", "year")]
+    [InlineData("quarter=1", "year")]
+    public async Task Get_InvalidQuarterOrYear_IsRejected(string query, string field)
+    {
+        var response = await _client.GetAsync($"/api/spending?{query}");
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var problem = await response.Content.ReadFromJsonAsync<ValidationProblemDetails>();
+        Assert.Contains(field, problem!.Errors.Keys);
+    }
+
     [Theory]
     [InlineData("year=2026&month=0", "month")]
     [InlineData("year=2026&month=13", "month")]
-    [InlineData("year=2026", "month")]
     [InlineData("year=1899&month=1", "year")]
     [InlineData("year=3000&month=1", "year")]
     [InlineData("month=1", "year")]

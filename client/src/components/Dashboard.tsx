@@ -2,14 +2,24 @@ import { useEffect, useId, useState } from 'react'
 import { Cell, Pie, PieChart, Tooltip } from 'recharts'
 import {
   fetchCategories,
-  fetchSpendingOfMonth,
+  fetchSpending,
   fetchTransactionMonths,
   type Category,
   type Spending,
   type TransactionMonth,
 } from '../lib/api'
 import { formatAmount } from '../lib/amount'
-import { currentMonth, MONTH_NAMES } from '../lib/month'
+import { currentMonth } from '../lib/month'
+import {
+  GRANULARITIES,
+  periodLabel,
+  periodOfMonth,
+  periodsOfMonths,
+  periodValue,
+  switchGranularity,
+  type Granularity,
+  type Period,
+} from '../lib/period'
 
 const LOAD_ERROR = 'Could not load the Spending.'
 
@@ -57,13 +67,10 @@ interface SliceView {
   colour: string
 }
 
-// A month's Spending, remembered with the month it was loaded for.
-interface LoadedSpending extends TransactionMonth {
+// A Period's Spending, remembered with the Period it was loaded for.
+interface LoadedSpending {
+  period: Period
   spending: Spending
-}
-
-function monthValue({ year, month }: TransactionMonth) {
-  return `${year}-${month}`
 }
 
 function toSliceViews(spending: Spending, categories: Category[]): SliceView[] {
@@ -79,14 +86,17 @@ function toSliceViews(spending: Spending, categories: Category[]): SliceView[] {
   }))
 }
 
-// Spending by Category for one month. Opens on the latest month with Transactions, and remembers
+// Spending by Category for one Period. Opens on the latest month with Transactions, and remembers
 // nothing between visits.
 export function Dashboard() {
   const headingId = useId()
   const [categories, setCategories] = useState<Category[]>([])
-  const [monthsWithTransactions, setMonthsWithTransactions] = useState<TransactionMonth[]>([])
-  // Null until the months are loaded, which decides the month the Dashboard opens on.
-  const [selected, setSelected] = useState<TransactionMonth | null>(null)
+  // The months with Transactions, newest first, or the current month when there are none. The
+  // Periods offered are worked out from them.
+  const [months, setMonths] = useState<TransactionMonth[]>([])
+  // Null until the months are loaded, which decide the Period the Dashboard opens on: the latest
+  // month with Transactions.
+  const [selected, setSelected] = useState<Period | null>(null)
   const [loaded, setLoaded] = useState<LoadedSpending | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
@@ -96,8 +106,9 @@ export function Dashboard() {
       .then(([loadedCategories, loadedMonths]) => {
         if (ignore) return
         setCategories(loadedCategories)
-        setMonthsWithTransactions(loadedMonths)
-        setSelected(loadedMonths[0] ?? currentMonth())
+        const available = loadedMonths.length > 0 ? loadedMonths : [currentMonth()]
+        setMonths(available)
+        setSelected(periodOfMonth(available[0], 'month'))
       })
       .catch(() => {
         if (!ignore) setErrorMessage(LOAD_ERROR)
@@ -110,9 +121,9 @@ export function Dashboard() {
   useEffect(() => {
     if (!selected) return
     let ignore = false
-    fetchSpendingOfMonth(selected)
+    fetchSpending(selected)
       .then((spending) => {
-        if (!ignore) setLoaded({ ...selected, spending })
+        if (!ignore) setLoaded({ period: selected, spending })
       })
       .catch(() => {
         if (!ignore) setErrorMessage(LOAD_ERROR)
@@ -122,15 +133,13 @@ export function Dashboard() {
     }
   }, [selected])
 
-  const spending =
-    loaded && loaded.year === selected?.year && loaded.month === selected.month ? loaded.spending : null
+  const spending = loaded && selected && loaded.period === selected ? loaded.spending : null
   const slices = spending ? toSliceViews(spending, categories) : []
-  const monthOptions = monthsWithTransactions.length > 0 ? monthsWithTransactions : selected ? [selected] : []
+  const periodOptions = selected ? periodsOfMonths(months, selected.granularity) : []
 
-  function chooseMonth(value: string) {
-    const [year, month] = value.split('-').map(Number)
+  function choosePeriod(period: Period) {
     setErrorMessage(null)
-    setSelected({ year, month })
+    setSelected(period)
   }
 
   return (
@@ -140,20 +149,40 @@ export function Dashboard() {
       </h2>
 
       {selected && (
-        <label className="mt-4 flex w-fit flex-col gap-1 text-sm font-medium text-slate-700">
-          Period
-          <select
-            value={monthValue(selected)}
-            onChange={(event) => chooseMonth(event.target.value)}
-            className="rounded-lg border border-slate-300 px-3 py-2 font-normal"
-          >
-            {monthOptions.map((option) => (
-              <option key={monthValue(option)} value={monthValue(option)}>
-                {MONTH_NAMES[option.month - 1]} {option.year}
-              </option>
-            ))}
-          </select>
-        </label>
+        <div className="mt-4 flex flex-wrap gap-4">
+          <label className="flex w-fit flex-col gap-1 text-sm font-medium text-slate-700">
+            Granularity
+            <select
+              value={selected.granularity}
+              onChange={(event) =>
+                choosePeriod(switchGranularity(selected, event.target.value as Granularity, months))
+              }
+              className="rounded-lg border border-slate-300 px-3 py-2 font-normal"
+            >
+              {GRANULARITIES.map(({ value, label }) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex w-fit flex-col gap-1 text-sm font-medium text-slate-700">
+            Period
+            <select
+              value={periodValue(selected)}
+              onChange={(event) =>
+                choosePeriod(periodOptions.find((option) => periodValue(option) === event.target.value)!)
+              }
+              className="rounded-lg border border-slate-300 px-3 py-2 font-normal"
+            >
+              {periodOptions.map((option) => (
+                <option key={periodValue(option)} value={periodValue(option)}>
+                  {periodLabel(option)}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
       )}
 
       {errorMessage && (

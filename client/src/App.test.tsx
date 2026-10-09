@@ -21,10 +21,14 @@ let handleDeleteRule: (id: number) => Response
 let months: { year: number; month: number }[] | Response
 let handleListMonth: (year: number, month: number) => Response
 let handleChangeCategory: (id: number, body: unknown) => Response | Promise<Response>
-let handleSpending: (year: number, month: number) => Response
+// The month or quarter is undefined when the Spending of a whole year, or of a quarter, is asked for.
+let handleSpending: (year: number, month?: number, quarter?: number) => Response
 const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
-  const spendingUrl = /^\/api\/spending\?year=(\d+)&month=(\d+)$/.exec(url)
-  if (spendingUrl) return handleSpending(Number(spendingUrl[1]), Number(spendingUrl[2]))
+  const spendingUrl = /^\/api\/spending\?year=(\d+)(?:&quarter=(\d+))?(?:&month=(\d+))?/.exec(url)
+  if (spendingUrl) {
+    const [, year, quarter, month] = spendingUrl
+    return handleSpending(Number(year), month ? Number(month) : undefined, quarter ? Number(quarter) : undefined)
+  }
   const monthUrl = /^\/api\/transactions\?year=(\d+)&month=(\d+)$/.exec(url)
   if (monthUrl) return handleListMonth(Number(monthUrl[1]), Number(monthUrl[2]))
   const categoryUrl = /^\/api\/transactions\/(\d+)\/category$/.exec(url)
@@ -1046,5 +1050,126 @@ describe('Dashboard', () => {
 
     await waitFor(() => expect(centreTotal()).toBe('Total 1 570,50 kr'))
     expect(screen.getByLabelText('Period')).toHaveValue('2026-9')
+  })
+
+  describe('Periods', () => {
+    const monthsWithTransactions = [
+      { year: 2026, month: 9 },
+      { year: 2026, month: 8 },
+      { year: 2026, month: 4 },
+      { year: 2025, month: 12 },
+      { year: 2025, month: 11 },
+      { year: 2025, month: 2 },
+      { year: 2025, month: 1 },
+    ]
+
+    function chooseGranularity(user: ReturnType<typeof userEvent.setup>, granularity: string) {
+      return user.selectOptions(screen.getByLabelText('Granularity'), granularity)
+    }
+
+    function choosePeriod(user: ReturnType<typeof userEvent.setup>, period: string) {
+      return user.selectOptions(screen.getByLabelText('Period'), period)
+    }
+
+    async function openDashboard() {
+      months = monthsWithTransactions
+      const user = userEvent.setup()
+      render(<App />)
+      await waitFor(() => expect(requestedSpending()).toEqual(['/api/spending?year=2026&month=9']))
+      return user
+    }
+
+    it('opens on the Month granularity', async () => {
+      await openDashboard()
+
+      expect(screen.getByLabelText('Granularity')).toHaveDisplayValue('Month')
+      expect(
+        within(screen.getByLabelText('Granularity'))
+          .getAllByRole('option')
+          .map((option) => option.textContent),
+      ).toEqual(['Year', 'Quarter', 'Month'])
+    })
+
+    it('offers only the quarters and years with Transactions, newest first', async () => {
+      const user = await openDashboard()
+
+      await chooseGranularity(user, 'Quarter')
+      expect(monthOptions()).toEqual(['Q3 2026', 'Q2 2026', 'Q4 2025', 'Q1 2025'])
+
+      await chooseGranularity(user, 'Year')
+      expect(monthOptions()).toEqual(['2026', '2025'])
+
+      await chooseGranularity(user, 'Month')
+      expect(monthOptions()).toEqual([
+        'September 2026',
+        'August 2026',
+        'April 2026',
+        'December 2025',
+        'November 2025',
+        'February 2025',
+        'January 2025',
+      ])
+    })
+
+    it("shows a quarter's Spending", async () => {
+      handleSpending = (_year, _month, quarter) =>
+        Response.json(quarter === 3 ? { total: 80, slices: [{ categoryId: 1, amount: 80 }] } : septemberSpending)
+      const user = await openDashboard()
+
+      await chooseGranularity(user, 'Quarter')
+
+      await waitFor(() => expect(legendRows()).toEqual([['Groceries', '80,00 kr', '100,0 %']]))
+      expect(centreTotal()).toBe('Total 80,00 kr')
+    })
+
+    it('keeps the Period that contains the current one when switching to a coarser granularity', async () => {
+      const user = await openDashboard()
+      await choosePeriod(user, 'April 2026')
+
+      await chooseGranularity(user, 'Quarter')
+      expect(screen.getByLabelText('Period')).toHaveDisplayValue('Q2 2026')
+
+      await chooseGranularity(user, 'Year')
+      expect(screen.getByLabelText('Period')).toHaveDisplayValue('2026')
+
+      await waitFor(() =>
+        expect(requestedSpending()).toEqual([
+          '/api/spending?year=2026&month=9',
+          '/api/spending?year=2026&month=4',
+          '/api/spending?year=2026&quarter=2',
+          '/api/spending?year=2026',
+        ]),
+      )
+    })
+
+    it('goes to the latest Period with Transactions inside the current one when switching to a finer granularity', async () => {
+      const user = await openDashboard()
+      await chooseGranularity(user, 'Year')
+      await choosePeriod(user, '2025')
+
+      await chooseGranularity(user, 'Quarter')
+      expect(screen.getByLabelText('Period')).toHaveDisplayValue('Q4 2025')
+
+      await choosePeriod(user, 'Q1 2025')
+      await chooseGranularity(user, 'Month')
+      expect(screen.getByLabelText('Period')).toHaveDisplayValue('February 2025')
+
+      await chooseGranularity(user, 'Year')
+      await chooseGranularity(user, 'Month')
+      expect(screen.getByLabelText('Period')).toHaveDisplayValue('December 2025')
+
+      await waitFor(() =>
+        expect(requestedSpending()).toEqual([
+          '/api/spending?year=2026&month=9',
+          '/api/spending?year=2026',
+          '/api/spending?year=2025',
+          '/api/spending?year=2025&quarter=4',
+          '/api/spending?year=2025&quarter=1',
+          '/api/spending?year=2025&month=2',
+          '/api/spending?year=2025',
+          '/api/spending?year=2025&month=12',
+        ]),
+      )
+    })
   })
 })

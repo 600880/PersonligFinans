@@ -16,19 +16,19 @@ public static class SpendingEndpoints
 
     public static void MapSpendingEndpoints(this IEndpointRouteBuilder app)
     {
-        app.MapGet("/api/spending", SpendingOfMonth);
+        app.MapGet("/api/spending", SpendingOfPeriod);
     }
 
-    // A month's Spending: one slice per Category with negative Amounts, and one for Uncategorized
-    // when it has any, largest first.
-    private static async Task<IResult> SpendingOfMonth(int? year, int? month, AppDbContext db)
+    // A Period's Spending: one slice per Category with negative Amounts, and one for Uncategorized
+    // when it has any, largest first. The Period is a year with a quarter, a year with a month, or a
+    // year alone for the whole year.
+    private static async Task<IResult> SpendingOfPeriod(int? year, int? quarter, int? month, AppDbContext db)
     {
-        var errors = TransactionEndpoints.ValidateMonth(year, month);
+        var errors = ValidatePeriod(year, quarter, month);
         if (errors.Count > 0)
             return Results.ValidationProblem(errors);
 
-        var first = new DateOnly(year!.Value, month!.Value, 1);
-        var next = first.AddMonths(1);
+        var (first, next) = Bounds(year!.Value, quarter, month);
         var slices = await db.Transactions
             .Where(t => t.PostedDate >= first && t.PostedDate < next && t.Amount < 0)
             .Where(t => t.Category == null || t.Category.Name != TransfersCategoryName)
@@ -39,5 +39,37 @@ public static class SpendingEndpoints
             .ToListAsync();
 
         return Results.Ok(new SpendingResponse(slices.Sum(s => s.Amount), slices));
+    }
+
+    // The errors per field of a Period; empty when it is valid.
+    private static Dictionary<string, string[]> ValidatePeriod(int? year, int? quarter, int? month)
+    {
+        var errors = month is null
+            ? TransactionEndpoints.ValidateYear(year)
+            : TransactionEndpoints.ValidateMonth(year, month);
+
+        if (quarter is not null && month is not null)
+            errors["quarter"] = ["Give either a quarter or a month, not both."];
+        else if (quarter is not (null or (>= 1 and <= 4)))
+            errors["quarter"] = ["Quarter must be between 1 and 4."];
+
+        return errors;
+    }
+
+    // From the first day of the Period up to, but not including, the first day of the next.
+    private static (DateOnly First, DateOnly Next) Bounds(int year, int? quarter, int? month)
+    {
+        if (month is not null)
+        {
+            var firstOfMonth = new DateOnly(year, month.Value, 1);
+            return (firstOfMonth, firstOfMonth.AddMonths(1));
+        }
+        if (quarter is not null)
+        {
+            var firstOfQuarter = new DateOnly(year, 3 * (quarter.Value - 1) + 1, 1);
+            return (firstOfQuarter, firstOfQuarter.AddMonths(3));
+        }
+        var firstOfYear = new DateOnly(year, 1, 1);
+        return (firstOfYear, firstOfYear.AddYears(1));
     }
 }
