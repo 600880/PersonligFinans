@@ -6,6 +6,7 @@ import { categoryColour } from '../lib/categoryColours'
 import { defaultSpan, monthLabel, monthValue, offeredMonths, withFrom, withTo, type Span } from '../lib/span'
 import {
   categoryRow,
+  coverageNote,
   formatChange,
   TOTAL_ROW,
   trendCategories,
@@ -55,12 +56,12 @@ function trendRows(monthly: MonthSpending[], categories: Category[] | null): Tre
   ]
 }
 
-// How Spending changed over a Span, as lines with one point per month and a table of the first and
-// last points for Total and each Category. Each row switches its line on and off; Total starts on and
-// the Categories off, and they stay as switched when the Span changes. `months` are the months with
-// Transactions, newest first, which decide the months offered. Opens on the 12 months ending at the
-// latest of them, and does so again whenever they are reloaded. Has its own Include transfers, off at
-// first and apart from the donut's.
+// How Spending changed over a Span, as lines with a point per month, quarter or half-year and a table
+// of the first and last points for Total and each Category. Each row switches its line on and off;
+// Total starts on and the Categories off, and they stay as switched when the Span changes. `months`
+// are the months with Transactions, newest first, which decide the months offered. Opens on the 12
+// months ending at the latest of them, and does so again whenever they are reloaded. Has its own
+// Include transfers, off at first and apart from the donut's.
 export function SpendingTrend({ months, categories }: { months: TransactionMonth[]; categories: Category[] | null }) {
   const headingId = useId()
   const offered = useMemo(() => offeredMonths(months), [months])
@@ -181,7 +182,10 @@ export function SpendingTrend({ months, categories }: { months: TransactionMonth
                     if (!point) return null
                     return (
                       <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm">
-                        <p className="font-medium text-slate-900">{point.label}</p>
+                        <p className="font-medium text-slate-900">
+                          {point.label}
+                          {coverageNote(point)}
+                        </p>
                         {drawn.map((row) => (
                           <p key={row.key} className="text-slate-600 tabular-nums">
                             {row.name} {formatAmount(point.values[row.key])} per month

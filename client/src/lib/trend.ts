@@ -1,7 +1,6 @@
 import type { MonthSpending } from './api'
+import { groupMonths } from './grouping'
 import { percent } from './percent'
-import { periodLabel, periodOfMonth } from './period'
-import { monthValue } from './span'
 
 // Identifies the Total row of the trend, and its line.
 export const TOTAL_ROW = 'total'
@@ -11,12 +10,14 @@ export function categoryRow(categoryId: number | null): string {
   return categoryId === null ? 'uncategorized' : String(categoryId)
 }
 
-// One point of the trend: a stretch of the Span, labelled like the Dashboard's Periods, with the
-// Spending of Total and of each Category in the Span as NOK per month, keyed by row. Every point is
-// one month for now.
+// One point of the trend: a month, quarter or half-year of the Span, with the Spending of Total and
+// of each Category in the Span as NOK per month, keyed by row. `monthsCovered` is how many of the
+// `monthsInUnit` months of its unit fall inside the Span.
 export interface TrendPoint {
   key: string
   label: string
+  monthsCovered: number
+  monthsInUnit: number
   values: Record<string, number>
 }
 
@@ -31,17 +32,25 @@ export function trendCategories(monthly: MonthSpending[]): (number | null)[] {
 }
 
 // The trend's points for a Span's monthly Spending, in order. Each point has a value for Total and
-// every Category in the Span, 0 when it had no Spending there.
+// every Category in the Span, 0 when it had no Spending there. Each value is the Spending divided by
+// the months the point covers, so that partial points at the Span's edges compare with full ones.
 export function trendPoints(monthly: MonthSpending[]): TrendPoint[] {
   const rows = [TOTAL_ROW, ...trendCategories(monthly).map(categoryRow)]
-  return monthly.map((month) => {
-    const values: Record<string, number> = Object.fromEntries(rows.map((row) => [row, 0]))
-    for (const { categoryId, amount } of month.slices) {
-      values[categoryRow(categoryId)] += amount
-      values[TOTAL_ROW] += amount
+  return groupMonths(monthly).map((group) => {
+    const monthsCovered = group.months.length
+    const sums: Record<string, number> = Object.fromEntries(rows.map((row) => [row, 0]))
+    for (const { categoryId, amount } of group.months.flatMap((month) => month.slices)) {
+      sums[categoryRow(categoryId)] += amount
+      sums[TOTAL_ROW] += amount
     }
-    return { key: monthValue(month), label: periodLabel(periodOfMonth(month, 'month')), values }
+    const values = Object.fromEntries(rows.map((row) => [row, sums[row] / monthsCovered]))
+    return { key: group.key, label: group.label, monthsCovered, monthsInUnit: group.monthsInUnit, values }
   })
+}
+
+// " (2 of 3 months)" for a point covering only part of its quarter or half-year, otherwise "".
+export function coverageNote({ monthsCovered, monthsInUnit }: TrendPoint): string {
+  return monthsCovered < monthsInUnit ? ` (${monthsCovered} of ${monthsInUnit} months)` : ''
 }
 
 // The change from the first point's monthly value to the last's, e.g. "▲ +12,3 %" or "▼ −8,0 %".
