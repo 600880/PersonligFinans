@@ -132,7 +132,10 @@ public static class Categorizer
 
     // Re-matches every rule-eligible Transaction against the rules tracked by db, including ones
     // added, changed or deleted but not yet saved, and returns how many changed Category.
-    public static async Task<int> RematchAsync(AppDbContext db)
+    public static async Task<int> RematchAsync(AppDbContext db) => (await RematchedAsync(db)).Count;
+
+    // Re-matches like RematchAsync, and returns the Transactions that changed Category.
+    private static async Task<List<Transaction>> RematchedAsync(AppDbContext db)
     {
         await db.CategorizationRules.LoadAsync();
         var rules = db.CategorizationRules.Local.ToList();
@@ -140,13 +143,13 @@ public static class Categorizer
 
         var eligible = await db.Transactions.Where(IsRuleEligible).ToListAsync();
 
-        var changed = 0;
+        var changed = new List<Transaction>();
         foreach (var transaction in eligible)
         {
             var rule = ChooseRule(transaction.Description, rules);
             var categoryId = rule?.CategoryId ?? (transaction.AiPlacedInOther ? otherId : null);
             if (transaction.CategoryId != categoryId)
-                changed++;
+                changed.Add(transaction);
             transaction.CategoryId = categoryId;
             transaction.CategorizationRule = rule;
             if (rule is null)
@@ -154,6 +157,33 @@ public static class Categorizer
         }
 
         return changed;
+    }
+
+    // Moves a Category's Categorization Rules and Transactions to the replacement Category, then
+    // re-matches, and returns how many Transactions changed Category, counting each once. Each
+    // Transaction keeps how it was categorized: a manual one stays manual, and one categorized by a
+    // rule follows its rule. Moved AI-generated rules lose their mark when the replacement is Other,
+    // since no AI-generated rule has Other. Call it inside the database transaction of a rule
+    // change; nothing is saved.
+    public static async Task<int> MoveToReplacementAsync(AppDbContext db, int categoryId, int replacementId)
+    {
+        var replacementIsOther = replacementId == await OtherCategoryIdAsync(db);
+        foreach (var rule in await db.CategorizationRules.Where(r => r.CategoryId == categoryId).ToListAsync())
+        {
+            rule.CategoryId = replacementId;
+            if (replacementIsOther)
+                rule.AiGenerated = false;
+        }
+
+        var moved = await db.Transactions.Where(t => t.CategoryId == categoryId).ToListAsync();
+        foreach (var transaction in moved)
+            transaction.CategoryId = replacementId;
+
+        // Every moved Transaction changed Category. The re-match counts changes from where the move
+        // left them, so those it changes again are counted only once here.
+        var movedSet = moved.ToHashSet();
+        var rematched = await RematchedAsync(db);
+        return moved.Count + rematched.Count(t => !movedSet.Contains(t));
     }
 
     // Makes each of the given Transactions that is still Uncategorized AI-placed in Other. During

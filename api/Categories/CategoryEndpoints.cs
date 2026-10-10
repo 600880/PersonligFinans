@@ -92,10 +92,13 @@ public static class CategoryEndpoints
             await db.CategorizationRules.CountAsync(r => r.CategoryId == id)));
     }
 
-    // Deletes a Category that nothing uses. Built-in Categories can't be deleted.
-    private static async Task<IResult> DeleteCategory(int id, AppDbContext db)
+    // Deletes a Category. One in use needs a replacement Category, which its Categorization Rules
+    // and Transactions move to first; one nothing uses needs nothing. Built-in Categories can't be
+    // deleted. Returns how many Transactions changed Category.
+    private static async Task<IResult> DeleteCategory(int id, int? replacementCategoryId, AppDbContext db)
     {
-        // Under the rule-change lock, so no rule can take the Category between the check and the delete.
+        // A rule change, under its lock, so no rule can take the Category between the check and the
+        // delete, and the move and its re-match happen in one database transaction.
         await using var transaction = await Categorizer.BeginRuleChangeAsync(db);
 
         var category = await db.Categories.FindAsync(id);
@@ -103,7 +106,18 @@ public static class CategoryEndpoints
             return Results.NotFound();
         if (category.BuiltIn)
             return CategoryProblem($"{category.Name} is a Built-in Category, so it can't be deleted.");
-        if (await db.Transactions.AnyAsync(t => t.CategoryId == id) ||
+
+        var transactionsChanged = 0;
+        if (replacementCategoryId is { } replacementId)
+        {
+            if (replacementId == id)
+                return ReplacementProblem("The replacement must be another Category.");
+            if (!await db.Categories.AnyAsync(c => c.Id == replacementId))
+                return ReplacementProblem("The replacement Category does not exist.");
+
+            transactionsChanged = await Categorizer.MoveToReplacementAsync(db, id, replacementId);
+        }
+        else if (await db.Transactions.AnyAsync(t => t.CategoryId == id) ||
             await db.CategorizationRules.AnyAsync(r => r.CategoryId == id))
             return InUse(category);
 
@@ -112,15 +126,14 @@ public static class CategoryEndpoints
         {
             await db.SaveChangesAsync();
         }
-        // A Transaction took the Category concurrently, between the check and now.
+        // A Transaction took the Category concurrently, between the check or move and now.
         catch (DbUpdateException e) when (e.InnerException is PostgresException { SqlState: PostgresErrorCodes.ForeignKeyViolation })
         {
             return InUse(category);
         }
         await transaction.CommitAsync();
 
-        // Nothing used the Category, so no Transaction changed.
-        return Results.Ok(new DeletedCategoryResponse(TransactionsChanged: 0));
+        return Results.Ok(new DeletedCategoryResponse(transactionsChanged));
     }
 
     private static IResult InUse(Category category) =>
@@ -128,6 +141,9 @@ public static class CategoryEndpoints
 
     private static IResult CategoryProblem(string message) =>
         Results.ValidationProblem(new Dictionary<string, string[]> { ["category"] = [message] });
+
+    private static IResult ReplacementProblem(string message) =>
+        Results.ValidationProblem(new Dictionary<string, string[]> { ["replacementCategoryId"] = [message] });
 
     // The trimmed name and description, and the validation errors keyed on the request's fields.
     // When editing, the edited Category's own name doesn't count as a duplicate, and a Built-in

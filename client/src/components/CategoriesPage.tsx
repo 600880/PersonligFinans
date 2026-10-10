@@ -43,8 +43,13 @@ function changedMessage(action: string, transactionsChanged: number) {
   return `${action} ${transactionsChanged} ${transactions} changed category.`
 }
 
+function isInUse(category: Category) {
+  return category.transactionCount > 0 || category.ruleCount > 0
+}
+
 // Every Category in the order the API lists them, alphabetically, with what uses it, and a form to
 // add one. Each can be edited inline, and one that isn't Built-in can be deleted after a confirmation.
+// Deleting one in use asks for a replacement Category, which its Transactions and rules move to.
 export function CategoriesPage() {
   const [categories, setCategories] = useState<Category[]>([])
   const [name, setName] = useState('')
@@ -53,6 +58,8 @@ export function CategoriesPage() {
   const [fieldErrors, setFieldErrors] = useState<CategoryFieldErrors>({})
   // The id of the Category whose delete is waiting for confirmation.
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<number | null>(null)
+  // The replacement chosen for a Category in use, as the select's value; '' until one is chosen.
+  const [replacementId, setReplacementId] = useState('')
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [edit, setEdit] = useState<CategoryEdit | null>(null)
@@ -109,19 +116,42 @@ export function CategoriesPage() {
     }
   }
 
+  function startDelete(category: Category) {
+    setReplacementId('')
+    setConfirmingDeleteId(category.id)
+  }
+
+  // A Category in use moves to the chosen replacement; one nothing uses is simply deleted.
   async function handleDelete(category: Category) {
     if (isSaving) return
+    const replacement = isInUse(category) ? Number(replacementId) : undefined
+    if (replacement === 0) return
 
     setIsSaving(true)
     setStatusMessage(null)
     setErrorMessage(null)
     setFieldErrors({})
 
-    const result = await deleteCategory(category.id).finally(() => setIsSaving(false))
+    const result = await deleteCategory(category.id, { replacementCategoryId: replacement }).finally(() =>
+      setIsSaving(false),
+    )
     setConfirmingDeleteId(null)
 
     if (result.ok) {
-      setCategories((categories) => categories.filter((c) => c.id !== category.id))
+      // The replacement now has everything that used the deleted Category.
+      setCategories((categories) =>
+        categories
+          .filter((c) => c.id !== category.id)
+          .map((c) =>
+            c.id === replacement && !result.alreadyDeleted
+              ? {
+                  ...c,
+                  transactionCount: c.transactionCount + category.transactionCount,
+                  ruleCount: c.ruleCount + category.ruleCount,
+                }
+              : c,
+          ),
+      )
       setStatusMessage(
         result.alreadyDeleted
           ? 'The category was already deleted.'
@@ -288,9 +318,28 @@ export function CategoriesPage() {
                   {confirmingDeleteId === category.id ? (
                     <>
                       <span className="mr-1 text-slate-700">Delete {category.name}?</span>
+                      {isInUse(category) && (
+                        <label className="mr-1 text-slate-700">
+                          Move its transactions and rules to{' '}
+                          <select
+                            value={replacementId}
+                            onChange={(event) => setReplacementId(event.target.value)}
+                            className="rounded-lg border border-slate-300 px-2 py-1"
+                          >
+                            <option value="">Choose a category</option>
+                            {categories
+                              .filter((c) => c.id !== category.id)
+                              .map((c) => (
+                                <option key={c.id} value={c.id}>
+                                  {c.name}
+                                </option>
+                              ))}
+                          </select>
+                        </label>
+                      )}
                       <button
                         type="button"
-                        disabled={isSaving}
+                        disabled={isSaving || (isInUse(category) && replacementId === '')}
                         onClick={() => handleDelete(category)}
                         className={smallButtonClass}
                       >
@@ -309,7 +358,7 @@ export function CategoriesPage() {
                         <button
                           type="button"
                           disabled={isSaving}
-                          onClick={() => setConfirmingDeleteId(category.id)}
+                          onClick={() => startDelete(category)}
                           className={smallButtonClass}
                         >
                           Delete

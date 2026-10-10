@@ -59,7 +59,8 @@ let handleAddRule: PostHandler
 let handleAddCategory: PostHandler
 let handleEditRule: (id: number, body: unknown) => Response
 let handleDeleteRule: (id: number) => Response
-let handleDeleteCategory: (id: number) => Response
+// The query holds the delete's choice, e.g. the replacement Category.
+let handleDeleteCategory: (id: number, query: URLSearchParams) => Response
 let handleEditCategory: (id: number, body: unknown) => Response | Promise<Response>
 let months: { year: number; month: number }[] | Response
 let handleListMonth: (year: number, month: number) => Response
@@ -105,11 +106,13 @@ const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
     return handleEditRule(Number(ruleUrl[1]), JSON.parse(init.body as string))
   }
   if (ruleUrl && init?.method === 'DELETE') return handleDeleteRule(Number(ruleUrl[1]))
-  const categoryUrlMatch = /^\/api\/categories\/(\d+)$/.exec(url)
+  const categoryUrlMatch = /^\/api\/categories\/(\d+)(?:\?(.*))?$/.exec(url)
   if (categoryUrlMatch && init?.method === 'PUT') {
     return handleEditCategory(Number(categoryUrlMatch[1]), JSON.parse(init.body as string))
   }
-  if (categoryUrlMatch && init?.method === 'DELETE') return handleDeleteCategory(Number(categoryUrlMatch[1]))
+  if (categoryUrlMatch && init?.method === 'DELETE') {
+    return handleDeleteCategory(Number(categoryUrlMatch[1]), new URLSearchParams(categoryUrlMatch[2]))
+  }
   if (url === '/api/categories' && init?.method === 'POST') {
     return handleAddCategory(JSON.parse(init.body as string))
   }
@@ -773,7 +776,62 @@ describe('Categories page', () => {
       expect(await screen.findByRole('status')).toHaveTextContent(
         'Category deleted. 0 transactions changed category.',
       )
+      expect(screen.queryByRole('combobox')).not.toBeInTheDocument()
       expect(screen.queryByRole('row', { name: /^Health/ })).not.toBeInTheDocument()
+    })
+
+    it('asks for a replacement when the Category is in use, and moves it there', async () => {
+      categoriesServed = [categories[0], { ...health, transactionCount: 3, ruleCount: 2 }, categories[1]]
+      let deleted: { id: number; query: string } | undefined
+      handleDeleteCategory = (id, query) => {
+        deleted = { id, query: query.toString() }
+        return Response.json({ transactionsChanged: 3 })
+      }
+      const user = await openCategoriesPage()
+      await listedRows()
+
+      await user.click(within(categoryRow('Health')).getByRole('button', { name: 'Delete' }))
+
+      const replacement = within(categoryRow('Health')).getByRole('combobox', {
+        name: 'Move its transactions and rules to',
+      })
+      expect(within(replacement).getAllByRole('option').map((option) => option.textContent)).toEqual([
+        'Choose a category',
+        'Groceries',
+        'Other',
+      ])
+      const confirm = within(categoryRow('Health')).getByRole('button', { name: 'Confirm delete' })
+      expect(confirm).toBeDisabled()
+
+      await user.selectOptions(replacement, 'Other')
+      await user.click(confirm)
+
+      expect(deleted).toEqual({ id: 7, query: 'replacementCategoryId=13' })
+      expect(await screen.findByRole('status')).toHaveTextContent(
+        'Category deleted. 3 transactions changed category.',
+      )
+      expect(await listedRows()).toEqual([
+        ['Groceries Built-in', 'All groceries.', '12', '3'],
+        ['Other Built-in', "Costs that don't belong in any other category.", '4', '2'],
+      ])
+    })
+
+    it("shows the server's reason when the replacement is refused", async () => {
+      categoriesServed = [categories[0], { ...health, ruleCount: 1 }]
+      handleDeleteCategory = () =>
+        Response.json(
+          { status: 400, errors: { replacementCategoryId: ['The replacement Category does not exist.'] } },
+          { status: 400 },
+        )
+      const user = await openCategoriesPage()
+      await listedRows()
+
+      await user.click(within(categoryRow('Health')).getByRole('button', { name: 'Delete' }))
+      await user.selectOptions(within(categoryRow('Health')).getByRole('combobox'), 'Groceries')
+      await user.click(within(categoryRow('Health')).getByRole('button', { name: 'Confirm delete' }))
+
+      expect(await screen.findByRole('alert')).toHaveTextContent('The replacement Category does not exist.')
+      expect(within(categoryRow('Health')).getByRole('button', { name: 'Delete' })).toBeInTheDocument()
     })
 
     it('keeps the Category when the confirmation is cancelled', async () => {
@@ -795,7 +853,8 @@ describe('Categories page', () => {
     })
 
     it("shows the server's reason and keeps the row when the delete is refused", async () => {
-      categoriesServed = [categories[0], { ...health, transactionCount: 2 }]
+      // Listed as unused, but something started using it since.
+      categoriesServed = [categories[0], health]
       handleDeleteCategory = () =>
         Response.json(
           { status: 400, errors: { category: ["Health is in use, so it can't be deleted."] } },

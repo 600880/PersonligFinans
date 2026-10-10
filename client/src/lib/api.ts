@@ -31,12 +31,24 @@ export type DeleteCategoryResult =
   | { ok: true; alreadyDeleted: boolean; transactionsChanged: number }
   | { ok: false; message: string }
 
-// Deletes a Category nothing uses. The server refuses a Built-in Category or one in use, and the
-// message says why.
-export async function deleteCategory(id: number): Promise<DeleteCategoryResult> {
+// What happens to what uses the Category being deleted. A Category in use needs a replacement
+// Category, which its Categorization Rules and Transactions move to; one nothing uses needs nothing.
+export interface DeleteCategoryChoice {
+  replacementCategoryId?: number
+}
+
+// Deletes a Category. The server refuses a Built-in Category, one in use without a replacement, or
+// a replacement that isn't another existing Category, and the message says why.
+export async function deleteCategory(id: number, choice: DeleteCategoryChoice = {}): Promise<DeleteCategoryResult> {
+  const query = new URLSearchParams()
+  if (choice.replacementCategoryId !== undefined) {
+    query.set('replacementCategoryId', String(choice.replacementCategoryId))
+  }
+  const search = query.toString() ? `?${query}` : ''
+
   let response: Response
   try {
-    response = await fetch(`/api/categories/${id}`, { method: 'DELETE' })
+    response = await fetch(`/api/categories/${id}${search}`, { method: 'DELETE' })
   } catch {
     return { ok: false, message: 'Could not reach the server.' }
   }
