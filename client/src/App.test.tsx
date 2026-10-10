@@ -883,8 +883,47 @@ describe('Transactions page', () => {
   ]
 
   const septemberTransactions = [
-    { id: 5, date: '2026-09-24', description: 'Rema 1000', amount: -1249.9, reference: null, categoryId: 1 },
-    { id: 4, date: '2026-09-03', description: 'Lønn Fra: Testfirma AS', amount: 24500, reference: null, categoryId: null },
+    {
+      id: 5,
+      date: '2026-09-24',
+      description: 'Rema 1000',
+      amount: -1249.9,
+      reference: null,
+      categoryId: 1,
+      aiPlacedInOther: false,
+    },
+    {
+      id: 4,
+      date: '2026-09-03',
+      description: 'Lønn Fra: Testfirma AS',
+      amount: 24500,
+      reference: null,
+      categoryId: null,
+      aiPlacedInOther: false,
+    },
+  ]
+
+  // A month with a Transaction AI-placed in Other, one the user put in Other, and one in another Category.
+  const aiPlacedTransactions = [
+    septemberTransactions[0],
+    {
+      id: 8,
+      date: '2026-09-20',
+      description: 'Vipps *Ola Nordmann',
+      amount: -200,
+      reference: null,
+      categoryId: 13,
+      aiPlacedInOther: true,
+    },
+    {
+      id: 7,
+      date: '2026-09-12',
+      description: 'Gave',
+      amount: -500,
+      reference: null,
+      categoryId: 13,
+      aiPlacedInOther: false,
+    },
   ]
 
   async function openTransactionsPage() {
@@ -1075,6 +1114,81 @@ describe('Transactions page', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Could not reach the server.')
     expect(categorySelect('Lønn Fra: Testfirma AS').selectedOptions[0]).toHaveTextContent('Uncategorized')
+  })
+
+  function transactionRow(description: string) {
+    const row = screen.getByRole('cell', { name: description }).closest('tr')
+    if (!row) throw new Error(`No row for ${description}`)
+    return row
+  }
+
+  function descriptions() {
+    return screen
+      .getAllByRole('row')
+      .slice(1)
+      .map((row) => within(row).getAllByRole('cell')[1].textContent)
+  }
+
+  async function openAiPlacedMonth() {
+    months = [{ year: 2026, month: 9 }]
+    handleListMonth = () => Response.json(aiPlacedTransactions)
+    const user = await openTransactionsPage()
+    await screen.findByRole('cell', { name: 'Rema 1000' })
+    return user
+  }
+
+  it('shows an AI marker next to Other only for Transactions AI-placed in Other', async () => {
+    await openAiPlacedMonth()
+
+    expect(categorySelect('Vipps *Ola Nordmann')).toHaveValue('13')
+    expect(within(transactionRow('Vipps *Ola Nordmann')).getByText('AI')).toBeInTheDocument()
+    expect(within(transactionRow('Gave')).queryByText('AI')).not.toBeInTheDocument()
+    expect(within(transactionRow('Rema 1000')).queryByText('AI')).not.toBeInTheDocument()
+  })
+
+  it('shows only Transactions AI-placed in Other while AI-placed only is on', async () => {
+    const user = await openAiPlacedMonth()
+
+    await user.click(screen.getByRole('checkbox', { name: 'AI-placed only' }))
+    expect(descriptions()).toEqual(['Vipps *Ola Nordmann'])
+
+    await user.click(screen.getByRole('checkbox', { name: 'AI-placed only' }))
+    expect(descriptions()).toEqual(['Rema 1000', 'Vipps *Ola Nordmann', 'Gave'])
+  })
+
+  it('says when a month has no Transactions AI-placed in Other while AI-placed only is on', async () => {
+    const user = await openSeptember()
+
+    await user.click(screen.getByRole('checkbox', { name: 'AI-placed only' }))
+
+    expect(screen.getByText('No AI-placed transactions in September 2026')).toBeInTheDocument()
+    expect(screen.queryByRole('table')).not.toBeInTheDocument()
+  })
+
+  it('drops the AI marker once the Category of a Transaction AI-placed in Other is changed', async () => {
+    handleChangeCategory = (_id, body) =>
+      Response.json({ ...aiPlacedTransactions[1], ...(body as object), aiPlacedInOther: false })
+    const user = await openAiPlacedMonth()
+    await user.click(screen.getByRole('checkbox', { name: 'AI-placed only' }))
+
+    await user.selectOptions(categorySelect('Vipps *Ola Nordmann'), 'Groceries')
+
+    expect(await screen.findByRole('status')).toHaveTextContent('Category changed')
+    expect(screen.getByText('No AI-placed transactions in September 2026')).toBeInTheDocument()
+    await user.click(screen.getByRole('checkbox', { name: 'AI-placed only' }))
+    expect(categorySelect('Vipps *Ola Nordmann')).toHaveValue('1')
+    expect(within(transactionRow('Vipps *Ola Nordmann')).queryByText('AI')).not.toBeInTheDocument()
+  })
+
+  it('keeps the AI marker when changing the Category of a Transaction AI-placed in Other fails', async () => {
+    handleChangeCategory = () => new Response(null, { status: 500 })
+    const user = await openAiPlacedMonth()
+
+    await user.selectOptions(categorySelect('Vipps *Ola Nordmann'), 'Groceries')
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Saving failed (500).')
+    expect(categorySelect('Vipps *Ola Nordmann')).toHaveValue('13')
+    expect(within(transactionRow('Vipps *Ola Nordmann')).getByText('AI')).toBeInTheDocument()
   })
 })
 
