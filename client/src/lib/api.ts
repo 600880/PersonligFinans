@@ -24,6 +24,39 @@ export async function fetchCategories(): Promise<Category[]> {
   return (await response.json()) as Category[]
 }
 
+// alreadyDeleted: the Category was gone before this delete, so nothing changed.
+export type DeleteCategoryResult =
+  | { ok: true; alreadyDeleted: boolean; transactionsChanged: number }
+  | { ok: false; message: string }
+
+// Deletes a Category nothing uses. The server refuses a Built-in Category or one in use, and the
+// message says why.
+export async function deleteCategory(id: number): Promise<DeleteCategoryResult> {
+  let response: Response
+  try {
+    response = await fetch(`/api/categories/${id}`, { method: 'DELETE' })
+  } catch {
+    return { ok: false, message: 'Could not reach the server.' }
+  }
+
+  if (response.ok) {
+    const { transactionsChanged } = (await response.json()) as { transactionsChanged: number }
+    return { ok: true, alreadyDeleted: false, transactionsChanged }
+  }
+
+  if (response.status === 404) return { ok: true, alreadyDeleted: true, transactionsChanged: 0 }
+
+  if (response.status === 400) {
+    const problem = (await response.json().catch(() => null)) as {
+      errors?: Record<string, string[]>
+    } | null
+    const message = Object.values(problem?.errors ?? {})[0]?.[0]
+    if (message) return { ok: false, message }
+  }
+
+  return { ok: false, message: `Deleting failed (${response.status}).` }
+}
+
 // categoryId is null for an Uncategorized Transaction. aiPlacedInOther is set while the LLM's choice
 // of Other stands: no rule holds the Transaction and the user hasn't changed its Category.
 export interface Transaction {

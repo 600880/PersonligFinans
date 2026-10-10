@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using PersonligFinans.Api.Categories;
@@ -8,7 +9,7 @@ using PersonligFinans.Api.Data;
 namespace PersonligFinans.Api.Tests;
 
 [Collection(ApiCollection.Name)]
-public class CategoryEndpointsTests
+public class CategoryEndpointsTests : IAsyncLifetime
 {
     private const int TravelId = 10;
     private const int ElectronicsId = 15;
@@ -24,6 +25,33 @@ public class CategoryEndpointsTests
     {
         _factory = factory;
         _client = factory.CreateClient();
+    }
+
+    // The Categories this test created, removed afterwards with whatever still uses them, so that
+    // the other tests see only the seeded Categories.
+    private readonly List<int> _createdCategoryIds = [];
+
+    public Task InitializeAsync() => Task.CompletedTask;
+
+    public async Task DisposeAsync()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        await db.Transactions.Where(t => _createdCategoryIds.Contains(t.CategoryId!.Value)).ExecuteDeleteAsync();
+        await db.CategorizationRules.Where(r => _createdCategoryIds.Contains(r.CategoryId)).ExecuteDeleteAsync();
+        await db.Categories.Where(c => _createdCategoryIds.Contains(c.Id)).ExecuteDeleteAsync();
+    }
+
+    // Adds a Category straight to the database, and returns its id.
+    private async Task<int> CreateCategory(string name, bool builtIn = false)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var category = new Category { Name = $"{_token} {name}", Description = "Made by a test.", BuiltIn = builtIn };
+        db.Categories.Add(category);
+        await db.SaveChangesAsync();
+        _createdCategoryIds.Add(category.Id);
+        return category.Id;
     }
 
     private async Task<List<CategoryResponse>> ListCategories() =>
@@ -105,5 +133,77 @@ public class CategoryEndpointsTests
         db.Categories.Add(new Category { Name = $"{_token.ToUpperInvariant()} HOBBY", Description = "Hobbies." });
 
         await Assert.ThrowsAsync<DbUpdateException>(() => db.SaveChangesAsync());
+    }
+
+    [Fact]
+    public async Task Delete_UnusedCategory_DeletesItAndChangesNoTransactions()
+    {
+        var id = await CreateCategory("Hobby");
+
+        var response = await _client.DeleteAsync($"/api/categories/{id}");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var deleted = await response.Content.ReadFromJsonAsync<DeletedCategoryResponse>();
+        Assert.Equal(0, deleted!.TransactionsChanged);
+        Assert.DoesNotContain(await ListCategories(), c => c.Id == id);
+    }
+
+    [Fact]
+    public async Task Delete_UnknownCategory_ReturnsNotFound()
+    {
+        var response = await _client.DeleteAsync($"/api/categories/{int.MaxValue}");
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Delete_BuiltInCategory_IsAValidationProblem()
+    {
+        var id = await CreateCategory("Pets", builtIn: true);
+
+        var response = await _client.DeleteAsync($"/api/categories/{id}");
+
+        await AssertCategoryProblem(response, $"{_token} Pets is a Built-in Category, so it can't be deleted.");
+        Assert.Contains(await ListCategories(), c => c.Id == id);
+    }
+
+    [Fact]
+    public async Task Delete_CategoryATransactionUses_IsAValidationProblem()
+    {
+        var id = await CreateCategory("Garden");
+        var transaction = await _client.PostAsJsonAsync("/api/transactions", new
+        {
+            date = "2026-08-03",
+            description = $"{_token} Plantasjen",
+            amount = -100m,
+            categoryId = id,
+        });
+        Assert.Equal(HttpStatusCode.Created, transaction.StatusCode);
+
+        var response = await _client.DeleteAsync($"/api/categories/{id}");
+
+        await AssertCategoryProblem(response, $"{_token} Garden is in use, so it can't be deleted.");
+        Assert.Contains(await ListCategories(), c => c.Id == id);
+    }
+
+    [Fact]
+    public async Task Delete_CategoryARuleUses_IsAValidationProblem()
+    {
+        var id = await CreateCategory("Garden");
+        var rule = await _client.PostAsJsonAsync(
+            "/api/categorization-rules", new { keyword = $"{_token} plantasjen", categoryId = id });
+        Assert.Equal(HttpStatusCode.Created, rule.StatusCode);
+
+        var response = await _client.DeleteAsync($"/api/categories/{id}");
+
+        await AssertCategoryProblem(response, $"{_token} Garden is in use, so it can't be deleted.");
+        Assert.Contains(await ListCategories(), c => c.Id == id);
+    }
+
+    private static async Task AssertCategoryProblem(HttpResponseMessage response, string message)
+    {
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var problem = await response.Content.ReadFromJsonAsync<ValidationProblemDetails>();
+        Assert.Equal([message], problem!.Errors["category"]);
     }
 }
