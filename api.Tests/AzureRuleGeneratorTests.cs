@@ -209,6 +209,21 @@ public class AzureRuleGeneratorTests
     }
 
     [Fact]
+    public async Task Generate_TellsTheModelADeclinedRowIsPutInOtherWhichItCannotChoose()
+    {
+        var handler = AnsweringWithContent("""{"rows": []}""");
+
+        await Generator(handler).GenerateAsync([Bakery], CategoryNames);
+
+        var request = JsonNode.Parse(Assert.Single(handler.RequestBodies))!;
+        var systemMessage = request["messages"]!.AsArray().Single(m => (string?)m!["role"] == "system")!;
+        Assert.Contains("put in the \"Other\" category", (string)systemMessage["content"]!);
+        var categoryEnum = request["response_format"]!["json_schema"]!["schema"]!
+            ["properties"]!["rows"]!["items"]!["properties"]!["category"]!["enum"]!.AsArray();
+        Assert.Equal(["Groceries", "Income", "Restaurants", null], categoryEnum.Select(c => (string?)c));
+    }
+
+    [Fact]
     public void AddRuleGenerator_WithoutAnEndpoint_RegistersNoRuleGenerator()
     {
         var services = Services(new() { ["RuleGenerator:Deployment"] = "gpt-4.1-mini" });

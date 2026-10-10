@@ -12,7 +12,8 @@ public record RuleProposal(string Keyword, string CategoryName);
 // The outcome of one call to the rule generator.
 public abstract record RuleGeneration
 {
-    // A proposal for each row the generator didn't decline. Declined rows have no entry.
+    // A proposal for each row the generator didn't decline. Declined rows have no entry; the import
+    // AI-places them in Other.
     public sealed record Generated(IReadOnlyDictionary<UnmatchedRow, RuleProposal> Proposals) : RuleGeneration;
 
     // The generator failed (timeout, rate limit, network, malformed response), so every row is

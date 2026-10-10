@@ -407,6 +407,63 @@ public class TransactionEndpointsTests
     }
 
     [Fact]
+    public async Task Get_Month_ShowsATransactionTheLlmDeclinedAsAiPlacedInOther()
+    {
+        await ImportForCorrection(new FakeRuleGenerator(), "Frisør");
+
+        var placed = await Own("Frisør");
+
+        Assert.Equal((OtherCategoryId, true), (placed.CategoryId, placed.AiPlacedInOther));
+    }
+
+    [Fact]
+    public async Task Get_Month_ShowsNoTransactionAsAiPlacedInOtherWhenTheGeneratorIsUnavailable()
+    {
+        await ImportForCorrection(new FakeRuleGenerator { Unavailable = true }, "Frisør");
+
+        var uncategorized = await Own("Frisør");
+
+        Assert.Equal((null, false), (uncategorized.CategoryId, uncategorized.AiPlacedInOther));
+    }
+
+    [Fact]
+    public async Task Post_Rule_ClaimsATransactionAiPlacedInOther()
+    {
+        await ImportForCorrection(new FakeRuleGenerator(), "Frisør Nord");
+
+        await AddRule($"{_token} frisør", ShoppingCategoryId);
+
+        var claimed = await Own("Frisør Nord");
+        Assert.Equal((ShoppingCategoryId, false), (claimed.CategoryId, claimed.AiPlacedInOther));
+    }
+
+    [Fact]
+    public async Task Delete_Rule_SendsATransactionAiPlacedInOtherBackToOther()
+    {
+        await ImportForCorrection(new FakeRuleGenerator(), "Frisør Nord");
+        var ruleId = await AddRule($"{_token} frisør", ShoppingCategoryId);
+
+        var response = await _client.DeleteAsync($"/api/categorization-rules/{ruleId}");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var placed = await Own("Frisør Nord");
+        Assert.Equal((OtherCategoryId, true), (placed.CategoryId, placed.AiPlacedInOther));
+    }
+
+    [Fact]
+    public async Task Put_Category_OfTransactionAiPlacedInOther_MakesItManual()
+    {
+        await ImportForCorrection(new FakeRuleGenerator(), "Frisør Nord");
+
+        // Choosing Other itself still counts as the user's decision.
+        var changed = await CategoryChanged((await Own("Frisør Nord")).Id, OtherCategoryId);
+        await AddRule($"{_token} frisør", ShoppingCategoryId);
+
+        Assert.Equal((OtherCategoryId, false), (changed.CategoryId, changed.AiPlacedInOther));
+        Assert.Equal(changed, await Own("Frisør Nord"));
+    }
+
+    [Fact]
     public async Task Put_Category_OfUnknownTransaction_ReturnsNotFound()
     {
         var response = await ChangeCategory(int.MaxValue, GroceriesCategoryId);

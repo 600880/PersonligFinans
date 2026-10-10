@@ -6,19 +6,21 @@ using PersonligFinans.Api.Data;
 namespace PersonligFinans.Api.CategorizationRules;
 
 // Owns what a Categorization Rule means. The invariant it keeps: every rule-eligible Transaction
-// (imported, and not categorized manually) has the Category of its best-matching current rule,
-// or is Uncategorized when no rule matches.
+// (imported, and not categorized manually) has the Category of its best-matching current rule.
+// When no rule matches, it is in Other if it is AI-placed in Other, and Uncategorized otherwise.
 public static class Categorizer
 {
     // A one-letter keyword would match nearly every description.
     public const int KeywordMinLength = 2;
 
-    // "Other" is a deliberate choice of the user's, never a fallback, so no AI-generated rule gets it.
+    // "Other" is a decision, never something a rule falls back on, so no AI-generated rule gets it.
+    // The LLM places single Transactions in it instead (AI-placed in Other).
     public const string OtherCategoryName = "Other";
 
-    // Imported, and not categorized manually: categorized by a rule, or Uncategorized.
+    // Imported, and not categorized manually: categorized by a rule, Uncategorized, or AI-placed in Other.
     private static readonly Expression<Func<Transaction, bool>> IsRuleEligible =
-        t => t.BankStatementId != null && (t.CategorizationRuleId != null || t.CategoryId == null);
+        t => t.BankStatementId != null &&
+            (t.CategorizationRuleId != null || t.CategoryId == null || t.AiPlacedInOther);
 
     // The rule whose keyword the description contains, ignoring case. The longest keyword wins, so
     // a specific rule overrides a general one; between equally long keywords the oldest rule wins.
@@ -72,7 +74,8 @@ public static class Categorizer
     // - its keyword, trimmed and lowercased, is within the length limits, appears in the row's
     //   description ignoring case, and is unique ignoring case;
     // - it would change the Category of nothing that has one: no rule-eligible Transaction, and none
-    //   of the descriptions about to be imported. It may only categorize what is Uncategorized.
+    //   of the descriptions about to be imported. It may only categorize what is Uncategorized or
+    //   AI-placed in Other, since no rule holds either.
     // Each added rule is saved at once, so that the uniqueness check is made by the database,
     // comparing keywords exactly as its unique index does. Call it inside the database transaction
     // of a rule change, so the checks see every rule and the rules are undone with the change.
@@ -133,6 +136,7 @@ public static class Categorizer
     {
         await db.CategorizationRules.LoadAsync();
         var rules = db.CategorizationRules.Local.ToList();
+        var otherId = await OtherCategoryIdAsync(db);
 
         var eligible = await db.Transactions.Where(IsRuleEligible).ToListAsync();
 
@@ -140,7 +144,7 @@ public static class Categorizer
         foreach (var transaction in eligible)
         {
             var rule = ChooseRule(transaction.Description, rules);
-            var categoryId = rule?.CategoryId;
+            var categoryId = rule?.CategoryId ?? (transaction.AiPlacedInOther ? otherId : null);
             if (transaction.CategoryId != categoryId)
                 changed++;
             transaction.CategoryId = categoryId;
@@ -151,4 +155,21 @@ public static class Categorizer
 
         return changed;
     }
+
+    // Makes each of the given Transactions that is still Uncategorized AI-placed in Other. During
+    // import, call it with the rows the LLM was asked about, after the AI-generated rules are added
+    // and the import is re-matched, so it takes the rows the LLM declined or whose proposal was dropped.
+    public static async Task PlaceInOtherAsync(AppDbContext db, IEnumerable<Transaction> transactions)
+    {
+        var otherId = await OtherCategoryIdAsync(db);
+        foreach (var transaction in transactions.Where(t => t.CategoryId is null))
+        {
+            transaction.CategoryId = otherId;
+            transaction.AiPlacedInOther = true;
+        }
+    }
+
+    // Found by name, which is safe because Other is a Built-in Category and can't be renamed.
+    private static Task<int> OtherCategoryIdAsync(AppDbContext db) =>
+        db.Categories.Where(c => c.Name == OtherCategoryName).Select(c => c.Id).SingleAsync();
 }

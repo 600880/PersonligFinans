@@ -19,7 +19,9 @@ public record TransactionResponse(
     string Description,
     decimal Amount,
     string? Reference,
-    int? CategoryId);
+    int? CategoryId,
+    // In Other because the LLM put it there, with no rule holding it now.
+    bool AiPlacedInOther);
 
 public record CategoryResponse(int Id, string Name);
 
@@ -144,8 +146,9 @@ public static class TransactionEndpoints
         return Results.Created($"/api/transactions/{transaction.Id}", ToResponse(transaction));
     }
 
-    // Categorizes one Transaction manually: an imported Transaction loses its rule link, so rules never
-    // change it again. Never creates, changes or deletes a Categorization Rule.
+    // Categorizes one Transaction manually: an imported Transaction loses its rule link and its
+    // AI-placed in Other mark, so rules never change it again. Never creates, changes or deletes a
+    // Categorization Rule.
     private static async Task<IResult> ChangeCategory(int id, ChangeCategoryRequest request, AppDbContext db)
     {
         await using var dbTransaction = await Categorizer.BeginManualCategorizationAsync(db);
@@ -162,6 +165,7 @@ public static class TransactionEndpoints
 
         transaction.CategoryId = request.CategoryId;
         transaction.CategorizationRuleId = null;
+        transaction.AiPlacedInOther = false;
         await db.SaveChangesAsync();
         await dbTransaction.CommitAsync();
 
@@ -178,5 +182,6 @@ public static class TransactionEndpoints
             transaction.Description,
             transaction.Amount,
             transaction.Reference,
-            transaction.CategoryId);
+            transaction.CategoryId,
+            transaction.AiPlacedInOther && transaction.CategorizationRuleId == null);
 }
