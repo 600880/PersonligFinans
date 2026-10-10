@@ -656,41 +656,44 @@ describe('Categories page', () => {
     expect(within(screen.getByRole('row', { name: /Groceries/ })).getByText('Built-in')).toBeInTheDocument()
   })
 
-  it('adds a Category, lists it in name order and offers it on the Rules page', async () => {
+  it('adds a Category, lists it by name after the Built-in Categories and offers it on the Rules page', async () => {
+    const health = { id: 7, name: 'Health', description: 'Pharmacy etc.', builtIn: false, transactionCount: 0, ruleCount: 0 }
+    categoriesServed = [...categories, health]
     let posted: unknown
     handleAddCategory = (body) => {
       posted = body
       const added = {
         id: 20,
-        name: 'Hobby',
-        description: 'Hobby supplies.',
+        name: 'Fitness',
+        description: 'Gym and sports.',
         colour: '#0891b2',
         builtIn: false,
         transactionCount: 0,
         ruleCount: 0,
       }
-      categoriesServed = [...categories, added]
+      categoriesServed = [...categories, added, health]
       return Response.json(added, { status: 201 })
     }
     const user = await openCategoriesPage()
     await listedRows()
 
-    await user.type(screen.getByLabelText('Name'), '  Hobby ')
-    await user.type(screen.getByLabelText('Description'), ' Hobby supplies.  ')
+    await user.type(screen.getByLabelText('Name'), '  Fitness ')
+    await user.type(screen.getByLabelText('Description'), ' Gym and sports.  ')
     await user.click(screen.getByRole('button', { name: 'Add category' }))
 
-    expect(posted).toEqual({ name: 'Hobby', description: 'Hobby supplies.' })
+    expect(posted).toEqual({ name: 'Fitness', description: 'Gym and sports.' })
     expect(await screen.findByRole('status')).toHaveTextContent('Category added.')
     expect(await listedRows()).toEqual([
       ['Groceries Built-in', 'All groceries.', '12', '3'],
-      ['Hobby', 'Hobby supplies.', '0', '0'],
       ['Other Built-in', "Costs that don't belong in any other category.", '1', '0'],
+      ['Fitness', 'Gym and sports.', '0', '0'],
+      ['Health', 'Pharmacy etc.', '0', '0'],
     ])
     expect(screen.getByLabelText('Name')).toHaveValue('')
     expect(screen.getByLabelText('Description')).toHaveValue('')
 
     await user.click(screen.getByRole('button', { name: 'Rules' }))
-    expect(await screen.findByRole('option', { name: 'Hobby' })).toBeInTheDocument()
+    expect(await screen.findByRole('option', { name: 'Fitness' })).toBeInTheDocument()
   })
 
   it("shows the server's field errors and keeps the input", async () => {
@@ -977,8 +980,9 @@ describe('Categories page', () => {
       return within(row)
     }
 
-    it('edits a Category inline and keeps the list sorted by name', async () => {
-      categoriesServed = [categories[0], health, categories[1]]
+    it('edits a Category inline and keeps it sorted by name after the Built-in Categories', async () => {
+      const travel = { id: 10, name: 'Travel', description: 'All travel.', builtIn: false, transactionCount: 0, ruleCount: 0 }
+      categoriesServed = [...categories, health, travel]
       let edited: { id: number; body: unknown } | undefined
       handleEditCategory = (id, body) => {
         edited = { id, body }
@@ -1001,6 +1005,7 @@ describe('Categories page', () => {
       expect(await listedRows()).toEqual([
         ['Groceries Built-in', 'All groceries.', '12', '3'],
         ['Other Built-in', "Costs that don't belong in any other category.", '1', '0'],
+        ['Travel', 'All travel.', '0', '0'],
         ['Wellness', 'Pharmacy, gym etc.', '4', '2'],
       ])
       expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument()

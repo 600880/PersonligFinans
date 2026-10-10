@@ -25,7 +25,7 @@ A label classifying a Transaction by type of spending (e.g. "Restaurants", "Groc
 _Avoid_: Tag, type, bucket
 
 **Built-in Category**:
-One of the seven Categories the app depends on and the user can never rename or delete, only re-describe: Other, Transfers, Housing, Income, Groceries, Transport and Clothing.
+One of the seven Categories the app depends on and the user can never rename or delete, only re-describe: Housing, Groceries, Clothing, Transport, Other, Income and Transfers.
 _Avoid_: Fixed, protected, system category
 
 **Uncategorized**:

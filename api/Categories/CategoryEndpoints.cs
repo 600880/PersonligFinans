@@ -29,8 +29,9 @@ public static class CategoryEndpoints
     {
         var api = app.MapGroup("/api/categories");
 
+        // The Built-in Categories first, in their own order, then the rest by name.
         api.MapGet("/", async (AppDbContext db) =>
-            await db.Categories
+            (await db.Categories
                 .OrderBy(c => c.Name)
                 .Select(c => new CategoryResponse(
                     c.Id,
@@ -40,7 +41,9 @@ public static class CategoryEndpoints
                     c.BuiltIn,
                     db.Transactions.Count(t => t.CategoryId == c.Id),
                     db.CategorizationRules.Count(r => r.CategoryId == c.Id)))
-                .ToListAsync());
+                .ToListAsync())
+            .OrderBy(c => c.BuiltIn ? Array.IndexOf(SeedCategories.BuiltInOrder, c.Name) : SeedCategories.BuiltInOrder.Length)
+            .ToList());
 
         api.MapPost("/", AddCategory);
         api.MapPut("/{id:int}", EditCategory);

@@ -9,8 +9,13 @@ import {
   type DeleteCategoryChoice,
 } from '../lib/api'
 
-function byName(a: Category, b: Category) {
-  return a.name.localeCompare(b.name)
+// The API's order: the Built-in Categories first, kept in the order they were served (they can't
+// be renamed or added), then the rest by name.
+function inListOrder(categories: Category[]) {
+  return [
+    ...categories.filter((c) => c.builtIn),
+    ...categories.filter((c) => !c.builtIn).sort((a, b) => a.name.localeCompare(b.name)),
+  ]
 }
 
 // The Category being edited inline, with the input as typed so far.
@@ -48,7 +53,7 @@ function isInUse(category: Category) {
   return category.transactionCount > 0 || category.ruleCount > 0
 }
 
-// Every Category in the order the API lists them, alphabetically, with what uses it, and a form to
+// Every Category in the order the API lists them, Built-in ones first, with what uses it, and a form to
 // add one. Each can be edited inline, and one that isn't Built-in can be deleted after a confirmation.
 // Deleting one in use asks for a choice: a replacement Category, which its Transactions and rules
 // move to, or to delete its rules, leaving its Transactions to the remaining rules, or Uncategorized.
@@ -110,7 +115,7 @@ export function CategoriesPage() {
 
     if (result.ok) {
       setCategories((categories) =>
-        categories.map((c) => (c.id === result.category.id ? result.category : c)).sort(byName),
+        inListOrder(categories.map((c) => (c.id === result.category.id ? result.category : c))),
       )
       setEdit((open) => (open?.id === current.id ? null : open))
       setStatusMessage('Category updated.')
@@ -198,7 +203,7 @@ export function CategoriesPage() {
     )
 
     if (result.ok) {
-      setCategories((current) => [...current, result.category].sort(byName))
+      setCategories((current) => inListOrder([...current, result.category]))
       setName('')
       setDescription('')
       setStatusMessage('Category added.')
@@ -265,8 +270,8 @@ export function CategoriesPage() {
           <tr>
             <th className="py-2 font-medium">Name</th>
             <th className="py-2 font-medium">Description</th>
-            <th className="py-2 text-right font-medium">Transactions</th>
-            <th className="py-2 text-right font-medium">Rules</th>
+            <th className="py-2 pl-6 text-right font-medium">Transactions</th>
+            <th className="py-2 pl-6 text-right font-medium">Rules</th>
             <th className="py-2">
               <span className="sr-only">Actions</span>
             </th>
@@ -311,8 +316,8 @@ export function CategoriesPage() {
                     </span>
                   </div>
                 </td>
-                <td className="py-2 pl-3 text-right tabular-nums">{category.transactionCount}</td>
-                <td className="py-2 pl-3 text-right tabular-nums">{category.ruleCount}</td>
+                <td className="py-2 pl-6 text-right tabular-nums">{category.transactionCount}</td>
+                <td className="py-2 pl-6 text-right tabular-nums">{category.ruleCount}</td>
                 <td className="py-2 text-right whitespace-nowrap">
                   <button
                     type="button"
@@ -334,8 +339,8 @@ export function CategoriesPage() {
                   {category.builtIn && <BuiltInBadge />}
                 </td>
                 <td className="py-2 pr-3 text-slate-600">{category.description}</td>
-                <td className="py-2 pl-3 text-right tabular-nums">{category.transactionCount}</td>
-                <td className="py-2 pl-3 text-right tabular-nums">{category.ruleCount}</td>
+                <td className="py-2 pl-6 text-right tabular-nums">{category.transactionCount}</td>
+                <td className="py-2 pl-6 text-right tabular-nums">{category.ruleCount}</td>
                 <td className="py-2 pl-3 text-right whitespace-nowrap">
                   {confirmingDeleteId === category.id ? (
                     <>
@@ -402,16 +407,19 @@ export function CategoriesPage() {
                       <button type="button" onClick={() => startEdit(category)} className={smallButtonClass}>
                         Edit
                       </button>
-                      {!category.builtIn && (
-                        <button
-                          type="button"
-                          disabled={isSaving}
-                          onClick={() => startDelete(category)}
-                          className={smallButtonClass}
-                        >
-                          Delete
-                        </button>
-                      )}
+                      {/* Kept as wide as Delete even when empty, so Edit lines up on every row. */}
+                      <span className="inline-block w-16 text-left">
+                        {!category.builtIn && (
+                          <button
+                            type="button"
+                            disabled={isSaving}
+                            onClick={() => startDelete(category)}
+                            className={smallButtonClass}
+                          >
+                            Delete
+                          </button>
+                        )}
+                      </span>
                     </>
                   )}
                 </td>

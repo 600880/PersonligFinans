@@ -20,4 +20,8 @@ public static class SeedCategories
         new() { Id = 14, Name = "Clothing", Description = "All clothing.", Colour = "#b8336a", BuiltIn = true },
         new() { Id = 15, Name = "Electronics", Description = "All electronics.", Colour = "#6b8e23" },
     ];
+
+    // The order the Built-in Categories are listed in, ahead of every other Category.
+    public static readonly string[] BuiltInOrder =
+        ["Housing", "Groceries", "Clothing", "Transport", "Other", "Income", "Transfers"];
 }

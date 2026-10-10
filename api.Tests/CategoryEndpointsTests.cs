@@ -130,11 +130,18 @@ public class CategoryEndpointsTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Get_ListsCategoriesOrderedByName()
+    public async Task Get_ListsTheBuiltInCategoriesFirstInTheirOrderThenTheRestByName()
     {
-        var names = (await ListCategories()).Select(c => c.Name).ToList();
+        await CreateCategory($"Aaa {_token}");
 
-        Assert.Equal(names.Order(StringComparer.Ordinal), names);
+        var categories = await ListCategories();
+
+        Assert.Equal(
+            ["Housing", "Groceries", "Clothing", "Transport", "Other", "Income", "Transfers"],
+            categories.Take(7).Select(c => c.Name));
+        var rest = categories.Skip(7).Select(c => c.Name).ToList();
+        Assert.Contains($"Aaa {_token}", rest);
+        Assert.Equal(rest.Order(StringComparer.Ordinal), rest);
     }
 
     [Fact]
