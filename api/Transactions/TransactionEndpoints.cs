@@ -21,8 +21,6 @@ public record TransactionResponse(
     string? Reference,
     int? CategoryId);
 
-public record CategoryResponse(int Id, string Name);
-
 public record TransactionMonthResponse(int Year, int Month);
 
 public static class TransactionEndpoints
@@ -36,12 +34,6 @@ public static class TransactionEndpoints
     public static void MapTransactionEndpoints(this IEndpointRouteBuilder app)
     {
         var api = app.MapGroup("/api");
-
-        api.MapGet("/categories", async (AppDbContext db) =>
-            await db.Categories
-                .OrderBy(c => c.Name)
-                .Select(c => new CategoryResponse(c.Id, c.Name))
-                .ToListAsync());
 
         api.MapGet("/transactions/months", async (AppDbContext db) =>
             await db.Transactions

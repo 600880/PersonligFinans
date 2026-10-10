@@ -1,4 +1,5 @@
 using PersonligFinans.Api.BankStatements;
+using PersonligFinans.Api.Categories;
 using PersonligFinans.Api.CategorizationRules;
 using PersonligFinans.Api.Data;
 using PersonligFinans.Api.Spending;
@@ -22,6 +23,7 @@ app.UseStaticFiles();
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 app.MapTransactionEndpoints();
+app.MapCategoryEndpoints();
 app.MapBankStatementEndpoints();
 app.MapCategorizationRuleEndpoints();
 app.MapSpendingEndpoints();

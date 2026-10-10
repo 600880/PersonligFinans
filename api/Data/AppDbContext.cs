@@ -8,6 +8,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public const int ReferenceMaxLength = 100;
     public const int AccountNumberMaxLength = 20;
     public const int KeywordMaxLength = 100;
+    public const int CategoryNameMaxLength = 50;
+    public const int CategoryDescriptionMaxLength = 200;
 
     public DbSet<Category> Categories => Set<Category>();
     public DbSet<Transaction> Transactions => Set<Transaction>();
@@ -16,10 +18,12 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        // Names are unique ignoring case, through an index on lower(name) that the migration
+        // creates by hand, since EF Core can't model an expression index.
         modelBuilder.Entity<Category>(category =>
         {
-            category.Property(c => c.Name).HasMaxLength(50);
-            category.HasIndex(c => c.Name).IsUnique();
+            category.Property(c => c.Name).HasMaxLength(CategoryNameMaxLength);
+            category.Property(c => c.Description).HasMaxLength(CategoryDescriptionMaxLength);
             category.HasData(SeedCategories.All);
         });
 

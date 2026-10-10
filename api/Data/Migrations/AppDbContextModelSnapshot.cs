@@ -114,6 +114,16 @@ namespace PersonligFinans.Api.Data.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
+                    b.Property<bool>("BuiltIn")
+                        .HasColumnType("boolean")
+                        .HasColumnName("built_in");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("description");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(50)
@@ -123,86 +133,112 @@ namespace PersonligFinans.Api.Data.Migrations
                     b.HasKey("Id")
                         .HasName("pk_categories");
 
-                    b.HasIndex("Name")
-                        .IsUnique()
-                        .HasDatabaseName("ix_categories_name");
-
                     b.ToTable("categories", (string)null);
 
                     b.HasData(
                         new
                         {
                             Id = 1,
+                            BuiltIn = true,
+                            Description = "All groceries.",
                             Name = "Groceries"
                         },
                         new
                         {
                             Id = 2,
+                            BuiltIn = false,
+                            Description = "Restaurant, takeaway, bakery etc.",
                             Name = "Restaurants"
                         },
                         new
                         {
                             Id = 3,
+                            BuiltIn = true,
+                            Description = "All transport.",
                             Name = "Transport"
                         },
                         new
                         {
                             Id = 4,
+                            BuiltIn = true,
+                            Description = "Mortgage, common costs and insurance.",
                             Name = "Housing"
                         },
                         new
                         {
                             Id = 5,
+                            BuiltIn = false,
+                            Description = "Electricity, water, phone, internet etc.",
                             Name = "Utilities"
                         },
                         new
                         {
                             Id = 6,
+                            BuiltIn = false,
+                            Description = "All subscriptions.",
                             Name = "Subscriptions"
                         },
                         new
                         {
                             Id = 7,
+                            BuiltIn = false,
+                            Description = "Pharmacy etc.",
                             Name = "Health"
                         },
                         new
                         {
                             Id = 8,
+                            BuiltIn = false,
+                            Description = "All shopping.",
                             Name = "Shopping"
                         },
                         new
                         {
                             Id = 9,
+                            BuiltIn = false,
+                            Description = "Movies, video games etc.",
                             Name = "Entertainment"
                         },
                         new
                         {
                             Id = 10,
+                            BuiltIn = false,
+                            Description = "All travel.",
                             Name = "Travel"
                         },
                         new
                         {
                             Id = 11,
+                            BuiltIn = true,
+                            Description = "All income.",
                             Name = "Income"
                         },
                         new
                         {
                             Id = 12,
+                            BuiltIn = true,
+                            Description = "All private transfers.",
                             Name = "Transfers"
                         },
                         new
                         {
                             Id = 13,
+                            BuiltIn = true,
+                            Description = "Costs that don't belong in any other category.",
                             Name = "Other"
                         },
                         new
                         {
                             Id = 14,
+                            BuiltIn = true,
+                            Description = "All clothing.",
                             Name = "Clothing"
                         },
                         new
                         {
                             Id = 15,
+                            BuiltIn = false,
+                            Description = "All electronics.",
                             Name = "Electronics"
                         });
                 });

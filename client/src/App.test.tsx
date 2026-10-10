@@ -5,9 +5,20 @@ import App from './App'
 import { todayIsoDate } from './lib/date'
 
 const categories = [
-  { id: 1, name: 'Groceries' },
-  { id: 13, name: 'Other' },
+  { id: 1, name: 'Groceries', description: 'All groceries.', builtIn: true, transactionCount: 12, ruleCount: 3 },
+  {
+    id: 13,
+    name: 'Other',
+    description: "Costs that don't belong in any other category.",
+    builtIn: true,
+    transactionCount: 1,
+    ruleCount: 0,
+  },
 ]
+
+// A Category as the categories endpoint returns it. Tests that only need a Category's name leave
+// out the rest.
+type ServedCategory = { id: number; name: string } & Partial<(typeof categories)[number]>
 
 type Month = { year: number; month: number }
 
@@ -42,7 +53,7 @@ let months: { year: number; month: number }[] | Response
 let handleListMonth: (year: number, month: number) => Response
 let handleChangeCategory: (id: number, body: unknown) => Response | Promise<Response>
 // What the categories endpoint returns: `categories` unless a test adds to it or makes it fail.
-let categoriesServed: { id: number; name: string }[] | Response
+let categoriesServed: ServedCategory[] | Response
 // The month or quarter is undefined when the Spending of a whole year, or of a quarter, is asked for.
 let handleSpending: (year: number, month: number | undefined, quarter: number | undefined, includeTransfers: boolean) => Response
 // The Spending of each month of the Span from `from` to `to`.
@@ -555,6 +566,65 @@ describe('App', () => {
   })
 })
 
+describe('Categories page', () => {
+  async function openCategoriesPage() {
+    const user = userEvent.setup()
+    render(<App />)
+    await user.click(screen.getByRole('button', { name: 'Categories' }))
+    await screen.findByRole('heading', { name: 'Categories' })
+    return user
+  }
+
+  // Each listed Category's cells, in the order shown.
+  async function listedRows() {
+    await screen.findByText('All groceries.')
+    return screen
+      .getAllByRole('row')
+      .slice(1)
+      .map((row) => within(row).getAllByRole('cell').map((cell) => cell.textContent))
+  }
+
+  it('opens from the header and lists each Category with its description and counts, in the order served', async () => {
+    categoriesServed = [
+      categories[0],
+      { id: 7, name: 'Health', description: 'Pharmacy etc.', builtIn: false, transactionCount: 0, ruleCount: 2 },
+      categories[1],
+    ]
+    await openCategoriesPage()
+
+    expect(await listedRows()).toEqual([
+      ['Groceries Built-in', 'All groceries.', '12', '3'],
+      ['Health', 'Pharmacy etc.', '0', '2'],
+      ['Other Built-in', "Costs that don't belong in any other category.", '1', '0'],
+    ])
+    expect(screen.getAllByRole('columnheader').map((header) => header.textContent)).toEqual([
+      'Name',
+      'Description',
+      'Transactions',
+      'Rules',
+    ])
+  })
+
+  it('marks only the Built-in Categories with a badge', async () => {
+    categoriesServed = [
+      categories[0],
+      { id: 7, name: 'Health', description: 'Pharmacy etc.', builtIn: false, transactionCount: 0, ruleCount: 0 },
+    ]
+    await openCategoriesPage()
+    await listedRows()
+
+    expect(screen.getAllByText('Built-in')).toHaveLength(1)
+    expect(within(screen.getByRole('row', { name: /Groceries/ })).getByText('Built-in')).toBeInTheDocument()
+  })
+
+  it('says when the Categories could not be loaded', async () => {
+    categoriesServed = new Response(null, { status: 500 })
+    await openCategoriesPage()
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Could not load the categories.')
+  })
+})
+
 describe('Rules page', () => {
   async function openRulesPage() {
     const user = userEvent.setup()
@@ -843,10 +913,10 @@ describe('Header', () => {
       .map((item) => item.textContent)
   }
 
-  it('shows Transactions then Rules, with no Back button', () => {
+  it('shows Transactions, Categories then Rules, with no Back button', () => {
     render(<App />)
 
-    expect(navItems().map((item) => item.textContent)).toEqual(['Transactions', 'Rules'])
+    expect(navItems().map((item) => item.textContent)).toEqual(['Transactions', 'Categories', 'Rules'])
     expect(screen.queryByRole('button', { name: 'Back' })).not.toBeInTheDocument()
   })
 
@@ -857,6 +927,9 @@ describe('Header', () => {
 
     await user.click(screen.getByRole('button', { name: 'Transactions' }))
     expect(currentPage()).toEqual(['Transactions'])
+
+    await user.click(screen.getByRole('button', { name: 'Categories' }))
+    expect(currentPage()).toEqual(['Categories'])
 
     await user.click(screen.getByRole('button', { name: 'Rules' }))
     expect(currentPage()).toEqual(['Rules'])

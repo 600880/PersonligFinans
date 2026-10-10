@@ -2,9 +2,14 @@ import { periodQuery, type Period } from './period'
 import { spanQuery, type Span } from './span'
 import type { CreateTransactionRequest } from './transactionForm'
 
+// transactionCount and ruleCount are how many Transactions and Categorization Rules have the Category.
 export interface Category {
   id: number
   name: string
+  description: string
+  builtIn: boolean
+  transactionCount: number
+  ruleCount: number
 }
 
 export type FieldErrors = Partial<Record<keyof CreateTransactionRequest, string>>

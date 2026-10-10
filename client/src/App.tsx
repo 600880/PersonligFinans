@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { AddTransactionModal } from './components/AddTransactionModal'
+import { CategoriesPage } from './components/CategoriesPage'
 import { Dashboard } from './components/Dashboard'
 import { RulesPage } from './components/RulesPage'
 import { TransactionsPage } from './components/TransactionsPage'
@@ -8,7 +9,7 @@ import { formatNorwegianDate } from './lib/date'
 
 const CONFIRMATION_MS = 3000
 
-type View = 'home' | 'transactions' | 'rules'
+type View = 'home' | 'transactions' | 'categories' | 'rules'
 
 // A picked PDF the server rejected, named by its filename since it may not be a readable Bank
 // Statement, with the reason the server gave.
@@ -16,6 +17,7 @@ type Rejection = { filename: string; message: string }
 
 const NAV_ITEMS: { view: View; label: string }[] = [
   { view: 'transactions', label: 'Transactions' },
+  { view: 'categories', label: 'Categories' },
   { view: 'rules', label: 'Rules' },
 ]
 
@@ -104,6 +106,10 @@ function App() {
       {view === 'transactions' ? (
         <main className="flex flex-col items-center px-6 py-10">
           <TransactionsPage />
+        </main>
+      ) : view === 'categories' ? (
+        <main className="flex flex-col items-center px-6 py-10">
+          <CategoriesPage />
         </main>
       ) : view === 'rules' ? (
         <main className="flex flex-col items-center px-6 py-10">
