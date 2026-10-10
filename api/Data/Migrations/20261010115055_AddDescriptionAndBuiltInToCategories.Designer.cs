@@ -255,6 +255,10 @@ namespace PersonligFinans.Api.Data.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
+                    b.Property<bool>("AiPlacedInOther")
+                        .HasColumnType("boolean")
+                        .HasColumnName("ai_placed_in_other");
+
                     b.Property<decimal>("Amount")
                         .HasPrecision(12, 2)
                         .HasColumnType("numeric(12,2)")
