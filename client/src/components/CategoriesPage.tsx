@@ -272,9 +272,9 @@ export function CategoriesPage() {
           <tr>
             <th className="py-2 font-medium">Name</th>
             <th className="py-2 font-medium">Description</th>
-            <th className="py-2 pl-6 text-right font-medium">Transactions</th>
-            <th className="py-2 pl-6 text-right font-medium">Rules</th>
-            <th className="py-2">
+            <th className="py-2 pl-1.25 text-right font-medium">Transactions</th>
+            <th className="py-2 pl-1.25 text-right font-medium">Rules</th>
+            <th className="py-2 pl-4">
               <span className="sr-only">Actions</span>
             </th>
           </tr>
@@ -318,9 +318,9 @@ export function CategoriesPage() {
                     </span>
                   </div>
                 </td>
-                <td className="py-2 pl-6 text-right tabular-nums">{category.transactionCount}</td>
-                <td className="py-2 pl-6 text-right tabular-nums">{category.ruleCount}</td>
-                <td className="py-2 text-right whitespace-nowrap">
+                <td className="py-2 pl-1.25 text-right tabular-nums">{category.transactionCount}</td>
+                <td className="py-2 pl-1.25 text-right tabular-nums">{category.ruleCount}</td>
+                <td className="py-2 pl-4 text-right whitespace-nowrap">
                   <button
                     type="button"
                     disabled={isSaving}
@@ -341,9 +341,9 @@ export function CategoriesPage() {
                   {category.builtIn && <BuiltInBadge />}
                 </td>
                 <td className="py-2 pr-3 text-slate-600">{category.description}</td>
-                <td className="py-2 pl-6 text-right tabular-nums">{category.transactionCount}</td>
-                <td className="py-2 pl-6 text-right tabular-nums">{category.ruleCount}</td>
-                <td className="py-2 pl-3 text-right whitespace-nowrap">
+                <td className="py-2 pl-1.25 text-right tabular-nums">{category.transactionCount}</td>
+                <td className="py-2 pl-1.25 text-right tabular-nums">{category.ruleCount}</td>
+                <td className="py-2 pl-4 text-right whitespace-nowrap">
                   {confirmingDeleteId === category.id ? (
                     <>
                       {isInUse(category) ? (
