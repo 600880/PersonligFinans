@@ -60,7 +60,7 @@ let handleAddCategory: PostHandler
 let handleEditRule: (id: number, body: unknown) => Response
 let handleDeleteRule: (id: number) => Response
 let handleDeleteCategory: (id: number) => Response
-let handleEditCategory: (id: number, body: unknown) => Response
+let handleEditCategory: (id: number, body: unknown) => Response | Promise<Response>
 let months: { year: number; month: number }[] | Response
 let handleListMonth: (year: number, month: number) => Response
 let handleChangeCategory: (id: number, body: unknown) => Response | Promise<Response>
@@ -695,7 +695,7 @@ describe('Categories page', () => {
       Response.json(
         {
           errors: {
-            name: ["A Category named 'Groceries' already exists."],
+            name: ["A category named 'Groceries' already exists."],
             description: ['Description is required.'],
           },
         },
@@ -707,7 +707,7 @@ describe('Categories page', () => {
     await user.type(screen.getByLabelText('Name'), 'groceries')
     await user.click(screen.getByRole('button', { name: 'Add category' }))
 
-    expect(await screen.findByText("A Category named 'Groceries' already exists.")).toBeInTheDocument()
+    expect(await screen.findByText("A category named 'Groceries' already exists.")).toBeInTheDocument()
     expect(screen.getByText('Description is required.')).toBeInTheDocument()
     expect(screen.getByLabelText('Name')).toHaveValue('groceries')
     expect(screen.getAllByRole('row')).toHaveLength(3)
@@ -823,6 +823,21 @@ describe('Categories page', () => {
       expect(await screen.findByRole('status')).toHaveTextContent('The category was already deleted.')
       expect(screen.queryByRole('row', { name: /^Health/ })).not.toBeInTheDocument()
       expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    })
+
+    it("clears the add form's errors once a delete succeeds", async () => {
+      categoriesServed = [categories[0], health]
+      handleAddCategory = () => Response.json({ errors: { name: ['Name is required.'] } }, { status: 400 })
+      const user = await openCategoriesPage()
+      await listedRows()
+      await user.click(screen.getByRole('button', { name: 'Add category' }))
+      await screen.findByText('Name is required.')
+
+      await user.click(within(categoryRow('Health')).getByRole('button', { name: 'Delete' }))
+      await user.click(within(categoryRow('Health')).getByRole('button', { name: 'Confirm delete' }))
+
+      expect(await screen.findByRole('status')).toHaveTextContent('Category deleted.')
+      expect(screen.queryByText('Name is required.')).not.toBeInTheDocument()
     })
 
     it('shows a general error when a delete cannot reach the server', async () => {
@@ -958,6 +973,41 @@ describe('Categories page', () => {
 
       expect(await screen.findByRole('alert')).toHaveTextContent('Could not reach the server.')
       expect(row.getByLabelText('Name')).toHaveValue('Health extra')
+    })
+
+    it("clears the add form's errors once an edit is saved", async () => {
+      categoriesServed = [categories[0], health]
+      handleAddCategory = () => Response.json({ errors: { name: ['Name is required.'] } }, { status: 400 })
+      const user = await openCategoriesPage()
+      await listedRows()
+      await user.click(screen.getByRole('button', { name: 'Add category' }))
+      await screen.findByText('Name is required.')
+
+      const row = await startEditing(user, /Health/)
+      await user.type(row.getByLabelText('Description'), ' and more')
+      await user.click(row.getByRole('button', { name: 'Save' }))
+
+      expect(await screen.findByRole('status')).toHaveTextContent('Category updated.')
+      expect(screen.queryByText('Name is required.')).not.toBeInTheDocument()
+    })
+
+    it('keeps a cancelled edit closed when its save then fails', async () => {
+      categoriesServed = [health]
+      let respond: (response: Response) => void = () => {}
+      handleEditCategory = () => new Promise((resolve) => (respond = resolve))
+      const user = await openCategoriesPage()
+      await screen.findByText('Pharmacy etc.')
+
+      const row = await startEditing(user, /Health/)
+      await user.clear(row.getByLabelText('Name'))
+      await user.click(row.getByRole('button', { name: 'Save' }))
+      await user.click(row.getByRole('button', { name: 'Cancel' }))
+      respond(Response.json({ errors: { name: ['Name is required.'] } }, { status: 400 }))
+
+      // Delete is disabled while the save is in flight.
+      await waitFor(() => expect(within(categoryRow(/Health/)).getByRole('button', { name: 'Delete' })).toBeEnabled())
+      expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument()
+      expect(screen.queryByText('Name is required.')).not.toBeInTheDocument()
     })
   })
 })

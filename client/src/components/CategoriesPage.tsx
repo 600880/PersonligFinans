@@ -87,6 +87,7 @@ export function CategoriesPage() {
 
     setIsSaving(true)
     setEdit({ ...current, fieldErrors: {} })
+    setFieldErrors({})
     setStatusMessage(null)
     setErrorMessage(null)
 
@@ -99,10 +100,11 @@ export function CategoriesPage() {
       setCategories((categories) =>
         categories.map((c) => (c.id === result.category.id ? result.category : c)).sort(byName),
       )
-      setEdit(null)
+      setEdit((open) => (open?.id === current.id ? null : open))
       setStatusMessage('Category updated.')
     } else {
-      setEdit({ ...current, fieldErrors: result.fieldErrors })
+      // An edit cancelled while it was saving stays closed.
+      setEdit((open) => (open?.id === current.id ? { ...current, fieldErrors: result.fieldErrors } : open))
       setErrorMessage(result.message)
     }
   }
@@ -113,6 +115,7 @@ export function CategoriesPage() {
     setIsSaving(true)
     setStatusMessage(null)
     setErrorMessage(null)
+    setFieldErrors({})
 
     const result = await deleteCategory(category.id).finally(() => setIsSaving(false))
     setConfirmingDeleteId(null)
