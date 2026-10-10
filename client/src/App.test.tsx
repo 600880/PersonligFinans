@@ -411,6 +411,83 @@ describe('App', () => {
     expect(status).not.toHaveTextContent('AI categorization')
   })
 
+  it('keeps uploading after a rejected statement and lists it by filename under the summary', async () => {
+    const uploaded: (FormDataEntryValue | null)[] = []
+    const responders: ((response: Response) => void)[] = []
+    handleUpload = (body) => {
+      uploaded.push(body.get('file'))
+      return new Promise((resolve) => responders.push(resolve))
+    }
+    const julyPdf = new File(['%PDF-1.7'], 'juli.pdf', { type: 'application/pdf' })
+    const scanPdf = new File(['%PDF-1.7'], 'scan.pdf', { type: 'application/pdf' })
+    const septemberPdf = new File(['%PDF-1.7'], 'september.pdf', { type: 'application/pdf' })
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.upload(screen.getByLabelText(/bank statement pdf/i), [julyPdf, scanPdf, septemberPdf])
+    responders[0](Response.json(importedStatement, { status: 201 }))
+    await waitFor(() => expect(responders).toHaveLength(2))
+    responders[1](Response.json({ errors: { file: ['The PDF could not be read. It may be damaged.'] } }, { status: 400 }))
+
+    expect(await screen.findByRole('button', { name: 'Categorizing… (2/3)' })).toBeDisabled()
+    await waitFor(() => expect(uploaded).toEqual([julyPdf, scanPdf, septemberPdf]))
+    responders[2](Response.json({ ...importedStatement, id: 8 }, { status: 201 }))
+
+    expect(await screen.findByRole('button', { name: /upload transactions/i })).toBeEnabled()
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'Imported 2 Bank Statements, 76 transactions: 62 categorized, 14 Uncategorized',
+    )
+    expect(screen.getByRole('alert')).toHaveTextContent('scan.pdf: The PDF could not be read. It may be damaged.')
+  })
+
+  it('lists only the rejected PDFs, one per line, when every statement was rejected', async () => {
+    let call = 0
+    handleUpload = () => {
+      if (call++ === 0) throw new TypeError('Failed to fetch')
+      return Response.json({ errors: { file: ['The file is not a PDF.'] } }, { status: 400 })
+    }
+    const augustPdf = new File(['%PDF-1.7'], 'august.pdf', { type: 'application/pdf' })
+    const notesPdf = new File(['notes'], 'notes.pdf', { type: 'application/pdf' })
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.upload(screen.getByLabelText(/bank statement pdf/i), [augustPdf, notesPdf])
+
+    const alert = await screen.findByRole('alert')
+    expect([...alert.children].map((line) => line.textContent)).toEqual([
+      'august.pdf: Could not reach the server.',
+      'notes.pdf: The file is not a PDF.',
+    ])
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /upload transactions/i })).toBeEnabled()
+  })
+
+  it('lists the second copy of a PDF picked twice as already imported', async () => {
+    let call = 0
+    handleUpload = () =>
+      call++ === 0
+        ? Response.json(importedStatement, { status: 201 })
+        : Response.json(
+            {
+              title: 'Conflict',
+              status: 409,
+              detail: 'Statement for 1111.22.33333, 01.08.2026–31.08.2026 has already been imported.',
+            },
+            { status: 409 },
+          )
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.upload(screen.getByLabelText(/bank statement pdf/i), [statementPdf, statementPdf])
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'kontoutskrift.pdf: Statement for 1111.22.33333, 01.08.2026–31.08.2026 has already been imported.',
+    )
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'Imported 38 transactions from statement 01.08.2026–31.08.2026: 31 categorized, 7 Uncategorized',
+    )
+  })
+
   it('shows why the server rejected the statement and re-enables the button', async () => {
     handleUpload = () =>
       Response.json(
@@ -423,7 +500,7 @@ describe('App', () => {
     await user.upload(screen.getByLabelText(/bank statement pdf/i), statementPdf)
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      'The file is not a Sparebanken Norge Bank Statement.',
+      'kontoutskrift.pdf: The file is not a Sparebanken Norge Bank Statement.',
     )
     expect(screen.getByRole('button', { name: /upload transactions/i })).toBeEnabled()
   })
@@ -444,7 +521,7 @@ describe('App', () => {
     await user.upload(screen.getByLabelText(/bank statement pdf/i), statementPdf)
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      'Statement for 1111.22.33333, 01.08.2026–31.08.2026 has already been imported.',
+      'kontoutskrift.pdf: Statement for 1111.22.33333, 01.08.2026–31.08.2026 has already been imported.',
     )
   })
 
@@ -457,7 +534,7 @@ describe('App', () => {
 
     await user.upload(screen.getByLabelText(/bank statement pdf/i), statementPdf)
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('Could not reach the server.')
+    expect(await screen.findByRole('alert')).toHaveTextContent('kontoutskrift.pdf: Could not reach the server.')
     expect(screen.getByRole('button', { name: /upload transactions/i })).toBeEnabled()
   })
 
@@ -466,7 +543,7 @@ describe('App', () => {
     const user = userEvent.setup()
     render(<App />)
     await user.upload(screen.getByLabelText(/bank statement pdf/i), statementPdf)
-    expect(await screen.findByRole('alert')).toHaveTextContent('Upload failed (500).')
+    expect(await screen.findByRole('alert')).toHaveTextContent('kontoutskrift.pdf: Upload failed (500).')
 
     handleUpload = () => Response.json(importedStatement, { status: 201 })
     await user.upload(screen.getByLabelText(/bank statement pdf/i), statementPdf)

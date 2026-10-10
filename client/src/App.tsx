@@ -10,6 +10,10 @@ const CONFIRMATION_MS = 3000
 
 type View = 'home' | 'transactions' | 'rules'
 
+// A picked PDF the server rejected, named by its filename since it may not be a readable Bank
+// Statement, with the reason the server gave.
+type Rejection = { filename: string; message: string }
+
 const NAV_ITEMS: { view: View; label: string }[] = [
   { view: 'transactions', label: 'Transactions' },
   { view: 'rules', label: 'Rules' },
@@ -23,7 +27,7 @@ function App() {
   const [uploadProgress, setUploadProgress] = useState<{ finished: number; picked: number } | null>(null)
   const isUploading = uploadProgress !== null
   const [importMessage, setImportMessage] = useState<string | null>(null)
-  const [uploadError, setUploadError] = useState<string | null>(null)
+  const [rejections, setRejections] = useState<Rejection[]>([])
   // Bumped after new Transactions are saved, so the Dashboard reloads in place.
   const [dashboardVersion, setDashboardVersion] = useState(0)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -37,33 +41,36 @@ function App() {
   function handleSaved() {
     setIsModalOpen(false)
     setImportMessage(null)
-    setUploadError(null)
+    setRejections([])
     setShowSavedMessage(true)
     setDashboardVersion((version) => version + 1)
   }
 
   // Imports the picked Bank Statements one after another, in pick order, so AI-generated rules
-  // created for one already categorize matching rows in the next. A rejection stops the rest.
+  // created for one already categorize matching rows in the next. Each Bank Statement is imported
+  // or rejected on its own, so a rejection doesn't stop the rest.
   async function handleFilesChosen(files: File[]) {
     if (files.length === 0) return
     setUploadProgress({ finished: 0, picked: files.length })
     setShowSavedMessage(false)
     setImportMessage(null)
-    setUploadError(null)
+    setRejections([])
 
     const imported: ImportedBankStatement[] = []
+    const rejected: Rejection[] = []
     try {
       for (const [index, file] of files.entries()) {
         const result = await uploadBankStatement(file)
-        if (!result.ok) {
-          setUploadError(result.message)
-          return
+        if (result.ok) {
+          imported.push(result.statement)
+          setDashboardVersion((version) => version + 1)
+        } else {
+          rejected.push({ filename: file.name, message: result.message })
         }
-        imported.push(result.statement)
-        setDashboardVersion((version) => version + 1)
         setUploadProgress({ finished: index + 1, picked: files.length })
       }
-      setImportMessage(importSummary(imported))
+      setImportMessage(imported.length > 0 ? importSummary(imported) : null)
+      setRejections(rejected)
     } finally {
       setUploadProgress(null)
     }
@@ -143,14 +150,19 @@ function App() {
             </button>
           </div>
 
-          {uploadError ? (
-            <p role="alert" className="min-h-5 text-sm text-red-700">
-              {uploadError}
-            </p>
-          ) : (
+          {(rejections.length === 0 || importMessage || showSavedMessage) && (
             <p role="status" className="h-5 text-sm text-emerald-700">
               {showSavedMessage ? 'Transaction saved' : importMessage}
             </p>
+          )}
+          {rejections.length > 0 && (
+            <div role="alert" className="text-sm text-red-700">
+              {rejections.map((rejection, index) => (
+                <p key={index}>
+                  {rejection.filename}: {rejection.message}
+                </p>
+              ))}
+            </div>
           )}
 
           <Dashboard version={dashboardVersion} />
