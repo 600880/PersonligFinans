@@ -37,11 +37,11 @@ A keyword paired with a Category: an imported Transaction whose description cont
 _Avoid_: Mapping, pattern
 
 **AI-generated rule**:
-A Categorization Rule created by an LLM during import, for an imported Transaction that no existing rule matched. It behaves exactly like any other rule; the mark only lets the user find and review it among the rules, and is removed once the user edits the rule (even saving it unchanged), after which it is an ordinary rule. It is never given the "Other" Category, and is only created when it categorizes nothing that already has a Category (Transactions AI-placed in Other aside); the LLM sees only the cleaned description and whether the Amount is negative or positive, along with each Category's name and description. It never declines: a Transaction it cannot write a confident rule for is AI-placed in Other instead.
+A Categorization Rule created by an LLM during import, for an imported Transaction that no existing rule matched. It behaves exactly like any other rule; the mark only lets the user spot and review it among the rules, and is removed once the user edits the rule (even saving it unchanged), after which it is an ordinary rule. It is never given the "Other" Category, and is only created when it categorizes nothing that already has a Category (Transactions AI-placed in Other aside); the LLM sees only the cleaned description and whether the Amount is negative or positive, along with each Category's name and description. It never declines: a Transaction it cannot write a confident rule for is AI-placed in Other instead.
 _Avoid_: Suggested rule, suggestion, unconfirmed rule
 
 **AI-placed in Other**:
-The state of an imported Transaction the LLM put in the Other Category during import, without creating a rule, because it could not write a confident one. It stays open to Categorization Rules: a matching rule takes it, and if no rule matches any more it returns to Other rather than becoming Uncategorized. The mark lets the user find and review such Transactions, and is removed once the user changes the Transaction's Category, which then counts as chosen manually.
+The state of an imported Transaction the LLM put in the Other Category during import, without creating a rule, because it could not write a confident one. It stays open to Categorization Rules: a matching rule takes it, and if no rule matches any more it returns to Other rather than becoming Uncategorized. The mark lets the user spot and review such Transactions, and is removed once the user changes the Transaction's Category, which then counts as chosen manually.
 _Avoid_: AI fallback, auto-Other, AI-categorized
 
 **Spending**:

@@ -1382,7 +1382,7 @@ describe('Rules page', () => {
       .map((row) => within(row).getAllByRole('cell')[0].textContent)
   }
 
-  it('shows an AI badge next to the keyword of AI-generated rules only', async () => {
+  it('shows an AI badge next to the keyword of AI-generated rules only, with no filter for them', async () => {
     rules = [
       { id: 3, keyword: 'café løkka', categoryId: 13, aiGenerated: true },
       { id: 1, keyword: 'kiwi', categoryId: 1, aiGenerated: false },
@@ -1391,22 +1391,7 @@ describe('Rules page', () => {
 
     expect(within(ruleRow('café løkka AI')).getByText('AI')).toBeInTheDocument()
     expect(within(ruleRow('kiwi')).queryByText('AI')).not.toBeInTheDocument()
-  })
-
-  it('shows only AI-generated rules, still sorted by keyword, while AI only is on', async () => {
-    rules = [
-      { id: 3, keyword: 'bakeriet', categoryId: 13, aiGenerated: true },
-      { id: 1, keyword: 'kiwi', categoryId: 1, aiGenerated: false },
-      { id: 4, keyword: 'nille', categoryId: 13, aiGenerated: true },
-      { id: 2, keyword: 'overføring mellom egne kontoer', categoryId: 13, aiGenerated: false },
-    ]
-    const user = await openRulesPage()
-
-    await user.click(screen.getByRole('checkbox', { name: 'AI only' }))
-    expect(keywords()).toEqual(['bakeriet AI', 'nille AI'])
-
-    await user.click(screen.getByRole('checkbox', { name: 'AI only' }))
-    expect(keywords()).toEqual(['bakeriet AI', 'kiwi', 'nille AI', 'overføring mellom egne kontoer'])
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument()
   })
 
   it('drops the AI badge once an AI-generated rule is saved, even unchanged', async () => {
@@ -1416,14 +1401,11 @@ describe('Rules page', () => {
       { id: 4, keyword: 'nille', categoryId: 13, aiGenerated: true },
     ]
     const user = await openRulesPage()
-    await user.click(screen.getByRole('checkbox', { name: 'AI only' }))
 
     await user.click(within(ruleRow('bakeriet AI')).getByRole('button', { name: 'Edit' }))
     await user.click(screen.getByRole('button', { name: 'Save' }))
     await screen.findByRole('status')
 
-    expect(keywords()).toEqual(['nille AI'])
-    await user.click(screen.getByRole('checkbox', { name: 'AI only' }))
     expect(keywords()).toEqual(['bakeriet', 'kiwi', 'nille AI'])
   })
 })
@@ -1721,13 +1703,6 @@ describe('Transactions page', () => {
     return row
   }
 
-  function descriptions() {
-    return screen
-      .getAllByRole('row')
-      .slice(1)
-      .map((row) => within(row).getAllByRole('cell')[1].textContent)
-  }
-
   async function openAiPlacedMonth() {
     months = [{ year: 2026, month: 9 }]
     handleListMonth = () => Response.json(aiPlacedTransactions)
@@ -1736,45 +1711,24 @@ describe('Transactions page', () => {
     return user
   }
 
-  it('shows an AI marker next to Other only for Transactions AI-placed in Other', async () => {
+  it('shows an AI marker next to Other only for Transactions AI-placed in Other, with no filter for them', async () => {
     await openAiPlacedMonth()
 
     expect(categorySelect('Vipps *Ola Nordmann')).toHaveValue('13')
     expect(within(transactionRow('Vipps *Ola Nordmann')).getByText('AI')).toBeInTheDocument()
     expect(within(transactionRow('Gave')).queryByText('AI')).not.toBeInTheDocument()
     expect(within(transactionRow('Rema 1000')).queryByText('AI')).not.toBeInTheDocument()
-  })
-
-  it('shows only Transactions AI-placed in Other while AI-placed only is on', async () => {
-    const user = await openAiPlacedMonth()
-
-    await user.click(screen.getByRole('checkbox', { name: 'AI-placed only' }))
-    expect(descriptions()).toEqual(['Vipps *Ola Nordmann'])
-
-    await user.click(screen.getByRole('checkbox', { name: 'AI-placed only' }))
-    expect(descriptions()).toEqual(['Rema 1000', 'Vipps *Ola Nordmann', 'Gave'])
-  })
-
-  it('says when a month has no Transactions AI-placed in Other while AI-placed only is on', async () => {
-    const user = await openSeptember()
-
-    await user.click(screen.getByRole('checkbox', { name: 'AI-placed only' }))
-
-    expect(screen.getByText('No AI-placed transactions in September 2026')).toBeInTheDocument()
-    expect(screen.queryByRole('table')).not.toBeInTheDocument()
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument()
   })
 
   it('drops the AI marker once the Category of a Transaction AI-placed in Other is changed', async () => {
     handleChangeCategory = (_id, body) =>
       Response.json({ ...aiPlacedTransactions[1], ...(body as object), aiPlacedInOther: false })
     const user = await openAiPlacedMonth()
-    await user.click(screen.getByRole('checkbox', { name: 'AI-placed only' }))
 
     await user.selectOptions(categorySelect('Vipps *Ola Nordmann'), 'Groceries')
 
     expect(await screen.findByRole('status')).toHaveTextContent('Category changed')
-    expect(screen.getByText('No AI-placed transactions in September 2026')).toBeInTheDocument()
-    await user.click(screen.getByRole('checkbox', { name: 'AI-placed only' }))
     expect(categorySelect('Vipps *Ola Nordmann')).toHaveValue('1')
     expect(within(transactionRow('Vipps *Ola Nordmann')).queryByText('AI')).not.toBeInTheDocument()
   })

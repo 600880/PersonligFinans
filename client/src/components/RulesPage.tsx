@@ -41,7 +41,6 @@ export function RulesPage() {
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [edit, setEdit] = useState<RuleEdit | null>(null)
-  const [aiOnly, setAiOnly] = useState(false)
 
   useEffect(() => {
     let ignore = false
@@ -60,7 +59,6 @@ export function RulesPage() {
   }, [])
 
   const categoryName = (id: number) => categories.find((c) => c.id === id)?.name ?? ''
-  const shownRules = aiOnly ? rules.filter((r) => r.aiGenerated) : rules
 
   async function handleAdd(event: FormEvent) {
     event.preventDefault()
@@ -199,16 +197,6 @@ export function RulesPage() {
         </p>
       )}
 
-      <label className="mt-2 flex items-center justify-end gap-2 text-sm font-medium text-slate-700">
-        <input
-          type="checkbox"
-          checked={aiOnly}
-          onChange={(event) => setAiOnly(event.target.checked)}
-          className="size-4 rounded border-slate-300"
-        />
-        AI only
-      </label>
-
       <table className="mt-2 w-full text-left text-sm">
         <thead className="text-slate-500">
           <tr>
@@ -220,7 +208,7 @@ export function RulesPage() {
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-200 text-slate-900">
-          {shownRules.map((rule) =>
+          {rules.map((rule) =>
             edit?.id === rule.id ? (
               <tr key={rule.id} className="align-top">
                 <td className="py-2 pr-3">

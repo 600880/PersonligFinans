@@ -34,7 +34,6 @@ export function TransactionsPage() {
   // The Transactions whose Category is being saved. Their selects are disabled until it is, so a
   // failed save never goes back over a later choice.
   const [savingIds, setSavingIds] = useState<ReadonlySet<number>>(new Set())
-  const [aiPlacedOnly, setAiPlacedOnly] = useState(false)
 
   useEffect(() => {
     let ignore = false
@@ -75,8 +74,6 @@ export function TransactionsPage() {
     loaded && loaded.year === selected?.year && loaded.month === selected.month
       ? loaded.transactions
       : null
-  const shownTransactions =
-    transactions && aiPlacedOnly ? transactions.filter((t) => t.aiPlacedInOther) : transactions
 
   function chooseMonth(change: Partial<TransactionMonth>) {
     if (!selected) return
@@ -173,26 +170,14 @@ export function TransactionsPage() {
         </p>
       )}
 
-      {selected && (
-        <label className="mt-2 flex items-center justify-end gap-2 text-sm font-medium text-slate-700">
-          <input
-            type="checkbox"
-            checked={aiPlacedOnly}
-            onChange={(event) => setAiPlacedOnly(event.target.checked)}
-            className="size-4 rounded border-slate-300"
-          />
-          AI-placed only
-        </label>
-      )}
-
-      {selected && shownTransactions?.length === 0 && (
+      {selected && transactions?.length === 0 && (
         <p className="mt-6 text-sm text-slate-500">
-          No {aiPlacedOnly ? 'AI-placed transactions' : 'transactions'} in {MONTH_NAMES[selected.month - 1]}{' '}
+          No transactions in {MONTH_NAMES[selected.month - 1]}{' '}
           {selected.year}
         </p>
       )}
 
-      {shownTransactions && shownTransactions.length > 0 && (
+      {transactions && transactions.length > 0 && (
         <table className="mt-4 w-full text-left text-sm">
           <thead className="text-slate-500">
             <tr>
@@ -203,7 +188,7 @@ export function TransactionsPage() {
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-200 text-slate-900">
-            {shownTransactions.map((transaction) => (
+            {transactions.map((transaction) => (
               <tr key={transaction.id}>
                 <td className="py-2 pr-3 whitespace-nowrap">{formatNorwegianDate(transaction.date)}</td>
                 <td className="py-2 pr-3">{transaction.description}</td>
