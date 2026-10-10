@@ -3,7 +3,7 @@ import { AddTransactionModal } from './components/AddTransactionModal'
 import { Dashboard } from './components/Dashboard'
 import { RulesPage } from './components/RulesPage'
 import { TransactionsPage } from './components/TransactionsPage'
-import { uploadBankStatement } from './lib/api'
+import { uploadBankStatement, type ImportedBankStatement } from './lib/api'
 import { formatNorwegianDate } from './lib/date'
 
 const CONFIRMATION_MS = 3000
@@ -19,7 +19,9 @@ function App() {
   const [view, setView] = useState<View>('home')
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [showSavedMessage, setShowSavedMessage] = useState(false)
-  const [isUploading, setIsUploading] = useState(false)
+  // How many of the picked Bank Statements have finished, out of how many; null when not uploading.
+  const [uploadProgress, setUploadProgress] = useState<{ finished: number; picked: number } | null>(null)
+  const isUploading = uploadProgress !== null
   const [importMessage, setImportMessage] = useState<string | null>(null)
   const [uploadError, setUploadError] = useState<string | null>(null)
   // Bumped after new Transactions are saved, so the Dashboard reloads in place.
@@ -40,28 +42,30 @@ function App() {
     setDashboardVersion((version) => version + 1)
   }
 
-  async function handleFileChosen(file: File | undefined) {
-    if (!file) return
-    setIsUploading(true)
+  // Imports the picked Bank Statements one after another, in pick order, so AI-generated rules
+  // created for one already categorize matching rows in the next. A rejection stops the rest.
+  async function handleFilesChosen(files: File[]) {
+    if (files.length === 0) return
+    setUploadProgress({ finished: 0, picked: files.length })
     setShowSavedMessage(false)
     setImportMessage(null)
     setUploadError(null)
 
-    const result = await uploadBankStatement(file).finally(() => setIsUploading(false))
-    if (result.ok) {
-      setDashboardVersion((version) => version + 1)
-      const { transactionCount, uncategorizedCount, aiCategorizationUnavailable, periodStart, periodEnd } =
-        result.statement
-      setImportMessage(
-        `Imported ${transactionCount} transactions from statement ` +
-          `${formatNorwegianDate(periodStart)}–${formatNorwegianDate(periodEnd)}: ` +
-          `${transactionCount - uncategorizedCount} categorized, ${uncategorizedCount} Uncategorized` +
-          (aiCategorizationUnavailable
-            ? `. AI categorization unavailable — ${uncategorizedCount} rows left Uncategorized`
-            : ''),
-      )
-    } else {
-      setUploadError(result.message)
+    const imported: ImportedBankStatement[] = []
+    try {
+      for (const [index, file] of files.entries()) {
+        const result = await uploadBankStatement(file)
+        if (!result.ok) {
+          setUploadError(result.message)
+          return
+        }
+        imported.push(result.statement)
+        setDashboardVersion((version) => version + 1)
+        setUploadProgress({ finished: index + 1, picked: files.length })
+      }
+      setImportMessage(importSummary(imported))
+    } finally {
+      setUploadProgress(null)
     }
   }
 
@@ -114,16 +118,19 @@ function App() {
                   className="size-4 animate-spin rounded-full border-2 border-slate-300 border-t-slate-900"
                 />
               )}
-              {isUploading ? 'Categorizing…' : 'Upload transactions'}
+              {uploadProgress
+                ? `Categorizing… (${uploadProgress.finished}/${uploadProgress.picked})`
+                : 'Upload transactions'}
             </button>
             <input
               ref={fileInputRef}
               type="file"
               accept="application/pdf"
               aria-label="Bank Statement PDF"
+              multiple
               hidden
               onChange={(event) => {
-                void handleFileChosen(event.target.files?.[0])
+                void handleFilesChosen([...(event.target.files ?? [])])
                 event.target.value = ''
               }}
             />
@@ -157,6 +164,32 @@ function App() {
         />
       )}
     </div>
+  )
+}
+
+// One imported Bank Statement is described by its period; several by their sums.
+function importSummary(statements: ImportedBankStatement[]) {
+  if (statements.length > 1) {
+    const transactions = statements.reduce((sum, statement) => sum + statement.transactionCount, 0)
+    const uncategorized = statements.reduce((sum, statement) => sum + statement.uncategorizedCount, 0)
+    const aiUnavailable = statements.filter((statement) => statement.aiCategorizationUnavailable).length
+    return (
+      `Imported ${statements.length} Bank Statements, ${transactions} transactions: ` +
+      `${transactions - uncategorized} categorized, ${uncategorized} Uncategorized` +
+      (aiUnavailable > 0
+        ? `. AI categorization unavailable for ${aiUnavailable} Bank Statement${aiUnavailable === 1 ? '' : 's'}`
+        : '')
+    )
+  }
+
+  const { transactionCount, uncategorizedCount, aiCategorizationUnavailable, periodStart, periodEnd } = statements[0]
+  return (
+    `Imported ${transactionCount} transactions from statement ` +
+    `${formatNorwegianDate(periodStart)}–${formatNorwegianDate(periodEnd)}: ` +
+    `${transactionCount - uncategorizedCount} categorized, ${uncategorizedCount} Uncategorized` +
+    (aiCategorizationUnavailable
+      ? `. AI categorization unavailable — ${uncategorizedCount} rows left Uncategorized`
+      : '')
   )
 }
 

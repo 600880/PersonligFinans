@@ -300,7 +300,7 @@ describe('App', () => {
     expect(screen.getByLabelText(/bank statement pdf/i)).toHaveAttribute('accept', 'application/pdf')
   })
 
-  it('shows a disabled Categorizing… button with a spinner while the upload is in progress', async () => {
+  it('shows a disabled Categorizing… (0/1) button with a spinner while a single upload is in progress', async () => {
     let respond: (response: Response) => void = () => {}
     handleUpload = () => new Promise((resolve) => (respond = resolve))
     const user = userEvent.setup()
@@ -308,7 +308,7 @@ describe('App', () => {
 
     await user.upload(screen.getByLabelText(/bank statement pdf/i), statementPdf)
 
-    const button = screen.getByRole('button', { name: 'Categorizing…' })
+    const button = screen.getByRole('button', { name: 'Categorizing… (0/1)' })
     expect(button).toBeDisabled()
     expect(button).toHaveAttribute('aria-busy', 'true')
 
@@ -316,6 +316,99 @@ describe('App', () => {
     const idle = await screen.findByRole('button', { name: /upload transactions/i })
     expect(idle).toBeEnabled()
     expect(idle).not.toHaveAttribute('aria-busy', 'true')
+  })
+
+  it('uploads several picked PDFs one at a time in pick order, counting finished ones on the button', async () => {
+    const uploaded: (FormDataEntryValue | null)[] = []
+    const responders: ((response: Response) => void)[] = []
+    handleUpload = (body) => {
+      uploaded.push(body.get('file'))
+      return new Promise((resolve) => responders.push(resolve))
+    }
+    const julyPdf = new File(['%PDF-1.7'], 'juli.pdf', { type: 'application/pdf' })
+    const septemberPdf = new File(['%PDF-1.7'], 'september.pdf', { type: 'application/pdf' })
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.upload(screen.getByLabelText(/bank statement pdf/i), [julyPdf, statementPdf, septemberPdf])
+
+    const button = screen.getByRole('button', { name: 'Categorizing… (0/3)' })
+    expect(button).toBeDisabled()
+    expect(uploaded).toEqual([julyPdf])
+
+    responders[0](Response.json(importedStatement, { status: 201 }))
+    expect(await screen.findByRole('button', { name: 'Categorizing… (1/3)' })).toBeDisabled()
+    await waitFor(() => expect(uploaded).toEqual([julyPdf, statementPdf]))
+
+    responders[1](Response.json(importedStatement, { status: 201 }))
+    expect(await screen.findByRole('button', { name: 'Categorizing… (2/3)' })).toBeDisabled()
+    await waitFor(() => expect(uploaded).toEqual([julyPdf, statementPdf, septemberPdf]))
+
+    responders[2](Response.json(importedStatement, { status: 201 }))
+    expect(await screen.findByRole('button', { name: /upload transactions/i })).toBeEnabled()
+  })
+
+  it('reloads the Dashboard after each imported statement, while the rest are still uploading', async () => {
+    const responders: ((response: Response) => void)[] = []
+    handleUpload = () => new Promise((resolve) => responders.push(resolve))
+    const monthsRequests = () => fetchMock.mock.calls.filter(([url]) => url === '/api/transactions/months').length
+    const user = userEvent.setup()
+    render(<App />)
+    await waitFor(() => expect(monthsRequests()).toBe(1))
+
+    await user.upload(screen.getByLabelText(/bank statement pdf/i), [statementPdf, statementPdf])
+    responders[0](Response.json(importedStatement, { status: 201 }))
+
+    await waitFor(() => expect(monthsRequests()).toBe(2))
+    expect(screen.getByRole('button', { name: 'Categorizing… (1/2)' })).toBeDisabled()
+
+    await waitFor(() => expect(responders).toHaveLength(2))
+    responders[1](Response.json(importedStatement, { status: 201 }))
+    await waitFor(() => expect(monthsRequests()).toBe(3))
+  })
+
+  it('sums several imported statements into one line, saying how many had AI categorization unavailable', async () => {
+    const statements = [
+      { ...importedStatement, transactionCount: 38, uncategorizedCount: 7 },
+      { ...importedStatement, id: 8, transactionCount: 40, uncategorizedCount: 0, aiCategorizationUnavailable: true },
+      { ...importedStatement, id: 9, transactionCount: 22, uncategorizedCount: 5, aiCategorizationUnavailable: true },
+    ]
+    let call = 0
+    handleUpload = () => Response.json(statements[call++], { status: 201 })
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.upload(screen.getByLabelText(/bank statement pdf/i), [statementPdf, statementPdf, statementPdf])
+
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      'Imported 3 Bank Statements, 100 transactions: 88 categorized, 12 Uncategorized. ' +
+        'AI categorization unavailable for 2 Bank Statements',
+    )
+  })
+
+  it('says Bank Statement in the singular when AI categorization was unavailable for one of them', async () => {
+    let call = 0
+    handleUpload = () =>
+      Response.json({ ...importedStatement, aiCategorizationUnavailable: call++ === 0 }, { status: 201 })
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.upload(screen.getByLabelText(/bank statement pdf/i), [statementPdf, statementPdf])
+
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      /AI categorization unavailable for 1 Bank Statement$/,
+    )
+  })
+
+  it('says nothing about AI categorization when it was available for every imported statement', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.upload(screen.getByLabelText(/bank statement pdf/i), [statementPdf, statementPdf])
+
+    const status = await screen.findByRole('status')
+    expect(status).toHaveTextContent('Imported 2 Bank Statements, 76 transactions: 62 categorized, 14 Uncategorized')
+    expect(status).not.toHaveTextContent('AI categorization')
   })
 
   it('shows why the server rejected the statement and re-enables the button', async () => {
