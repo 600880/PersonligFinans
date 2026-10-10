@@ -21,20 +21,28 @@ An optional, free-text identifier a user attaches to a manually-entered Transact
 _Avoid_: Note, memo, ID
 
 **Category**:
-A label classifying a Transaction by type of spending (e.g. "Restaurants", "Groceries"), used to group spending on the Dashboard. Comes from a fixed system-defined list.
+A label classifying a Transaction by type of spending (e.g. "Restaurants", "Groceries"), used to group spending on the Dashboard. Has a unique name (ignoring case) and a short description of what belongs in it, which the LLM also reads when creating AI-generated rules. The user manages the list (adding, editing and deleting Categories), which starts from a seeded set. Deleting a Category that is in use means choosing either a replacement Category, which its Transactions and Categorization Rules move to (each Transaction keeping whether it was categorized manually or by a rule), or to delete its Categorization Rules, after which its Transactions are matched against the remaining rules like any rule change, and those left without a Category become Uncategorized. When an AI-generated rule moves to Other this way, it loses its mark and becomes an ordinary rule.
 _Avoid_: Tag, type, bucket
 
+**Built-in Category**:
+One of the seven Categories the app depends on and the user can never rename or delete, only re-describe: Other, Transfers, Housing, Income, Groceries, Transport and Clothing.
+_Avoid_: Fixed, protected, system category
+
 **Uncategorized**:
-The state of an imported Transaction with no matching Categorization Rule, awaiting manual assignment. A manually-entered Transaction is never Uncategorized. Distinct from the "Other" Category, which is a deliberate choice rather than a pending one.
+The state of a Transaction with no Category, awaiting a decision: an imported Transaction no Categorization Rule matches and the LLM could not be asked about, or any Transaction whose Category was deleted without a replacement. The user can never choose it for a manually-entered Transaction. Distinct from the "Other" Category, which is a decision (the user's, or the LLM's when AI-placed in Other) rather than a pending one.
 _Avoid_: Unreviewed, pending
 
 **Categorization Rule**:
-A keyword paired with a Category: an imported Transaction whose description contains the keyword (ignoring case) is automatically assigned that Category, and reassigned whenever the rules change unless its Category was chosen manually; when several match, the longest keyword wins. Keywords are unique. Seeded with common merchants and visible to the user; correcting a Transaction's Category by hand never creates one. Never applied to manually-entered Transactions.
+A keyword paired with a Category: an imported Transaction whose description contains the keyword (ignoring case) is automatically assigned that Category, and reassigned whenever the rules change unless its Category was chosen manually (a Transaction AI-placed in Other was not); when several match, the longest keyword wins. Keywords are unique. Seeded with common merchants and visible to the user; correcting a Transaction's Category by hand never creates one. Never applied to manually-entered Transactions.
 _Avoid_: Mapping, pattern
 
 **AI-generated rule**:
-A Categorization Rule created by an LLM during import, for an imported Transaction that no existing rule matched. It behaves exactly like any other rule; the mark only lets the user find and review it among the rules, and is removed once the user edits the rule (even saving it unchanged), after which it is an ordinary rule. It is never given the "Other" Category, and is only created when it categorizes nothing that already has a Category; the LLM sees only the cleaned description and whether the Amount is negative or positive, and may decline, leaving the Transaction Uncategorized.
+A Categorization Rule created by an LLM during import, for an imported Transaction that no existing rule matched. It behaves exactly like any other rule; the mark only lets the user find and review it among the rules, and is removed once the user edits the rule (even saving it unchanged), after which it is an ordinary rule. It is never given the "Other" Category, and is only created when it categorizes nothing that already has a Category (Transactions AI-placed in Other aside); the LLM sees only the cleaned description and whether the Amount is negative or positive, along with each Category's name and description. It never declines: a Transaction it cannot write a confident rule for is AI-placed in Other instead.
 _Avoid_: Suggested rule, suggestion, unconfirmed rule
+
+**AI-placed in Other**:
+The state of an imported Transaction the LLM put in the Other Category during import, without creating a rule, because it could not write a confident one. It stays open to Categorization Rules: a matching rule takes it, and if no rule matches any more it returns to Other rather than becoming Uncategorized. The mark lets the user find and review such Transactions, and is removed once the user changes the Transaction's Category, which then counts as chosen manually.
+_Avoid_: AI fallback, auto-Other, AI-categorized
 
 **Spending**:
 The money that left during a Period: the sum of the negative Amounts, shown as a positive figure and grouped by Category (Uncategorized Transactions count as their own group). Positive Amounts, such as refunds, never reduce it. Transactions in the Transfers Category are left out unless the user chooses to include them, since moving money between the user's own accounts is not spending.
