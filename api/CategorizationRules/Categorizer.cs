@@ -22,7 +22,8 @@ public static class Categorizer
         t => t.BankStatementId != null &&
             (t.CategorizationRuleId != null || t.CategoryId == null || t.AiPlacedInOther);
 
-    private static readonly Func<Transaction, bool> IsTrackedRuleEligible = IsRuleEligible.Compile();
+    // The same test, for Transactions changed in memory but not yet saved.
+    private static readonly Func<Transaction, bool> IsRuleEligibleInMemory = IsRuleEligible.Compile();
 
     // The rule whose keyword the description contains, ignoring case. The longest keyword wins, so
     // a specific rule overrides a general one; between equally long keywords the oldest rule wins.
@@ -133,7 +134,9 @@ public static class Categorizer
                 ChooseRule(d, [.. rules, rule])!.CategoryId != current.CategoryId);
 
     // Re-matches every rule-eligible Transaction against the rules tracked by db, including ones
-    // added, changed or deleted but not yet saved, and returns how many changed Category.
+    // added, changed or deleted but not yet saved, and returns how many changed Category. A
+    // Transaction counts as rule-eligible as saved or as changed in db but not yet saved, so one
+    // just made Uncategorized is re-matched too.
     public static async Task<int> RematchAsync(AppDbContext db) => (await RematchedAsync(db)).Count;
 
     // Re-matches like RematchAsync, and returns the Transactions that changed Category.
@@ -143,10 +146,8 @@ public static class Categorizer
         var rules = db.CategorizationRules.Local.ToList();
         var otherId = await OtherCategoryIdAsync(db);
 
-        // Rule-eligible as saved, or as tracked by db: one made Uncategorized but not yet saved is
-        // eligible too.
         var eligible = await db.Transactions.Where(IsRuleEligible).ToListAsync();
-        eligible = eligible.Union(db.Transactions.Local.Where(IsTrackedRuleEligible)).ToList();
+        eligible = eligible.Union(db.Transactions.Local.Where(IsRuleEligibleInMemory)).ToList();
 
         var changed = new List<Transaction>();
         foreach (var transaction in eligible)
@@ -173,7 +174,7 @@ public static class Categorizer
     public static async Task<int> MoveToReplacementAsync(AppDbContext db, int categoryId, int replacementId)
     {
         var replacementIsOther = replacementId == await OtherCategoryIdAsync(db);
-        foreach (var rule in await db.CategorizationRules.Where(r => r.CategoryId == categoryId).ToListAsync())
+        foreach (var rule in await RulesOf(db, categoryId))
         {
             rule.CategoryId = replacementId;
             if (replacementIsOther)
@@ -184,11 +185,8 @@ public static class Categorizer
         foreach (var transaction in moved)
             transaction.CategoryId = replacementId;
 
-        // Every moved Transaction changed Category. The re-match counts changes from where the move
-        // left them, so those it changes again are counted only once here.
-        var movedSet = moved.ToHashSet();
-        var rematched = await RematchedAsync(db);
-        return moved.Count + rematched.Count(t => !movedSet.Contains(t));
+        // Every moved Transaction changed Category.
+        return await RematchCountingOnceAsync(db, alreadyChanged: moved);
     }
 
     // Deletes a Category's Categorization Rules and makes its Transactions Uncategorized, then
@@ -200,8 +198,7 @@ public static class Categorizer
     // of a rule change; nothing is saved.
     public static async Task<int> DeleteRulesAndUncategorizeAsync(AppDbContext db, int categoryId)
     {
-        db.CategorizationRules.RemoveRange(
-            await db.CategorizationRules.Where(r => r.CategoryId == categoryId).ToListAsync());
+        db.CategorizationRules.RemoveRange(await RulesOf(db, categoryId));
 
         var uncategorized = await db.Transactions.Where(t => t.CategoryId == categoryId).ToListAsync();
         foreach (var transaction in uncategorized)
@@ -211,11 +208,21 @@ public static class Categorizer
         }
 
         // Every one of its Transactions changed Category, whether the re-match gives it another or
-        // leaves it Uncategorized, so those the re-match changes are counted only once here.
-        var uncategorizedSet = uncategorized.ToHashSet();
-        var rematched = await RematchedAsync(db);
-        return uncategorized.Count + rematched.Count(t => !uncategorizedSet.Contains(t));
+        // leaves it Uncategorized.
+        return await RematchCountingOnceAsync(db, alreadyChanged: uncategorized);
     }
+
+    // Re-matches, and returns how many Transactions changed Category: those already changed, plus
+    // those the re-match changes that weren't among them, so none is counted twice.
+    private static async Task<int> RematchCountingOnceAsync(AppDbContext db, List<Transaction> alreadyChanged)
+    {
+        var alreadyChangedSet = alreadyChanged.ToHashSet();
+        var rematched = await RematchedAsync(db);
+        return alreadyChanged.Count + rematched.Count(t => !alreadyChangedSet.Contains(t));
+    }
+
+    private static Task<List<CategorizationRule>> RulesOf(AppDbContext db, int categoryId) =>
+        db.CategorizationRules.Where(r => r.CategoryId == categoryId).ToListAsync();
 
     // Makes each of the given Transactions that is still Uncategorized AI-placed in Other. During
     // import, call it with the rows the LLM was asked about, after the AI-generated rules are added

@@ -17,6 +17,10 @@ public record CategoryResponse(
     int TransactionCount,
     int RuleCount);
 
+// How a Category in use is deleted, from the query string: its Categorization Rules and
+// Transactions move to a replacement Category, or its rules are deleted. Giving both is refused.
+public record CategoryDeletion(int? ReplacementCategoryId, bool? DeleteRules);
+
 public record DeletedCategoryResponse(int TransactionsChanged);
 
 public static class CategoryEndpoints
@@ -96,9 +100,10 @@ public static class CategoryEndpoints
     // Categorization Rules and Transactions move to first, or deleteRules, which deletes its rules
     // and leaves its Transactions to the remaining rules, or Uncategorized. One nothing uses needs
     // neither. Built-in Categories can't be deleted. Returns how many Transactions changed Category.
-    private static async Task<IResult> DeleteCategory(
-        int id, int? replacementCategoryId, AppDbContext db, bool deleteRules = false)
+    private static async Task<IResult> DeleteCategory(int id, [AsParameters] CategoryDeletion deletion, AppDbContext db)
     {
+        var deleteRules = deletion.DeleteRules == true;
+
         // A rule change, under its lock, so no rule can take the Category between the check and the
         // delete, and the move or rule deletion and its re-match happen in one database transaction.
         await using var transaction = await Categorizer.BeginRuleChangeAsync(db);
@@ -109,14 +114,14 @@ public static class CategoryEndpoints
         if (category.BuiltIn)
             return CategoryProblem($"{category.Name} is a Built-in Category, so it can't be deleted.");
 
-        if (replacementCategoryId is not null && deleteRules)
+        if (deletion.ReplacementCategoryId is not null && deleteRules)
             return Results.ValidationProblem(new Dictionary<string, string[]>
             {
                 ["deleteRules"] = ["Choose either a replacement Category or to delete its rules, not both."],
             });
 
         var transactionsChanged = 0;
-        if (replacementCategoryId is { } replacementId)
+        if (deletion.ReplacementCategoryId is { } replacementId)
         {
             if (replacementId == id)
                 return ReplacementProblem("The replacement must be another Category.");

@@ -31,23 +31,24 @@ export type DeleteCategoryResult =
   | { ok: true; alreadyDeleted: boolean; transactionsChanged: number }
   | { ok: false; message: string }
 
-// What happens to what uses the Category being deleted. A Category in use needs one of the two: a
-// replacement Category, which its Categorization Rules and Transactions move to, or deleteRules,
-// which deletes its rules and leaves its Transactions to the remaining rules, or Uncategorized. One
-// nothing uses needs neither.
-export interface DeleteCategoryChoice {
-  replacementCategoryId?: number
-  deleteRules?: boolean
-}
+// What happens to what uses the Category being deleted. A Category in use needs one of the two:
+// moveToReplacement, which moves its Categorization Rules and Transactions to another Category, or
+// deleteRules, which deletes its rules and leaves its Transactions to the remaining rules, or
+// Uncategorized. One nothing uses needs neither.
+export type DeleteCategoryChoice =
+  | { kind: 'unused' }
+  | { kind: 'moveToReplacement'; replacementCategoryId: number }
+  | { kind: 'deleteRules' }
 
-// Deletes a Category. The server refuses a Built-in Category, one in use without a choice, both
-// choices at once, or a replacement that isn't another existing Category, and the message says why.
-export async function deleteCategory(id: number, choice: DeleteCategoryChoice = {}): Promise<DeleteCategoryResult> {
+// Deletes a Category. The server refuses a Built-in Category, one in use without a choice, or a
+// replacement that isn't another existing Category, and the message says why.
+export async function deleteCategory(
+  id: number,
+  choice: DeleteCategoryChoice = { kind: 'unused' },
+): Promise<DeleteCategoryResult> {
   const query = new URLSearchParams()
-  if (choice.replacementCategoryId !== undefined) {
-    query.set('replacementCategoryId', String(choice.replacementCategoryId))
-  }
-  if (choice.deleteRules) query.set('deleteRules', 'true')
+  if (choice.kind === 'moveToReplacement') query.set('replacementCategoryId', String(choice.replacementCategoryId))
+  if (choice.kind === 'deleteRules') query.set('deleteRules', 'true')
   const search = query.toString() ? `?${query}` : ''
 
   let response: Response

@@ -60,8 +60,9 @@ export function CategoriesPage() {
   const [fieldErrors, setFieldErrors] = useState<CategoryFieldErrors>({})
   // The id of the Category whose delete is waiting for confirmation.
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<number | null>(null)
-  // How a Category in use is to be deleted; null until chosen.
-  const [deleteMode, setDeleteMode] = useState<'replace' | 'deleteRules' | null>(null)
+  // How a Category in use is to be deleted, as the radios show it; null until chosen. Moving needs a
+  // replacement too, so the choice is only complete once one is.
+  const [deleteMode, setDeleteMode] = useState<'moveToReplacement' | 'deleteRules' | null>(null)
   // The replacement chosen for a Category in use, as the select's value; '' until one is chosen.
   const [replacementId, setReplacementId] = useState('')
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
@@ -129,9 +130,11 @@ export function CategoriesPage() {
   // What the delete is to do: nothing for a Category nothing uses, and for one in use what was
   // chosen, or null while no valid choice is made.
   function deleteChoice(category: Category): DeleteCategoryChoice | null {
-    if (!isInUse(category)) return {}
-    if (deleteMode === 'deleteRules') return { deleteRules: true }
-    if (deleteMode === 'replace' && replacementId !== '') return { replacementCategoryId: Number(replacementId) }
+    if (!isInUse(category)) return { kind: 'unused' }
+    if (deleteMode === 'deleteRules') return { kind: 'deleteRules' }
+    if (deleteMode === 'moveToReplacement' && replacementId !== '') {
+      return { kind: 'moveToReplacement', replacementCategoryId: Number(replacementId) }
+    }
     return null
   }
 
@@ -139,7 +142,7 @@ export function CategoriesPage() {
     if (isSaving) return
     const choice = deleteChoice(category)
     if (!choice) return
-    const replacement = choice.replacementCategoryId
+    const replacement = choice.kind === 'moveToReplacement' ? choice.replacementCategoryId : null
 
     setIsSaving(true)
     setStatusMessage(null)
@@ -171,7 +174,7 @@ export function CategoriesPage() {
       )
       // The remaining rules may have given its Transactions to other Categories, so the counts are
       // reloaded. Until then, or if that fails, the list just lacks the deleted Category.
-      if (choice.deleteRules && !result.alreadyDeleted) {
+      if (choice.kind === 'deleteRules' && !result.alreadyDeleted) {
         fetchCategories()
           .then(setCategories)
           .catch(() => {})
@@ -344,8 +347,8 @@ export function CategoriesPage() {
                               <input
                                 type="radio"
                                 name={`delete-${category.id}`}
-                                checked={deleteMode === 'replace'}
-                                onChange={() => setDeleteMode('replace')}
+                                checked={deleteMode === 'moveToReplacement'}
+                                onChange={() => setDeleteMode('moveToReplacement')}
                               />
                               Move its transactions and rules to
                             </label>
@@ -355,7 +358,7 @@ export function CategoriesPage() {
                               value={replacementId}
                               onChange={(event) => {
                                 setReplacementId(event.target.value)
-                                setDeleteMode('replace')
+                                setDeleteMode('moveToReplacement')
                               }}
                               className="rounded-lg border border-slate-300 px-2 py-1"
                             >
