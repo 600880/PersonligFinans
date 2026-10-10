@@ -10,7 +10,7 @@ public class FakeRuleGenerator : IRuleGenerator
 
     public bool Unavailable { get; init; }
 
-    public List<(IReadOnlyList<UnmatchedRow> Rows, IReadOnlyList<string> CategoryNames)> Calls { get; } = [];
+    public List<(IReadOnlyList<UnmatchedRow> Rows, IReadOnlyList<CategoryChoice> Categories)> Calls { get; } = [];
 
     public FakeRuleGenerator Proposing(string description, string keyword, string categoryName)
     {
@@ -18,9 +18,9 @@ public class FakeRuleGenerator : IRuleGenerator
         return this;
     }
 
-    public Task<RuleGeneration> GenerateAsync(IReadOnlyList<UnmatchedRow> rows, IReadOnlyList<string> categoryNames)
+    public Task<RuleGeneration> GenerateAsync(IReadOnlyList<UnmatchedRow> rows, IReadOnlyList<CategoryChoice> categories)
     {
-        Calls.Add((rows, categoryNames));
+        Calls.Add((rows, categories));
         if (Unavailable)
             return Task.FromResult<RuleGeneration>(new RuleGeneration.Unavailable());
 

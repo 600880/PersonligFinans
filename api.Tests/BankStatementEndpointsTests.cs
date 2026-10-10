@@ -454,7 +454,7 @@ public class BankStatementEndpointsTests
     }
 
     [Fact]
-    public async Task Post_Statement_GeneratorReceivesOnlyEachRowsDescriptionAndSignAndTheCategoryNames()
+    public async Task Post_Statement_GeneratorReceivesOnlyEachRowsDescriptionAndSignAndTheCategoryNamesAndDescriptions()
     {
         var pdf = StatementPdf.Create(
             UniqueAccountNumber(),
@@ -474,10 +474,40 @@ public class BankStatementEndpointsTests
         Assert.Equal(
             [new UnmatchedRow($"{_token} Kafé", AmountSign.Negative), new UnmatchedRow($"{_token} Lønn", AmountSign.Positive)],
             call.Rows);
-        // "Other" is a deliberate choice of the user's, never offered to the rule generator.
+        // "Other" is where the import puts a row the rule generator declines, never offered to it.
         Assert.Equal(
-            SeedCategories.All.Select(c => c.Name).Where(n => n != "Other").Order(),
-            call.CategoryNames.Order());
+            SeedCategories.All.Where(c => c.Name != "Other").Select(c => new CategoryChoice(c.Name, c.Description)).OrderBy(c => c.Name),
+            call.Categories.OrderBy(c => c.Name));
+    }
+
+    [Fact]
+    public async Task Post_Statement_GeneratorReceivesACategorysEditedDescription()
+    {
+        const string edited = "Restaurant, takeaway, bakery, café and bar.";
+        await SetDescription(RestaurantsId, edited);
+        try
+        {
+            var generator = new FakeRuleGenerator();
+
+            await Created(await Upload(StatementWithPurchasesFrom($"{_token} Kafé"), generator));
+
+            var call = Assert.Single(generator.Calls);
+            Assert.Contains(new CategoryChoice("Restaurants", edited), call.Categories);
+        }
+        finally
+        {
+            // The tests share one database.
+            await SetDescription(RestaurantsId, SeedCategories.All.Single(c => c.Id == RestaurantsId).Description);
+        }
+    }
+
+    private async Task SetDescription(int categoryId, string description)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        await db.Categories
+            .Where(c => c.Id == categoryId)
+            .ExecuteUpdateAsync(c => c.SetProperty(x => x.Description, description));
     }
 
     [Fact]

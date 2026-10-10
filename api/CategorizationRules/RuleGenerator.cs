@@ -6,6 +6,10 @@ public enum AmountSign { Negative, Positive }
 // description and whether money was spent or received, never the Amount itself.
 public record UnmatchedRow(string Description, AmountSign Sign);
 
+// A Category the rule generator may choose, as it sees it: its name and the description of what
+// belongs in it.
+public record CategoryChoice(string Name, string Description);
+
 // A keyword and the name of the Category it should assign, proposed for one unmatched row.
 public record RuleProposal(string Keyword, string CategoryName);
 
@@ -21,9 +25,9 @@ public abstract record RuleGeneration
     public sealed record Unavailable : RuleGeneration;
 }
 
-// Proposes AI-generated rules: for each unmatched row, a keyword and one of the given Category
-// names, or nothing when it declines. Never throws; any failure is reported as Unavailable.
+// Proposes AI-generated rules: for each unmatched row, a keyword and the name of one of the given
+// Categories, or nothing when it declines. Never throws; any failure is reported as Unavailable.
 public interface IRuleGenerator
 {
-    Task<RuleGeneration> GenerateAsync(IReadOnlyList<UnmatchedRow> rows, IReadOnlyList<string> categoryNames);
+    Task<RuleGeneration> GenerateAsync(IReadOnlyList<UnmatchedRow> rows, IReadOnlyList<CategoryChoice> categories);
 }

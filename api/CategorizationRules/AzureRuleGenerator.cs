@@ -5,9 +5,9 @@ using OpenAI.Chat;
 namespace PersonligFinans.Api.CategorizationRules;
 
 // The rule generator backed by a chat model deployed on Azure: one call per import, answered with
-// JSON that must follow a schema. Only each row's description and sign, and the Category names,
-// are sent; never existing rules, Amounts, dates or account numbers. The import leaves "Other" out
-// of the Category names, since it AI-places a row the model declines in Other itself.
+// JSON that must follow a schema. Only each row's description and sign, and each Category's name and
+// description, are sent; never existing rules, Amounts, dates or account numbers. The import leaves
+// "Other" out of the Categories, since it AI-places a row the model declines in Other itself.
 public class AzureRuleGenerator(ChatClient chat, ILogger<AzureRuleGenerator> logger, TimeSpan? timeLimit = null)
     : IRuleGenerator
 {
@@ -17,12 +17,13 @@ public class AzureRuleGenerator(ChatClient chat, ILogger<AzureRuleGenerator> log
 
     private const string Instructions = """
         You create categorization rules for a personal finance app's bank transactions. You get the
-        list of category names, and the rows to categorize. Each row has an index, the description
-        from the bank statement, and a sign: "negative" means money was spent, "positive" means money
-        was received.
+        list of categories, each with a name and a description of what belongs in it, and the rows to
+        categorize. Each row has an index, the description from the bank statement, and a sign:
+        "negative" means money was spent, "positive" means money was received.
 
         For each row, answer with its index and either:
-        - a category and a keyword: the category must be one of the given category names. The keyword
+        - a category and a keyword: the category must be the name of one of the given categories,
+          chosen by what the categories' descriptions say belongs in them. The keyword
           is a short merchant name, in lowercase, copied literally from the description so that it
           matches this merchant's future transactions at any of its locations. Leave out city, area
           and place names, store numbers, dates, card numbers and payment prefixes. For example,
@@ -49,24 +50,24 @@ public class AzureRuleGenerator(ChatClient chat, ILogger<AzureRuleGenerator> log
 
     private record PromptRow(int Index, string Description, string Sign);
 
-    private record Prompt(IReadOnlyList<string> Categories, IReadOnlyList<PromptRow> Rows);
+    private record Prompt(IReadOnlyList<CategoryChoice> Categories, IReadOnlyList<PromptRow> Rows);
 
     private record AnswerRow(int Index, string? Keyword, string? Category);
 
     private record Answer(IReadOnlyList<AnswerRow> Rows);
 
-    public async Task<RuleGeneration> GenerateAsync(IReadOnlyList<UnmatchedRow> rows, IReadOnlyList<string> categoryNames)
+    public async Task<RuleGeneration> GenerateAsync(IReadOnlyList<UnmatchedRow> rows, IReadOnlyList<CategoryChoice> categories)
     {
         try
         {
             var prompt = new Prompt(
-                categoryNames,
+                categories,
                 rows.Select((row, index) => new PromptRow(
                     index, row.Description, row.Sign == AmountSign.Negative ? "negative" : "positive")).ToList());
             var options = new ChatCompletionOptions
             {
                 ResponseFormat = ChatResponseFormat.CreateJsonSchemaFormat(
-                    "categorization_rules", AnswerSchema(categoryNames), jsonSchemaIsStrict: true),
+                    "categorization_rules", AnswerSchema(categories.Select(c => c.Name)), jsonSchemaIsStrict: true),
             };
 
             using var timeout = new CancellationTokenSource(timeLimit ?? DefaultTimeLimit);
@@ -104,8 +105,8 @@ public class AzureRuleGenerator(ChatClient chat, ILogger<AzureRuleGenerator> log
     }
 
     // The schema the answer must follow. Strict mode needs every property required and no others;
-    // a decline is a null keyword and Category.
-    private static BinaryData AnswerSchema(IReadOnlyList<string> categoryNames) =>
+    // a decline is a null keyword and Category. The Category is given by name alone.
+    private static BinaryData AnswerSchema(IEnumerable<string> categoryNames) =>
         BinaryData.FromObjectAsJson(new
         {
             type = "object",

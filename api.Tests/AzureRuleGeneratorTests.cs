@@ -19,7 +19,12 @@ public class AzureRuleGeneratorTests
     private static readonly UnmatchedRow Bakery = new("Bakeriet Lille Bergen", AmountSign.Negative);
     private static readonly UnmatchedRow Vipps = new("Vipps *Ola Nordmann", AmountSign.Negative);
     private static readonly UnmatchedRow Salary = new("Lønn Arbeidsgiver AS", AmountSign.Positive);
-    private static readonly string[] CategoryNames = ["Groceries", "Income", "Restaurants"];
+    private static readonly CategoryChoice[] Categories =
+    [
+        new("Groceries", "All groceries."),
+        new("Income", "All income."),
+        new("Restaurants", "Restaurant, takeaway, bakery etc."),
+    ];
 
     // Answers every request with the given response, and remembers the request bodies.
     private sealed class FakeHandler(Func<CancellationToken, Task<HttpResponseMessage>> respond) : HttpMessageHandler
@@ -79,7 +84,7 @@ public class AzureRuleGeneratorTests
             ]}
             """);
 
-        var result = await Generator(handler).GenerateAsync([Bakery, Vipps, Salary], CategoryNames);
+        var result = await Generator(handler).GenerateAsync([Bakery, Vipps, Salary], Categories);
 
         var generated = Assert.IsType<RuleGeneration.Generated>(result);
         Assert.Equal(
@@ -96,7 +101,7 @@ public class AzureRuleGeneratorTests
     {
         var handler = AnsweringWithContent("""{"rows": [{"index": 0, "keyword": null, "category": null}]}""");
 
-        var result = await Generator(handler).GenerateAsync([Vipps], CategoryNames);
+        var result = await Generator(handler).GenerateAsync([Vipps], Categories);
 
         Assert.Empty(Assert.IsType<RuleGeneration.Generated>(result).Proposals);
     }
@@ -115,7 +120,7 @@ public class AzureRuleGeneratorTests
             ]}
             """);
 
-        var result = await Generator(handler).GenerateAsync([Bakery, Vipps, Salary], CategoryNames);
+        var result = await Generator(handler).GenerateAsync([Bakery, Vipps, Salary], Categories);
 
         var proposal = Assert.Single(Assert.IsType<RuleGeneration.Generated>(result).Proposals);
         Assert.Equal((Salary, new RuleProposal("arbeidsgiver", "Income")), (proposal.Key, proposal.Value));
@@ -131,7 +136,7 @@ public class AzureRuleGeneratorTests
     [InlineData("")]
     public async Task Generate_MalformedOrPartialResponse_IsUnavailable(string content)
     {
-        var result = await Generator(AnsweringWithContent(content)).GenerateAsync([Bakery], CategoryNames);
+        var result = await Generator(AnsweringWithContent(content)).GenerateAsync([Bakery], Categories);
 
         Assert.IsType<RuleGeneration.Unavailable>(result);
     }
@@ -140,7 +145,7 @@ public class AzureRuleGeneratorTests
     public async Task Generate_ResponseThatIsNotAChatCompletion_IsUnavailable()
     {
         var result = await Generator(Answering(HttpStatusCode.OK, "<html>Bad gateway</html>"))
-            .GenerateAsync([Bakery], CategoryNames);
+            .GenerateAsync([Bakery], Categories);
 
         Assert.IsType<RuleGeneration.Unavailable>(result);
     }
@@ -154,7 +159,7 @@ public class AzureRuleGeneratorTests
     {
         var handler = Answering(status, """{"error": {"code": "error", "message": "Failed."}}""");
 
-        var result = await Generator(handler).GenerateAsync([Bakery], CategoryNames);
+        var result = await Generator(handler).GenerateAsync([Bakery], Categories);
 
         Assert.IsType<RuleGeneration.Unavailable>(result);
     }
@@ -164,7 +169,7 @@ public class AzureRuleGeneratorTests
     {
         var handler = new FakeHandler(_ => throw new HttpRequestException("No route to host."));
 
-        var result = await Generator(handler).GenerateAsync([Bakery], CategoryNames);
+        var result = await Generator(handler).GenerateAsync([Bakery], Categories);
 
         Assert.IsType<RuleGeneration.Unavailable>(result);
     }
@@ -178,17 +183,17 @@ public class AzureRuleGeneratorTests
             throw new UnreachableException();
         });
 
-        var result = await Generator(handler, TimeSpan.FromMilliseconds(200)).GenerateAsync([Bakery], CategoryNames);
+        var result = await Generator(handler, TimeSpan.FromMilliseconds(200)).GenerateAsync([Bakery], Categories);
 
         Assert.IsType<RuleGeneration.Unavailable>(result);
     }
 
     [Fact]
-    public async Task Generate_MakesOneCallSendingOnlyTheDescriptionsSignsAndCategoryNames()
+    public async Task Generate_MakesOneCallSendingOnlyTheDescriptionsSignsAndCategoryNamesAndDescriptions()
     {
         var handler = AnsweringWithContent("""{"rows": []}""");
 
-        await Generator(handler).GenerateAsync([Bakery, Salary], CategoryNames);
+        await Generator(handler).GenerateAsync([Bakery, Salary], Categories);
 
         var request = JsonNode.Parse(Assert.Single(handler.RequestBodies))!;
         Assert.Equal("gpt-4.1-mini", (string?)request["model"]);
@@ -196,7 +201,11 @@ public class AzureRuleGeneratorTests
         var userMessage = request["messages"]!.AsArray().Single(m => (string?)m!["role"] == "user")!;
         var expected = JsonNode.Parse("""
             {
-              "categories": ["Groceries", "Income", "Restaurants"],
+              "categories": [
+                {"name": "Groceries", "description": "All groceries."},
+                {"name": "Income", "description": "All income."},
+                {"name": "Restaurants", "description": "Restaurant, takeaway, bakery etc."}
+              ],
               "rows": [
                 {"index": 0, "description": "Bakeriet Lille Bergen", "sign": "negative"},
                 {"index": 1, "description": "Lønn Arbeidsgiver AS", "sign": "positive"}
@@ -213,7 +222,7 @@ public class AzureRuleGeneratorTests
     {
         var handler = AnsweringWithContent("""{"rows": []}""");
 
-        await Generator(handler).GenerateAsync([Bakery], CategoryNames);
+        await Generator(handler).GenerateAsync([Bakery], Categories);
 
         var request = JsonNode.Parse(Assert.Single(handler.RequestBodies))!;
         var systemMessage = request["messages"]!.AsArray().Single(m => (string?)m!["role"] == "system")!;

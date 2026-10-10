@@ -160,12 +160,13 @@ public static class BankStatementEndpoints
         if (unmatched.Count == 0)
             return ([], [], false);
 
-        var categoryNames = await db.Categories
+        // Read at each import, so an edited description reaches the next prompt.
+        var categories = await db.Categories
             .Where(c => c.Name != Categorizer.OtherCategoryName)
             .OrderBy(c => c.Name)
-            .Select(c => c.Name)
+            .Select(c => new CategoryChoice(c.Name, c.Description))
             .ToListAsync();
-        return await ruleGenerator.GenerateAsync(unmatched, categoryNames) switch
+        return await ruleGenerator.GenerateAsync(unmatched, categories) switch
         {
             RuleGeneration.Generated generated =>
                 (unmatched
