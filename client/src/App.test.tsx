@@ -696,6 +696,32 @@ describe('Categories page', () => {
     expect(await screen.findByRole('option', { name: 'Fitness' })).toBeInTheDocument()
   })
 
+  it('places an added Category where the API lists it: in the Norwegian alphabet, whatever the browser language', async () => {
+    const health = { id: 7, name: 'Health', description: 'Pharmacy etc.', builtIn: false, transactionCount: 0, ruleCount: 0 }
+    const yearly = { id: 8, name: 'Årlig', description: 'Yearly costs.', builtIn: false, transactionCount: 0, ruleCount: 0 }
+    categoriesServed = [...categories, health, yearly]
+    handleAddCategory = () =>
+      Response.json(
+        { id: 20, name: 'Ære', description: 'Gifts.', builtIn: false, transactionCount: 0, ruleCount: 0 },
+        { status: 201 },
+      )
+    const user = await openCategoriesPage()
+    await listedRows()
+
+    await user.type(screen.getByLabelText('Name'), 'Ære')
+    await user.type(screen.getByLabelText('Description'), 'Gifts.')
+    await user.click(screen.getByRole('button', { name: 'Add category' }))
+
+    expect(await screen.findByRole('status')).toHaveTextContent('Category added.')
+    expect((await listedRows()).map((cells) => cells[0])).toEqual([
+      'Groceries Built-in',
+      'Other Built-in',
+      'Health',
+      'Ære',
+      'Årlig',
+    ])
+  })
+
   it("shows the server's field errors and keeps the input", async () => {
     handleAddCategory = () =>
       Response.json(

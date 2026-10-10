@@ -132,16 +132,30 @@ public class CategoryEndpointsTests : IAsyncLifetime
     [Fact]
     public async Task Get_ListsTheBuiltInCategoriesFirstInTheirOrderThenTheRestByName()
     {
-        await CreateCategory($"Aaa {_token}");
+        // Created out of order, and named to sort among each other only: in the Norwegian alphabet,
+        // ignoring case, Æ, Ø and Å come last.
+        string[] created = [$"Åa {_token}", $"Zzz {_token}", $"øa {_token}", $"zzy {_token}", $"Æa {_token}"];
+        foreach (var name in created)
+            await CreateCategory(name);
+        string[] builtIns = ["Housing", "Groceries", "Clothing", "Transport", "Other", "Income", "Transfers"];
 
         var categories = await ListCategories();
 
+        Assert.Equal(builtIns, categories.Take(builtIns.Length).Select(c => c.Name));
         Assert.Equal(
-            ["Housing", "Groceries", "Clothing", "Transport", "Other", "Income", "Transfers"],
-            categories.Take(7).Select(c => c.Name));
-        var rest = categories.Skip(7).Select(c => c.Name).ToList();
-        Assert.Contains($"Aaa {_token}", rest);
-        Assert.Equal(rest.Order(StringComparer.Ordinal), rest);
+            [$"zzy {_token}", $"Zzz {_token}", $"Æa {_token}", $"øa {_token}", $"Åa {_token}"],
+            categories.Select(c => c.Name).Where(created.Contains));
+        Assert.Equal(
+            ["Electronics", "Entertainment", "Health", "Restaurants", "Shopping", "Subscriptions", "Travel", "Utilities"],
+            categories.Select(c => c.Name).Where(name => SeedCategories.All.Any(s => !s.BuiltIn && s.Name == name)));
+    }
+
+    [Fact]
+    public void BuiltInOrder_NamesEverySeededBuiltInCategoryOnce()
+    {
+        Assert.Equal(
+            SeedCategories.All.Where(c => c.BuiltIn).Select(c => c.Name).Order(),
+            SeedCategories.BuiltInOrder.Order());
     }
 
     [Fact]

@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 using PersonligFinans.Api.CategorizationRules;
@@ -25,14 +26,17 @@ public record DeletedCategoryResponse(int TransactionsChanged);
 
 public static class CategoryEndpoints
 {
+    private static readonly StringComparer ByNorwegianName =
+        StringComparer.Create(CultureInfo.GetCultureInfo("nb-NO"), ignoreCase: true);
+
     public static void MapCategoryEndpoints(this IEndpointRouteBuilder app)
     {
         var api = app.MapGroup("/api/categories");
 
-        // The Built-in Categories first, in their own order, then the rest by name.
+        // The Built-in Categories first, in their own order, then the rest by name in the Norwegian
+        // alphabet, ignoring case. The client sorts an added or renamed Category the same way.
         api.MapGet("/", async (AppDbContext db) =>
             (await db.Categories
-                .OrderBy(c => c.Name)
                 .Select(c => new CategoryResponse(
                     c.Id,
                     c.Name,
@@ -43,6 +47,7 @@ public static class CategoryEndpoints
                     db.CategorizationRules.Count(r => r.CategoryId == c.Id)))
                 .ToListAsync())
             .OrderBy(c => c.BuiltIn ? Array.IndexOf(SeedCategories.BuiltInOrder, c.Name) : SeedCategories.BuiltInOrder.Length)
+            .ThenBy(c => c.Name, ByNorwegianName)
             .ToList());
 
         api.MapPost("/", AddCategory);

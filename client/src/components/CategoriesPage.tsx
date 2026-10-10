@@ -10,11 +10,13 @@ import {
 } from '../lib/api'
 
 // The API's order: the Built-in Categories first, kept in the order they were served (they can't
-// be renamed or added), then the rest by name.
+// be renamed or added), then the rest by name in the Norwegian alphabet, ignoring case.
 function inListOrder(categories: Category[]) {
   return [
     ...categories.filter((c) => c.builtIn),
-    ...categories.filter((c) => !c.builtIn).sort((a, b) => a.name.localeCompare(b.name)),
+    ...categories
+      .filter((c) => !c.builtIn)
+      .sort((a, b) => a.name.localeCompare(b.name, 'nb', { sensitivity: 'accent' })),
   ]
 }
 
