@@ -31,19 +31,23 @@ export type DeleteCategoryResult =
   | { ok: true; alreadyDeleted: boolean; transactionsChanged: number }
   | { ok: false; message: string }
 
-// What happens to what uses the Category being deleted. A Category in use needs a replacement
-// Category, which its Categorization Rules and Transactions move to; one nothing uses needs nothing.
+// What happens to what uses the Category being deleted. A Category in use needs one of the two: a
+// replacement Category, which its Categorization Rules and Transactions move to, or deleteRules,
+// which deletes its rules and leaves its Transactions to the remaining rules, or Uncategorized. One
+// nothing uses needs neither.
 export interface DeleteCategoryChoice {
   replacementCategoryId?: number
+  deleteRules?: boolean
 }
 
-// Deletes a Category. The server refuses a Built-in Category, one in use without a replacement, or
-// a replacement that isn't another existing Category, and the message says why.
+// Deletes a Category. The server refuses a Built-in Category, one in use without a choice, both
+// choices at once, or a replacement that isn't another existing Category, and the message says why.
 export async function deleteCategory(id: number, choice: DeleteCategoryChoice = {}): Promise<DeleteCategoryResult> {
   const query = new URLSearchParams()
   if (choice.replacementCategoryId !== undefined) {
     query.set('replacementCategoryId', String(choice.replacementCategoryId))
   }
+  if (choice.deleteRules) query.set('deleteRules', 'true')
   const search = query.toString() ? `?${query}` : ''
 
   let response: Response

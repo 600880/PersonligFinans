@@ -22,6 +22,8 @@ public static class Categorizer
         t => t.BankStatementId != null &&
             (t.CategorizationRuleId != null || t.CategoryId == null || t.AiPlacedInOther);
 
+    private static readonly Func<Transaction, bool> IsTrackedRuleEligible = IsRuleEligible.Compile();
+
     // The rule whose keyword the description contains, ignoring case. The longest keyword wins, so
     // a specific rule overrides a general one; between equally long keywords the oldest rule wins.
     public static CategorizationRule? ChooseRule(string description, IEnumerable<CategorizationRule> rules) =>
@@ -141,7 +143,10 @@ public static class Categorizer
         var rules = db.CategorizationRules.Local.ToList();
         var otherId = await OtherCategoryIdAsync(db);
 
+        // Rule-eligible as saved, or as tracked by db: one made Uncategorized but not yet saved is
+        // eligible too.
         var eligible = await db.Transactions.Where(IsRuleEligible).ToListAsync();
+        eligible = eligible.Union(db.Transactions.Local.Where(IsTrackedRuleEligible)).ToList();
 
         var changed = new List<Transaction>();
         foreach (var transaction in eligible)
@@ -184,6 +189,32 @@ public static class Categorizer
         var movedSet = moved.ToHashSet();
         var rematched = await RematchedAsync(db);
         return moved.Count + rematched.Count(t => !movedSet.Contains(t));
+    }
+
+    // Deletes a Category's Categorization Rules and makes its Transactions Uncategorized, then
+    // re-matches, and returns how many Transactions changed Category, counting each once. Its
+    // imported Transactions, including those categorized manually, are then matched against the
+    // remaining rules like any rule change: a rule that still matches takes them, one AI-placed in
+    // Other goes back to Other, and the rest stay Uncategorized. Its manually-entered Transactions
+    // stay Uncategorized, since rules never apply to them. Call it inside the database transaction
+    // of a rule change; nothing is saved.
+    public static async Task<int> DeleteRulesAndUncategorizeAsync(AppDbContext db, int categoryId)
+    {
+        db.CategorizationRules.RemoveRange(
+            await db.CategorizationRules.Where(r => r.CategoryId == categoryId).ToListAsync());
+
+        var uncategorized = await db.Transactions.Where(t => t.CategoryId == categoryId).ToListAsync();
+        foreach (var transaction in uncategorized)
+        {
+            transaction.CategoryId = null;
+            transaction.CategorizationRuleId = null;
+        }
+
+        // Every one of its Transactions changed Category, whether the re-match gives it another or
+        // leaves it Uncategorized, so those the re-match changes are counted only once here.
+        var uncategorizedSet = uncategorized.ToHashSet();
+        var rematched = await RematchedAsync(db);
+        return uncategorized.Count + rematched.Count(t => !uncategorizedSet.Contains(t));
     }
 
     // Makes each of the given Transactions that is still Uncategorized AI-placed in Other. During

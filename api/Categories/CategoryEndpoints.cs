@@ -92,13 +92,15 @@ public static class CategoryEndpoints
             await db.CategorizationRules.CountAsync(r => r.CategoryId == id)));
     }
 
-    // Deletes a Category. One in use needs a replacement Category, which its Categorization Rules
-    // and Transactions move to first; one nothing uses needs nothing. Built-in Categories can't be
-    // deleted. Returns how many Transactions changed Category.
-    private static async Task<IResult> DeleteCategory(int id, int? replacementCategoryId, AppDbContext db)
+    // Deletes a Category. One in use needs a choice: a replacement Category, which its
+    // Categorization Rules and Transactions move to first, or deleteRules, which deletes its rules
+    // and leaves its Transactions to the remaining rules, or Uncategorized. One nothing uses needs
+    // neither. Built-in Categories can't be deleted. Returns how many Transactions changed Category.
+    private static async Task<IResult> DeleteCategory(
+        int id, int? replacementCategoryId, AppDbContext db, bool deleteRules = false)
     {
         // A rule change, under its lock, so no rule can take the Category between the check and the
-        // delete, and the move and its re-match happen in one database transaction.
+        // delete, and the move or rule deletion and its re-match happen in one database transaction.
         await using var transaction = await Categorizer.BeginRuleChangeAsync(db);
 
         var category = await db.Categories.FindAsync(id);
@@ -106,6 +108,12 @@ public static class CategoryEndpoints
             return Results.NotFound();
         if (category.BuiltIn)
             return CategoryProblem($"{category.Name} is a Built-in Category, so it can't be deleted.");
+
+        if (replacementCategoryId is not null && deleteRules)
+            return Results.ValidationProblem(new Dictionary<string, string[]>
+            {
+                ["deleteRules"] = ["Choose either a replacement Category or to delete its rules, not both."],
+            });
 
         var transactionsChanged = 0;
         if (replacementCategoryId is { } replacementId)
@@ -117,6 +125,8 @@ public static class CategoryEndpoints
 
             transactionsChanged = await Categorizer.MoveToReplacementAsync(db, id, replacementId);
         }
+        else if (deleteRules)
+            transactionsChanged = await Categorizer.DeleteRulesAndUncategorizeAsync(db, id);
         else if (await db.Transactions.AnyAsync(t => t.CategoryId == id) ||
             await db.CategorizationRules.AnyAsync(r => r.CategoryId == id))
             return InUse(category);

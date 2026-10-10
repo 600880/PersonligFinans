@@ -6,6 +6,7 @@ using Microsoft.Extensions.DependencyInjection;
 using PersonligFinans.Api.CategorizationRules;
 using PersonligFinans.Api.Categories;
 using PersonligFinans.Api.Data;
+using PersonligFinans.Api.Spending;
 using PersonligFinans.Api.Transactions;
 
 namespace PersonligFinans.Api.Tests;
@@ -35,12 +36,15 @@ public class CategoryEndpointsTests : IAsyncLifetime
 
     // Removes the Categories the test created, and the rules and Transactions using them, since
     // other tests expect only the seeded Categories, e.g. among those offered to the rule generator.
+    // Also removes the test's own Transactions, which a delete may have left Uncategorized or in Other.
     public async Task DisposeAsync()
     {
         using var scope = _factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var created = db.Categories.Where(c => c.Name.ToLower().Contains(_token));
-        await db.Transactions.Where(t => created.Any(c => c.Id == t.CategoryId)).ExecuteDeleteAsync();
+        await db.Transactions
+            .Where(t => created.Any(c => c.Id == t.CategoryId) || t.Description.ToLower().Contains(_token))
+            .ExecuteDeleteAsync();
         await db.CategorizationRules.Where(r => created.Any(c => c.Id == r.CategoryId)).ExecuteDeleteAsync();
         await created.ExecuteDeleteAsync();
     }
@@ -258,7 +262,9 @@ public class CategoryEndpointsTests : IAsyncLifetime
     }
 
     // Stores Transactions as if imported from a Bank Statement, all Uncategorized.
-    private async Task<int[]> Imported(params string[] descriptions)
+    private Task<int[]> Imported(params string[] descriptions) => ImportedOn(new DateOnly(2026, 8, 3), descriptions);
+
+    private async Task<int[]> ImportedOn(DateOnly postedDate, params string[] descriptions)
     {
         using var scope = _factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -270,7 +276,7 @@ public class CategoryEndpointsTests : IAsyncLifetime
             ImportedAt = DateTimeOffset.UtcNow,
         };
         var transactions = descriptions
-            .Select(d => new Transaction { PostedDate = new DateOnly(2026, 8, 3), Description = d, Amount = -100m })
+            .Select(d => new Transaction { PostedDate = postedDate, Description = d, Amount = -100m })
             .ToList();
         statement.Transactions.AddRange(transactions);
         db.BankStatements.Add(statement);
@@ -309,11 +315,11 @@ public class CategoryEndpointsTests : IAsyncLifetime
         (await _client.GetFromJsonAsync<List<CategorizationRuleResponse>>("/api/categorization-rules"))!
             .Single(r => r.Id == ruleId);
 
-    private async Task<int> ManuallyEntered(string description, int categoryId)
+    private async Task<int> ManuallyEntered(string description, int categoryId, string date = "2026-08-03")
     {
         var response = await _client.PostAsJsonAsync("/api/transactions", new
         {
-            date = "2026-08-03",
+            date,
             description,
             amount = -100m,
             categoryId,
@@ -480,6 +486,217 @@ public class CategoryEndpointsTests : IAsyncLifetime
 
         await AssertCategoryProblem(response, $"{_token} Pets is a Built-in Category, so it can't be deleted.");
         Assert.Contains(await ListCategories(), c => c.Id == id);
+    }
+
+    private Task<HttpResponseMessage> DeleteWithItsRules(int id) =>
+        _client.DeleteAsync($"/api/categories/{id}?deleteRules=true");
+
+    private async Task<int> TransactionsChangedByDeletingWithItsRules(int id)
+    {
+        var response = await DeleteWithItsRules(id);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        return (await response.Content.ReadFromJsonAsync<DeletedCategoryResponse>())!.TransactionsChanged;
+    }
+
+    private async Task CategorizeManually(int transactionId, int categoryId)
+    {
+        var response = await _client.PutAsJsonAsync(
+            $"/api/transactions/{transactionId}/category", new { categoryId });
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    // Only an import sets the mark, so the tests set it directly in the database.
+    private async Task PlaceInOther(int transactionId)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var transaction = await db.Transactions.SingleAsync(t => t.Id == transactionId);
+        transaction.CategoryId = OtherId;
+        transaction.AiPlacedInOther = true;
+        await db.SaveChangesAsync();
+    }
+
+    [Fact]
+    public async Task Delete_WithItsRules_DeletesTheRulesAndTheCategory()
+    {
+        var id = await CreateCategory($"{_token} Garden");
+        var ruleId = await AddedRuleId($"{_token} plantasjen", id);
+
+        await TransactionsChangedByDeletingWithItsRules(id);
+
+        Assert.DoesNotContain(await ListCategories(), c => c.Id == id);
+        Assert.DoesNotContain(
+            (await _client.GetFromJsonAsync<List<CategorizationRuleResponse>>("/api/categorization-rules"))!,
+            r => r.Id == ruleId);
+    }
+
+    [Fact]
+    public async Task Delete_WithItsRules_AShorterRemainingRuleForAnotherCategoryPicksUpItsTransactions()
+    {
+        var id = await CreateCategory($"{_token} Garden");
+        var otherCategoryId = await CreateCategory($"{_token} Home");
+        var transactionIds = await Imported($"{_token} Plantasjen Oslo", $"{_token} Plant Shop");
+        await AddedRuleId($"{_token} plant", otherCategoryId);
+        await AddedRuleId($"{_token} plantasjen", id);
+        Assert.Equal([id, otherCategoryId], await CategoriesOf(transactionIds));
+
+        var changed = await TransactionsChangedByDeletingWithItsRules(id);
+
+        Assert.Equal(1, changed);
+        Assert.Equal([otherCategoryId, otherCategoryId], await CategoriesOf(transactionIds));
+    }
+
+    [Fact]
+    public async Task Delete_WithItsRules_ImportedTransactionsNoRemainingRuleMatchesBecomeUncategorized()
+    {
+        var id = await CreateCategory($"{_token} Garden");
+        var transactionIds = await Imported($"{_token} Plantasjen Oslo", $"{_token} Plantasjen Bergen");
+        await AddedRuleId($"{_token} plantasjen", id);
+
+        var changed = await TransactionsChangedByDeletingWithItsRules(id);
+
+        Assert.Equal(2, changed);
+        Assert.Equal([null, null], await CategoriesOf(transactionIds));
+    }
+
+    [Fact]
+    public async Task Delete_WithItsRules_ManuallyCategorizedAndManuallyEnteredTransactionsBecomeUncategorized()
+    {
+        var id = await CreateCategory($"{_token} Garden");
+        var laterId = await CreateCategory($"{_token} Hobby");
+        var manual = (await Imported($"{_token} Hageland"))[0];
+        await CategorizeManually(manual, id);
+        var manuallyEntered = await ManuallyEntered($"{_token} Hageland", id);
+
+        var changed = await TransactionsChangedByDeletingWithItsRules(id);
+
+        Assert.Equal(2, changed);
+        Assert.Equal([null, null], await CategoriesOf(manual, manuallyEntered));
+
+        // The imported one is no longer categorized manually, so a matching rule takes it; rules
+        // never apply to the manually-entered one.
+        await AddedRuleId($"{_token} hageland", laterId);
+        Assert.Equal([laterId, null], await CategoriesOf(manual, manuallyEntered));
+    }
+
+    [Fact]
+    public async Task Delete_WithItsRules_ARemainingRulePicksUpAManuallyCategorizedImportedTransaction()
+    {
+        var id = await CreateCategory($"{_token} Garden");
+        var otherCategoryId = await CreateCategory($"{_token} Home");
+        await AddedRuleId($"{_token} plant", otherCategoryId);
+        var manual = (await Imported($"{_token} Plantasjen"))[0];
+        await CategorizeManually(manual, id);
+
+        var changed = await TransactionsChangedByDeletingWithItsRules(id);
+
+        Assert.Equal(1, changed);
+        Assert.Equal([otherCategoryId], await CategoriesOf(manual));
+    }
+
+    [Fact]
+    public async Task Delete_WithItsRules_TransactionsAiPlacedInOtherGoBackToOther()
+    {
+        var id = await CreateCategory($"{_token} Garden");
+        var transactionId = (await Imported($"{_token} Plantasjen"))[0];
+        await PlaceInOther(transactionId);
+        await AddedRuleId($"{_token} plantasjen", id);
+        Assert.Equal([id], await CategoriesOf(transactionId));
+
+        var changed = await TransactionsChangedByDeletingWithItsRules(id);
+
+        Assert.Equal(1, changed);
+        Assert.Equal([OtherId], await CategoriesOf(transactionId));
+    }
+
+    [Fact]
+    public async Task Delete_WithItsRules_CountsEveryTransactionThatChangedCategoryOnce()
+    {
+        var id = await CreateCategory($"{_token} Garden");
+        var otherCategoryId = await CreateCategory($"{_token} Home");
+        await AddedRuleId($"{_token} plant", otherCategoryId);
+        var untouched = await Imported($"{_token} Plant Shop");
+        var ruleCategorized = await Imported($"{_token} Plantasjen Oslo", $"{_token} Mester Grønn");
+        await AddedRuleId($"{_token} plantasjen", id);
+        await AddedRuleId($"{_token} mester", id);
+        var manual = (await Imported($"{_token} Hageland"))[0];
+        await CategorizeManually(manual, id);
+        await ManuallyEntered($"{_token} Felleskjøpet", id);
+
+        var changed = await TransactionsChangedByDeletingWithItsRules(id);
+
+        Assert.Equal(4, changed);
+        Assert.Equal(
+            [otherCategoryId, otherCategoryId, null],
+            await CategoriesOf(untouched[0], ruleCategorized[0], ruleCategorized[1]));
+    }
+
+    [Fact]
+    public async Task Delete_WithItsRulesOfAnUnusedCategory_DeletesItAndChangesNoTransactions()
+    {
+        var id = await CreateCategory($"{_token} Garden");
+
+        Assert.Equal(0, await TransactionsChangedByDeletingWithItsRules(id));
+        Assert.DoesNotContain(await ListCategories(), c => c.Id == id);
+    }
+
+    [Fact]
+    public async Task Delete_WithItsRules_SpendingCountsItsTransactionsAsUncategorized()
+    {
+        // Spending adds up every Transaction of a month, so this uses a year no other test uses.
+        var id = await CreateCategory($"{_token} Garden");
+        var manual = (await ImportedOn(new DateOnly(2091, 5, 3), $"{_token} Hageland"))[0];
+        await CategorizeManually(manual, id);
+        await ManuallyEntered($"{_token} Felleskjøpet", id, date: "2091-05-04");
+
+        await TransactionsChangedByDeletingWithItsRules(id);
+
+        var spending = await _client.GetFromJsonAsync<SpendingResponse>("/api/spending?year=2091&month=5");
+        Assert.Equal(new SpendingSliceResponse(null, 200m), Assert.Single(spending!.Slices));
+    }
+
+    [Fact]
+    public async Task Delete_WithItsRules_AnUncategorizedManuallyEnteredTransactionIsListedAndCanBeGivenACategory()
+    {
+        var id = await CreateCategory($"{_token} Garden");
+        var transactionId = await ManuallyEntered($"{_token} Felleskjøpet", id);
+
+        await TransactionsChangedByDeletingWithItsRules(id);
+
+        var listed = (await _client.GetFromJsonAsync<List<TransactionResponse>>("/api/transactions?year=2026&month=8"))!
+            .Single(t => t.Id == transactionId);
+        Assert.Null(listed.CategoryId);
+        await CategorizeManually(transactionId, GroceriesId);
+        Assert.Equal([GroceriesId], await CategoriesOf(transactionId));
+    }
+
+    [Fact]
+    public async Task Delete_WithBothAReplacementAndItsRules_IsAValidationProblem()
+    {
+        var id = await CreateCategory($"{_token} Garden");
+        var replacementId = await CreateCategory($"{_token} Home");
+        var transactionId = await ManuallyEntered($"{_token} Plantasjen", id);
+
+        var response = await _client.DeleteAsync(
+            $"/api/categories/{id}?replacementCategoryId={replacementId}&deleteRules=true");
+
+        await AssertCategoryProblem(
+            response, "Choose either a replacement Category or to delete its rules, not both.", key: "deleteRules");
+        Assert.Contains(await ListCategories(), c => c.Id == id);
+        Assert.Equal([id], await CategoriesOf(transactionId));
+    }
+
+    [Fact]
+    public async Task Delete_BuiltInCategoryWithItsRules_IsAValidationProblem()
+    {
+        var id = await CreateCategory($"{_token} Pets", builtIn: true);
+        var ruleId = await AddedRuleId($"{_token} dyrebutikk", id);
+
+        var response = await DeleteWithItsRules(id);
+
+        await AssertCategoryProblem(response, $"{_token} Pets is a Built-in Category, so it can't be deleted.");
+        Assert.Contains(await ListCategories(), c => c.Id == id);
+        Assert.Equal(id, (await Rule(ruleId)).CategoryId);
     }
 
     private async Task<HttpResponseMessage> EditCategory(int id, string? name, string? description) =>

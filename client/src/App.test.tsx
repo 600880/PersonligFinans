@@ -804,6 +804,7 @@ describe('Categories page', () => {
       expect(confirm).toBeDisabled()
 
       await user.selectOptions(replacement, 'Other')
+      expect(within(categoryRow('Health')).getByRole('radio', { name: 'Move its transactions and rules to' })).toBeChecked()
       await user.click(confirm)
 
       expect(deleted).toEqual({ id: 7, query: 'replacementCategoryId=13' })
@@ -814,6 +815,54 @@ describe('Categories page', () => {
         ['Groceries Built-in', 'All groceries.', '12', '3'],
         ['Other Built-in', "Costs that don't belong in any other category.", '4', '2'],
       ])
+    })
+
+    it('offers deleting its rules instead, and says how many transactions changed category', async () => {
+      categoriesServed = [categories[0], { ...health, transactionCount: 2, ruleCount: 1 }, categories[1]]
+      let deleted: { id: number; query: string } | undefined
+      handleDeleteCategory = (id, query) => {
+        deleted = { id, query: query.toString() }
+        // A remaining Groceries rule picked up one of its Transactions; the other is Uncategorized.
+        categoriesServed = [{ ...categories[0], transactionCount: 13 }, categories[1]]
+        return Response.json({ transactionsChanged: 2 })
+      }
+      const user = await openCategoriesPage()
+      await listedRows()
+
+      await user.click(within(categoryRow('Health')).getByRole('button', { name: 'Delete' }))
+
+      const row = categoryRow('Health')
+      const choices = within(row).getByRole('group', { name: 'Delete Health?' })
+      const move = within(choices).getByRole('radio', { name: 'Move its transactions and rules to' })
+      const deleteRules = within(choices).getByRole('radio', {
+        name: 'Delete its rules and leave its transactions Uncategorized unless another rule matches them',
+      })
+      const confirm = within(row).getByRole('button', { name: 'Confirm delete' })
+      expect(move).not.toBeChecked()
+      expect(deleteRules).not.toBeChecked()
+      expect(confirm).toBeDisabled()
+
+      await user.click(deleteRules)
+      expect(confirm).toBeEnabled()
+
+      // Moving needs a replacement chosen first.
+      await user.click(move)
+      expect(confirm).toBeDisabled()
+
+      await user.click(deleteRules)
+      await user.click(confirm)
+
+      expect(deleted).toEqual({ id: 7, query: 'deleteRules=true' })
+      expect(await screen.findByRole('status')).toHaveTextContent(
+        'Category deleted. 2 transactions changed category.',
+      )
+      // Reloaded, since the remaining rules may have given its Transactions to other Categories.
+      await waitFor(async () =>
+        expect(await listedRows()).toEqual([
+          ['Groceries Built-in', 'All groceries.', '13', '3'],
+          ['Other Built-in', "Costs that don't belong in any other category.", '1', '0'],
+        ]),
+      )
     })
 
     it("shows the server's reason when the replacement is refused", async () => {

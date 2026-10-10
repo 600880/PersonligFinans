@@ -6,6 +6,7 @@ import {
   fetchCategories,
   type Category,
   type CategoryFieldErrors,
+  type DeleteCategoryChoice,
 } from '../lib/api'
 
 function byName(a: Category, b: Category) {
@@ -49,7 +50,8 @@ function isInUse(category: Category) {
 
 // Every Category in the order the API lists them, alphabetically, with what uses it, and a form to
 // add one. Each can be edited inline, and one that isn't Built-in can be deleted after a confirmation.
-// Deleting one in use asks for a replacement Category, which its Transactions and rules move to.
+// Deleting one in use asks for a choice: a replacement Category, which its Transactions and rules
+// move to, or to delete its rules, leaving its Transactions to the remaining rules, or Uncategorized.
 export function CategoriesPage() {
   const [categories, setCategories] = useState<Category[]>([])
   const [name, setName] = useState('')
@@ -58,6 +60,8 @@ export function CategoriesPage() {
   const [fieldErrors, setFieldErrors] = useState<CategoryFieldErrors>({})
   // The id of the Category whose delete is waiting for confirmation.
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<number | null>(null)
+  // How a Category in use is to be deleted; null until chosen.
+  const [deleteMode, setDeleteMode] = useState<'replace' | 'deleteRules' | null>(null)
   // The replacement chosen for a Category in use, as the select's value; '' until one is chosen.
   const [replacementId, setReplacementId] = useState('')
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
@@ -117,24 +121,32 @@ export function CategoriesPage() {
   }
 
   function startDelete(category: Category) {
+    setDeleteMode(null)
     setReplacementId('')
     setConfirmingDeleteId(category.id)
   }
 
-  // A Category in use moves to the chosen replacement; one nothing uses is simply deleted.
+  // What the delete is to do: nothing for a Category nothing uses, and for one in use what was
+  // chosen, or null while no valid choice is made.
+  function deleteChoice(category: Category): DeleteCategoryChoice | null {
+    if (!isInUse(category)) return {}
+    if (deleteMode === 'deleteRules') return { deleteRules: true }
+    if (deleteMode === 'replace' && replacementId !== '') return { replacementCategoryId: Number(replacementId) }
+    return null
+  }
+
   async function handleDelete(category: Category) {
     if (isSaving) return
-    const replacement = isInUse(category) ? Number(replacementId) : undefined
-    if (replacement === 0) return
+    const choice = deleteChoice(category)
+    if (!choice) return
+    const replacement = choice.replacementCategoryId
 
     setIsSaving(true)
     setStatusMessage(null)
     setErrorMessage(null)
     setFieldErrors({})
 
-    const result = await deleteCategory(category.id, { replacementCategoryId: replacement }).finally(() =>
-      setIsSaving(false),
-    )
+    const result = await deleteCategory(category.id, choice).finally(() => setIsSaving(false))
     setConfirmingDeleteId(null)
 
     if (result.ok) {
@@ -157,6 +169,13 @@ export function CategoriesPage() {
           ? 'The category was already deleted.'
           : changedMessage('Category deleted.', result.transactionsChanged),
       )
+      // The remaining rules may have given its Transactions to other Categories, so the counts are
+      // reloaded. Until then, or if that fails, the list just lacks the deleted Category.
+      if (choice.deleteRules && !result.alreadyDeleted) {
+        fetchCategories()
+          .then(setCategories)
+          .catch(() => {})
+      }
     } else {
       setErrorMessage(result.message)
     }
@@ -317,29 +336,55 @@ export function CategoriesPage() {
                 <td className="py-2 pl-3 text-right whitespace-nowrap">
                   {confirmingDeleteId === category.id ? (
                     <>
-                      <span className="mr-1 text-slate-700">Delete {category.name}?</span>
-                      {isInUse(category) && (
-                        <label className="mr-1 text-slate-700">
-                          Move its transactions and rules to{' '}
-                          <select
-                            value={replacementId}
-                            onChange={(event) => setReplacementId(event.target.value)}
-                            className="rounded-lg border border-slate-300 px-2 py-1"
-                          >
-                            <option value="">Choose a category</option>
-                            {categories
-                              .filter((c) => c.id !== category.id)
-                              .map((c) => (
-                                <option key={c.id} value={c.id}>
-                                  {c.name}
-                                </option>
-                              ))}
-                          </select>
-                        </label>
+                      {isInUse(category) ? (
+                        <fieldset className="mr-1 inline-flex flex-col items-start gap-1 text-left whitespace-normal text-slate-700">
+                          <legend className="mb-1">Delete {category.name}?</legend>
+                          <div className="flex flex-wrap items-center gap-1">
+                            <label className="flex items-center gap-1">
+                              <input
+                                type="radio"
+                                name={`delete-${category.id}`}
+                                checked={deleteMode === 'replace'}
+                                onChange={() => setDeleteMode('replace')}
+                              />
+                              Move its transactions and rules to
+                            </label>
+                            {/* Choosing a replacement also chooses to move. */}
+                            <select
+                              aria-label="Move its transactions and rules to"
+                              value={replacementId}
+                              onChange={(event) => {
+                                setReplacementId(event.target.value)
+                                setDeleteMode('replace')
+                              }}
+                              className="rounded-lg border border-slate-300 px-2 py-1"
+                            >
+                              <option value="">Choose a category</option>
+                              {categories
+                                .filter((c) => c.id !== category.id)
+                                .map((c) => (
+                                  <option key={c.id} value={c.id}>
+                                    {c.name}
+                                  </option>
+                                ))}
+                            </select>
+                          </div>
+                          <label className="flex items-center gap-1">
+                            <input
+                              type="radio"
+                              name={`delete-${category.id}`}
+                              checked={deleteMode === 'deleteRules'}
+                              onChange={() => setDeleteMode('deleteRules')}
+                            />
+                            Delete its rules and leave its transactions Uncategorized unless another rule matches them
+                          </label>
+                        </fieldset>
+                      ) : (
+                        <span className="mr-1 text-slate-700">Delete {category.name}?</span>
                       )}
                       <button
                         type="button"
-                        disabled={isSaving || (isInUse(category) && replacementId === '')}
+                        disabled={isSaving || deleteChoice(category) === null}
                         onClick={() => handleDelete(category)}
                         className={smallButtonClass}
                       >
