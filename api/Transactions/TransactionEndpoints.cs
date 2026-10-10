@@ -59,6 +59,8 @@ public static class TransactionEndpoints
         if (errors.Count > 0)
             return Results.ValidationProblem(errors);
 
+        // Validated first, so the dates are only built from a valid year and month. A whole year
+        // starts on 1 January.
         var first = new DateOnly(year!.Value, month ?? 1, 1);
         var next = month is null ? first.AddYears(1) : first.AddMonths(1);
         return Results.Ok(await db.Transactions

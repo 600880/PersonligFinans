@@ -3,15 +3,16 @@ import {
   changeTransactionCategory,
   fetchCategories,
   fetchTransactionMonths,
-  fetchTransactionsOf,
+  fetchTransactions,
   type Category,
   type Transaction,
   type TransactionMonth,
-  type TransactionPeriod,
+  type YearOrMonth,
 } from '../lib/api'
 import { formatAmount } from '../lib/amount'
 import { formatNorwegianDate } from '../lib/date'
 import { currentMonth, MONTH_NAMES } from '../lib/month'
+import { periodLabel, periodValue } from '../lib/period'
 
 const LOAD_ERROR = 'Could not load the transactions.'
 
@@ -20,7 +21,8 @@ const categorySelectClass =
   'rounded-lg border border-slate-300 px-2 py-1 disabled:cursor-not-allowed disabled:bg-slate-100'
 
 // A Period's Transactions, remembered with the Period they were loaded for.
-interface LoadedPeriod extends TransactionPeriod {
+interface LoadedPeriod {
+  period: YearOrMonth
   transactions: Transaction[]
 }
 
@@ -39,15 +41,12 @@ function matchesSearch(transaction: Transaction, search: string) {
   return transaction.description.toLowerCase().includes(search.trim().toLowerCase())
 }
 
-function periodName({ year, month }: TransactionPeriod) {
-  return month === null ? String(year) : `${MONTH_NAMES[month - 1]} ${year}`
-}
-
 export function TransactionsPage() {
   const [categories, setCategories] = useState<Category[]>([])
   const [monthsWithTransactions, setMonthsWithTransactions] = useState<TransactionMonth[]>([])
-  // Null until the months are loaded, which decides the month the page opens on.
-  const [selected, setSelected] = useState<TransactionPeriod | null>(null)
+  // The chosen month or whole year. Null until the months are loaded, which decide the month the
+  // page opens on.
+  const [selected, setSelected] = useState<YearOrMonth | null>(null)
   const [loaded, setLoaded] = useState<LoadedPeriod | null>(null)
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
@@ -64,7 +63,7 @@ export function TransactionsPage() {
         if (ignore) return
         setCategories(loadedCategories)
         setMonthsWithTransactions(loadedMonths)
-        setSelected(loadedMonths[0] ?? currentMonth())
+        setSelected({ granularity: 'month', ...(loadedMonths[0] ?? currentMonth()) })
       })
       .catch(() => {
         if (!ignore) setErrorMessage(LOAD_ERROR)
@@ -77,9 +76,9 @@ export function TransactionsPage() {
   useEffect(() => {
     if (!selected) return
     let ignore = false
-    fetchTransactionsOf(selected)
+    fetchTransactions(selected)
       .then((transactions) => {
-        if (!ignore) setLoaded({ ...selected, transactions })
+        if (!ignore) setLoaded({ period: selected, transactions })
       })
       .catch(() => {
         if (!ignore) setErrorMessage(LOAD_ERROR)
@@ -93,18 +92,15 @@ export function TransactionsPage() {
     ...new Set([currentMonth().year, ...monthsWithTransactions.map((m) => m.year)]),
   ].sort((a, b) => b - a)
   const transactions =
-    loaded && loaded.year === selected?.year && loaded.month === selected.month
-      ? loaded.transactions
-      : null
+    loaded && selected && periodValue(loaded.period) === periodValue(selected) ? loaded.transactions : null
   const isFiltering = categoryFilter !== '' || search.trim() !== ''
   const shownTransactions =
     transactions?.filter((t) => matchesCategory(t, categoryFilter) && matchesSearch(t, search)) ?? null
 
-  function choosePeriod(change: Partial<TransactionPeriod>) {
-    if (!selected) return
+  function choosePeriod(period: YearOrMonth) {
     setStatusMessage(null)
     setErrorMessage(null)
-    setSelected({ ...selected, ...change })
+    setSelected(period)
   }
 
   function showChange(id: number, change: Partial<Transaction>) {
@@ -158,7 +154,7 @@ export function TransactionsPage() {
             Year
             <select
               value={selected.year}
-              onChange={(event) => choosePeriod({ year: Number(event.target.value) })}
+              onChange={(event) => choosePeriod({ ...selected, year: Number(event.target.value) })}
               className={inputClass}
             >
               {years.map((year) => (
@@ -171,9 +167,13 @@ export function TransactionsPage() {
           <label className="flex flex-col gap-1 text-sm font-medium text-slate-700">
             Month
             <select
-              value={selected.month ?? ''}
+              value={selected.granularity === 'month' ? selected.month : ''}
               onChange={(event) =>
-                choosePeriod({ month: event.target.value === '' ? null : Number(event.target.value) })
+                choosePeriod(
+                  event.target.value === ''
+                    ? { granularity: 'year', year: selected.year }
+                    : { granularity: 'month', year: selected.year, month: Number(event.target.value) },
+                )
               }
               className={inputClass}
             >
@@ -225,7 +225,7 @@ export function TransactionsPage() {
 
       {selected && shownTransactions?.length === 0 && (
         <p className="mt-6 text-sm text-slate-500">
-          {isFiltering ? 'No transactions match' : `No transactions in ${periodName(selected)}`}
+          {isFiltering ? 'No transactions match' : `No transactions in ${periodLabel(selected)}`}
         </p>
       )}
 

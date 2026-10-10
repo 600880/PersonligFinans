@@ -152,14 +152,11 @@ export async function fetchTransactionMonths(): Promise<TransactionMonth[]> {
   return (await response.json()) as TransactionMonth[]
 }
 
-// A month, or a whole year when month is null.
-export interface TransactionPeriod {
-  year: number
-  month: number | null
-}
+// The Transactions endpoint lists a year or a month, not a quarter.
+export type YearOrMonth = Exclude<Period, { granularity: 'quarter' }>
 
-export async function fetchTransactionsOf({ year, month }: TransactionPeriod): Promise<Transaction[]> {
-  const response = await fetch(`/api/transactions?year=${year}${month === null ? '' : `&month=${month}`}`)
+export async function fetchTransactions(period: YearOrMonth): Promise<Transaction[]> {
+  const response = await fetch(`/api/transactions?${periodQuery(period)}`)
   if (!response.ok) throw new Error(`Loading transactions failed (${response.status})`)
   return (await response.json()) as Transaction[]
 }

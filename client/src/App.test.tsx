@@ -1715,6 +1715,22 @@ describe('Transactions page', () => {
     expect(screen.queryByRole('table')).not.toBeInTheDocument()
   })
 
+  it('searches only the descriptions, not the Reference or the Amount', async () => {
+    const invoice = { ...septemberTransactions[0], id: 11, description: 'Rørlegger', amount: -349, reference: 'Kiwi-17' }
+    months = [{ year: 2026, month: 9 }]
+    handleListPeriod = () => Response.json([...septemberTransactions, invoice])
+    const user = await openTransactionsPage()
+    await screen.findByRole('cell', { name: 'Rema 1000' })
+    const search = screen.getByRole('searchbox', { name: 'Search' })
+
+    await user.type(search, 'kiwi')
+    expect(screen.getByText('No transactions match')).toBeInTheDocument()
+
+    await user.clear(search)
+    await user.type(search, '349')
+    expect(screen.getByText('No transactions match')).toBeInTheDocument()
+  })
+
   it('keeps the Category filter and search when the Period changes', async () => {
     months = [{ year: 2026, month: 9 }]
     handleListPeriod = (_year, month) =>

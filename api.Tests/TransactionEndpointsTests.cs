@@ -256,6 +256,8 @@ public class TransactionEndpointsTests
     [InlineData("year=2026&month=0", "month")]
     [InlineData("year=2026&month=13", "month")]
     [InlineData("year=1899&month=1", "year")]
+    [InlineData("year=1899", "year")]
+    [InlineData("year=3000", "year")]
     [InlineData("year=3000&month=1", "year")]
     [InlineData("month=1", "year")]
     public async Task Get_InvalidYearOrMonth_IsRejected(string query, string field)
