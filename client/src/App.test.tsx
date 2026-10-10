@@ -49,6 +49,7 @@ let rules: { id: number; keyword: string; categoryId: number; aiGenerated: boole
 let handleAddRule: PostHandler
 let handleEditRule: (id: number, body: unknown) => Response
 let handleDeleteRule: (id: number) => Response
+let handleEditCategory: (id: number, body: unknown) => Response
 let months: { year: number; month: number }[] | Response
 let handleListMonth: (year: number, month: number) => Response
 let handleChangeCategory: (id: number, body: unknown) => Response | Promise<Response>
@@ -93,6 +94,10 @@ const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
     return handleEditRule(Number(ruleUrl[1]), JSON.parse(init.body as string))
   }
   if (ruleUrl && init?.method === 'DELETE') return handleDeleteRule(Number(ruleUrl[1]))
+  const editedCategoryUrl = /^\/api\/categories\/(\d+)$/.exec(url)
+  if (editedCategoryUrl && init?.method === 'PUT') {
+    return handleEditCategory(Number(editedCategoryUrl[1]), JSON.parse(init.body as string))
+  }
   if (url === '/api/categories') {
     return categoriesServed instanceof Response ? categoriesServed : Response.json(categoriesServed)
   }
@@ -123,6 +128,10 @@ beforeEach(() => {
   handleEditRule = (id, body) =>
     Response.json({ id, ...(body as object), aiGenerated: false, transactionsChanged: 0 })
   handleDeleteRule = () => Response.json({ transactionsChanged: 0 })
+  handleEditCategory = (id, body) => {
+    const category = categories.find((c) => c.id === id)
+    return Response.json({ ...category, id, ...(body as object) })
+  }
   months = []
   handleListMonth = () => Response.json([])
   handleChangeCategory = () => new Response(null, { status: 500 })
@@ -581,7 +590,12 @@ describe('Categories page', () => {
     return screen
       .getAllByRole('row')
       .slice(1)
-      .map((row) => within(row).getAllByRole('cell').map((cell) => cell.textContent))
+      .map((row) =>
+        within(row)
+          .getAllByRole('cell')
+          .slice(0, 4)
+          .map((cell) => cell.textContent),
+      )
   }
 
   it('opens from the header and lists each Category with its description and counts, in the order served', async () => {
@@ -602,6 +616,7 @@ describe('Categories page', () => {
       'Description',
       'Transactions',
       'Rules',
+      'Actions',
     ])
   })
 
@@ -622,6 +637,124 @@ describe('Categories page', () => {
     await openCategoriesPage()
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Could not load the categories.')
+  })
+
+  const health = { id: 7, name: 'Health', description: 'Pharmacy etc.', builtIn: false, transactionCount: 4, ruleCount: 2 }
+
+  function categoryRow(name: RegExp) {
+    return screen.getByRole('row', { name })
+  }
+
+  async function startEditing(user: ReturnType<typeof userEvent.setup>, name: RegExp) {
+    await user.click(within(categoryRow(name)).getByRole('button', { name: 'Edit' }))
+    const row = screen.getByRole('button', { name: 'Save' }).closest('tr')!
+    return within(row)
+  }
+
+  it('edits a Category inline and keeps the list sorted by name', async () => {
+    categoriesServed = [categories[0], health, categories[1]]
+    let edited: { id: number; body: unknown } | undefined
+    handleEditCategory = (id, body) => {
+      edited = { id, body }
+      return Response.json({ ...health, name: 'Wellness', description: 'Pharmacy, gym etc.' })
+    }
+    const user = await openCategoriesPage()
+    await listedRows()
+
+    const row = await startEditing(user, /Health/)
+    expect(row.getByLabelText('Name')).toHaveValue('Health')
+    expect(row.getByLabelText('Description')).toHaveValue('Pharmacy etc.')
+    await user.clear(row.getByLabelText('Name'))
+    await user.type(row.getByLabelText('Name'), ' Wellness ')
+    await user.clear(row.getByLabelText('Description'))
+    await user.type(row.getByLabelText('Description'), 'Pharmacy, gym etc. ')
+    await user.click(row.getByRole('button', { name: 'Save' }))
+
+    expect(edited).toEqual({ id: 7, body: { name: 'Wellness', description: 'Pharmacy, gym etc.' } })
+    expect(await screen.findByRole('status')).toHaveTextContent('Category updated.')
+    expect(await listedRows()).toEqual([
+      ['Groceries Built-in', 'All groceries.', '12', '3'],
+      ['Other Built-in', "Costs that don't belong in any other category.", '1', '0'],
+      ['Wellness', 'Pharmacy, gym etc.', '4', '2'],
+    ])
+    expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument()
+  })
+
+  it("edits only a Built-in Category's description, sending its name unchanged", async () => {
+    let edited: unknown
+    handleEditCategory = (_id, body) => {
+      edited = body
+      return Response.json({ ...categories[0], description: 'Food and drink.' })
+    }
+    const user = await openCategoriesPage()
+    await listedRows()
+
+    const row = await startEditing(user, /Groceries/)
+    expect(row.queryByLabelText('Name')).not.toBeInTheDocument()
+    expect(row.getByText('Groceries')).toBeInTheDocument()
+    await user.clear(row.getByLabelText('Description'))
+    await user.type(row.getByLabelText('Description'), 'Food and drink.')
+    await user.click(row.getByRole('button', { name: 'Save' }))
+
+    expect(edited).toEqual({ name: 'Groceries', description: 'Food and drink.' })
+    expect(await screen.findByRole('status')).toHaveTextContent('Category updated.')
+    expect(within(categoryRow(/Groceries/)).getByText('Food and drink.')).toBeInTheDocument()
+  })
+
+  it('cancels an edit and restores the row', async () => {
+    categoriesServed = [health]
+    const user = await openCategoriesPage()
+    await screen.findByText('Pharmacy etc.')
+
+    const row = await startEditing(user, /Health/)
+    await user.type(row.getByLabelText('Name'), ' extra')
+    await user.click(row.getByRole('button', { name: 'Cancel' }))
+
+    expect(categoryRow(/Health/)).toHaveTextContent('HealthPharmacy etc.42')
+    expect(fetchMock).not.toHaveBeenCalledWith('/api/categories/7', expect.anything())
+  })
+
+  it("shows the server's field errors on an edit and keeps the input", async () => {
+    categoriesServed = [categories[0], health]
+    handleEditCategory = () =>
+      Response.json(
+        {
+          errors: {
+            name: ["A category named 'Groceries' already exists."],
+            description: ['Description is required.'],
+          },
+        },
+        { status: 400 },
+      )
+    const user = await openCategoriesPage()
+    await listedRows()
+
+    const row = await startEditing(user, /Health/)
+    await user.clear(row.getByLabelText('Name'))
+    await user.type(row.getByLabelText('Name'), 'GROCERIES')
+    await user.clear(row.getByLabelText('Description'))
+    await user.click(row.getByRole('button', { name: 'Save' }))
+
+    const nameError = await row.findByText("A category named 'Groceries' already exists.")
+    expect(row.getByLabelText('Name')).toHaveAccessibleDescription(nameError.textContent!)
+    expect(row.getByLabelText('Description')).toHaveAccessibleDescription('Description is required.')
+    expect(row.getByLabelText('Name')).toHaveValue('GROCERIES')
+  })
+
+  it('shows a general error when an edit cannot reach the server', async () => {
+    categoriesServed = [health]
+    handleEditCategory = () => {
+      throw new TypeError('Failed to fetch')
+    }
+    const user = await openCategoriesPage()
+    await screen.findByText('Pharmacy etc.')
+
+    const row = await startEditing(user, /Health/)
+    await user.type(row.getByLabelText('Name'), ' extra')
+    await user.click(row.getByRole('button', { name: 'Save' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Could not reach the server.')
+    expect(row.getByLabelText('Name')).toHaveValue('Health extra')
   })
 })
 
