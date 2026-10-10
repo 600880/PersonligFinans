@@ -5,11 +5,20 @@ import App from './App'
 import { todayIsoDate } from './lib/date'
 
 const categories = [
-  { id: 1, name: 'Groceries', description: 'All groceries.', builtIn: true, transactionCount: 12, ruleCount: 3 },
+  {
+    id: 1,
+    name: 'Groceries',
+    description: 'All groceries.',
+    colour: '#2a78d6',
+    builtIn: true,
+    transactionCount: 12,
+    ruleCount: 3,
+  },
   {
     id: 13,
     name: 'Other',
     description: "Costs that don't belong in any other category.",
+    colour: '#9085e9',
     builtIn: true,
     transactionCount: 1,
     ruleCount: 0,
@@ -47,6 +56,7 @@ let handlePost: PostHandler
 let handleUpload: UploadHandler
 let rules: { id: number; keyword: string; categoryId: number; aiGenerated: boolean }[] | Response
 let handleAddRule: PostHandler
+let handleAddCategory: PostHandler
 let handleEditRule: (id: number, body: unknown) => Response
 let handleDeleteRule: (id: number) => Response
 let months: { year: number; month: number }[] | Response
@@ -93,6 +103,9 @@ const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
     return handleEditRule(Number(ruleUrl[1]), JSON.parse(init.body as string))
   }
   if (ruleUrl && init?.method === 'DELETE') return handleDeleteRule(Number(ruleUrl[1]))
+  if (url === '/api/categories' && init?.method === 'POST') {
+    return handleAddCategory(JSON.parse(init.body as string))
+  }
   if (url === '/api/categories') {
     return categoriesServed instanceof Response ? categoriesServed : Response.json(categoriesServed)
   }
@@ -123,6 +136,11 @@ beforeEach(() => {
   handleEditRule = (id, body) =>
     Response.json({ id, ...(body as object), aiGenerated: false, transactionsChanged: 0 })
   handleDeleteRule = () => Response.json({ transactionsChanged: 0 })
+  handleAddCategory = (body) =>
+    Response.json(
+      { id: 20, ...(body as object), colour: '#0891b2', builtIn: false, transactionCount: 0, ruleCount: 0 },
+      { status: 201 },
+    )
   months = []
   handleListMonth = () => Response.json([])
   handleChangeCategory = () => new Response(null, { status: 500 })
@@ -615,6 +633,81 @@ describe('Categories page', () => {
 
     expect(screen.getAllByText('Built-in')).toHaveLength(1)
     expect(within(screen.getByRole('row', { name: /Groceries/ })).getByText('Built-in')).toBeInTheDocument()
+  })
+
+  it('adds a Category, lists it in name order and offers it on the Rules page', async () => {
+    let posted: unknown
+    handleAddCategory = (body) => {
+      posted = body
+      const added = {
+        id: 20,
+        name: 'Hobby',
+        description: 'Hobby supplies.',
+        colour: '#0891b2',
+        builtIn: false,
+        transactionCount: 0,
+        ruleCount: 0,
+      }
+      categoriesServed = [...categories, added]
+      return Response.json(added, { status: 201 })
+    }
+    const user = await openCategoriesPage()
+    await listedRows()
+
+    await user.type(screen.getByLabelText('Name'), '  Hobby ')
+    await user.type(screen.getByLabelText('Description'), ' Hobby supplies.  ')
+    await user.click(screen.getByRole('button', { name: 'Add category' }))
+
+    expect(posted).toEqual({ name: 'Hobby', description: 'Hobby supplies.' })
+    expect(await screen.findByRole('status')).toHaveTextContent('Category added.')
+    expect(await listedRows()).toEqual([
+      ['Groceries Built-in', 'All groceries.', '12', '3'],
+      ['Hobby', 'Hobby supplies.', '0', '0'],
+      ['Other Built-in', "Costs that don't belong in any other category.", '1', '0'],
+    ])
+    expect(screen.getByLabelText('Name')).toHaveValue('')
+    expect(screen.getByLabelText('Description')).toHaveValue('')
+
+    await user.click(screen.getByRole('button', { name: 'Rules' }))
+    expect(await screen.findByRole('option', { name: 'Hobby' })).toBeInTheDocument()
+  })
+
+  it("shows the server's field errors and keeps the input", async () => {
+    handleAddCategory = () =>
+      Response.json(
+        {
+          errors: {
+            name: ["A Category named 'Groceries' already exists."],
+            description: ['Description is required.'],
+          },
+        },
+        { status: 400 },
+      )
+    const user = await openCategoriesPage()
+    await listedRows()
+
+    await user.type(screen.getByLabelText('Name'), 'groceries')
+    await user.click(screen.getByRole('button', { name: 'Add category' }))
+
+    expect(await screen.findByText("A Category named 'Groceries' already exists.")).toBeInTheDocument()
+    expect(screen.getByText('Description is required.')).toBeInTheDocument()
+    expect(screen.getByLabelText('Name')).toHaveValue('groceries')
+    expect(screen.getAllByRole('row')).toHaveLength(3)
+  })
+
+  it('shows a general error when the server cannot be reached', async () => {
+    handleAddCategory = () => {
+      throw new TypeError('Failed to fetch')
+    }
+    const user = await openCategoriesPage()
+    await listedRows()
+
+    await user.type(screen.getByLabelText('Name'), 'Hobby')
+    await user.type(screen.getByLabelText('Description'), 'Hobby supplies.')
+    await user.click(screen.getByRole('button', { name: 'Add category' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Could not reach the server.')
+    expect(screen.getByLabelText('Name')).toHaveValue('Hobby')
   })
 
   it('says when the Categories could not be loaded', async () => {
@@ -1391,6 +1484,18 @@ describe('Dashboard', () => {
     await user.selectOptions(screen.getByLabelText('Period'), 'August 2026')
     await waitFor(() => expect(legendRows()).toHaveLength(1))
     expect(swatchColour('Groceries')).toBe(groceries)
+  })
+
+  it('draws each Category in the colour the API gives it', async () => {
+    categoriesServed = [{ ...categories[0], colour: '#123456' }, { ...categories[1], colour: '#abcdef' }]
+    months = [{ year: 2026, month: 9 }]
+    handleSpending = () => Response.json(septemberSpending)
+    render(<App />)
+    await waitFor(() => expect(legendRows()).toHaveLength(3))
+
+    expect(swatchColour('Groceries')).toBe('rgb(18, 52, 86)')
+    expect(swatchColour('Other')).toBe('rgb(171, 205, 239)')
+    expect(swatchColour('Uncategorized')).toBe('rgb(148, 163, 184)')
   })
 
   it('adds a Transfers slice, counted in the total and percentages, while Include transfers is on', async () => {
@@ -2385,6 +2490,23 @@ describe('Dashboard', () => {
           expect(rowSwatch(trend(), name)).toBe(rowSwatch(dashboard(), name))
         }
         expect(rowSwatch(trend(), 'Total')).toBe('rgb(30, 41, 59)')
+      })
+
+      it('draws each Category in the colour the API gives it', async () => {
+        categoriesServed = [{ ...categories[0], colour: '#123456' }, { ...categories[1], colour: '#abcdef' }]
+        months = [
+          { year: 2026, month: 9 },
+          { year: 2026, month: 8 },
+        ]
+        handleMonthlySpending = (from, to) =>
+          Response.json(monthlySpending(from, to, { '2026-9': septemberSpending.slices }))
+
+        render(<App />)
+
+        await waitFor(() => expect(trendTable()).toHaveLength(5))
+        expect(rowSwatch(trend(), 'Groceries')).toBe('rgb(18, 52, 86)')
+        expect(rowSwatch(trend(), 'Other')).toBe('rgb(171, 205, 239)')
+        expect(rowSwatch(trend(), 'Uncategorized')).toBe('rgb(148, 163, 184)')
       })
 
       it('opens with Total switched on and the Categories off, and switches any of them', async () => {

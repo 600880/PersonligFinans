@@ -474,10 +474,10 @@ public class BankStatementEndpointsTests
         Assert.Equal(
             [new UnmatchedRow($"{_token} Kafé", AmountSign.Negative), new UnmatchedRow($"{_token} Lønn", AmountSign.Positive)],
             call.Rows);
-        // "Other" is a deliberate choice of the user's, never offered to the rule generator.
-        Assert.Equal(
-            SeedCategories.All.Select(c => c.Name).Where(n => n != "Other").Order(),
-            call.CategoryNames.Order());
+        // "Other" is a deliberate choice of the user's, never offered to the rule generator. Other
+        // tests add Categories of their own, so only the seeded ones are checked.
+        Assert.Subset(call.CategoryNames.ToHashSet(), SeedCategories.All.Select(c => c.Name).Where(n => n != "Other").ToHashSet());
+        Assert.DoesNotContain("Other", call.CategoryNames);
     }
 
     [Fact]

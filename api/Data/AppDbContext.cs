@@ -10,6 +10,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public const int KeywordMaxLength = 100;
     public const int CategoryNameMaxLength = 50;
     public const int CategoryDescriptionMaxLength = 200;
+    public const int CategoryColourMaxLength = 7;
 
     public DbSet<Category> Categories => Set<Category>();
     public DbSet<Transaction> Transactions => Set<Transaction>();
@@ -24,6 +25,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         {
             category.Property(c => c.Name).HasMaxLength(CategoryNameMaxLength);
             category.Property(c => c.Description).HasMaxLength(CategoryDescriptionMaxLength);
+            category.Property(c => c.Colour).HasMaxLength(CategoryColourMaxLength);
             category.HasData(SeedCategories.All);
         });
 
