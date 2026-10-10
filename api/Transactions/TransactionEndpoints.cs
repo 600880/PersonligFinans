@@ -46,20 +46,21 @@ public static class TransactionEndpoints
                 .Select(m => new TransactionMonthResponse(m.Year, m.Month))
                 .ToListAsync());
 
-        api.MapGet("/transactions", ListMonth);
+        api.MapGet("/transactions", ListPeriod);
         api.MapPost("/transactions", CreateTransaction);
         api.MapPut("/transactions/{id:int}/category", ChangeCategory);
     }
 
-    // A month's Transactions, imported and manual, newest first with the id as a stable tie-break.
-    private static async Task<IResult> ListMonth(int? year, int? month, AppDbContext db)
+    // A month's Transactions, or a whole year's when no month is given, imported and manual, newest
+    // first with the id as a stable tie-break.
+    private static async Task<IResult> ListPeriod(int? year, int? month, AppDbContext db)
     {
-        var errors = ValidateMonth(year, month);
+        var errors = month is null ? ValidateYear(year) : ValidateMonth(year, month);
         if (errors.Count > 0)
             return Results.ValidationProblem(errors);
 
-        var first = new DateOnly(year!.Value, month!.Value, 1);
-        var next = first.AddMonths(1);
+        var first = new DateOnly(year!.Value, month ?? 1, 1);
+        var next = month is null ? first.AddYears(1) : first.AddMonths(1);
         return Results.Ok(await db.Transactions
             .Where(t => t.PostedDate >= first && t.PostedDate < next)
             .OrderByDescending(t => t.PostedDate)

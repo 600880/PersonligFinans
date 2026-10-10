@@ -236,10 +236,25 @@ public class TransactionEndpointsTests
         Assert.Empty(transactions!);
     }
 
+    [Fact]
+    public async Task Get_YearWithoutMonth_ListsTheWholeYearsTransactionsNewestFirst()
+    {
+        await AddManualTransaction("2045-12-31", $"{_token} last day");
+        await AddManualTransaction("2044-12-31", $"{_token} day before");
+        await AddManualTransaction("2045-06-15", $"{_token} mid");
+        await AddManualTransaction("2045-01-01", $"{_token} first day");
+        await AddManualTransaction("2046-01-01", $"{_token} day after");
+
+        var transactions = await _client.GetFromJsonAsync<List<TransactionResponse>>("/api/transactions?year=2045");
+
+        Assert.Equal(
+            [$"{_token} last day", $"{_token} mid", $"{_token} first day"],
+            transactions!.Where(t => t.Description.StartsWith(_token)).Select(t => t.Description));
+    }
+
     [Theory]
     [InlineData("year=2026&month=0", "month")]
     [InlineData("year=2026&month=13", "month")]
-    [InlineData("year=2026", "month")]
     [InlineData("year=1899&month=1", "year")]
     [InlineData("year=3000&month=1", "year")]
     [InlineData("month=1", "year")]

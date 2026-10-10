@@ -63,7 +63,8 @@ let handleDeleteRule: (id: number) => Response
 let handleDeleteCategory: (id: number, query: URLSearchParams) => Response
 let handleEditCategory: (id: number, body: unknown) => Response | Promise<Response>
 let months: { year: number; month: number }[] | Response
-let handleListMonth: (year: number, month: number) => Response
+// month is undefined for a whole year.
+let handleListPeriod: (year: number, month: number | undefined) => Response
 let handleChangeCategory: (id: number, body: unknown) => Response | Promise<Response>
 // What the categories endpoint returns: `categories` unless a test adds to it or makes it fail.
 let categoriesServed: ServedCategory[] | Response
@@ -92,8 +93,8 @@ const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       transfers !== undefined,
     )
   }
-  const monthUrl = /^\/api\/transactions\?year=(\d+)&month=(\d+)$/.exec(url)
-  if (monthUrl) return handleListMonth(Number(monthUrl[1]), Number(monthUrl[2]))
+  const periodUrl = /^\/api\/transactions\?year=(\d+)(?:&month=(\d+))?$/.exec(url)
+  if (periodUrl) return handleListPeriod(Number(periodUrl[1]), periodUrl[2] ? Number(periodUrl[2]) : undefined)
   const categoryUrl = /^\/api\/transactions\/(\d+)\/category$/.exec(url)
   if (categoryUrl && init?.method === 'PUT') {
     return handleChangeCategory(Number(categoryUrl[1]), JSON.parse(init.body as string))
@@ -157,7 +158,7 @@ beforeEach(() => {
       { status: 201 },
     )
   months = []
-  handleListMonth = () => Response.json([])
+  handleListPeriod = () => Response.json([])
   handleChangeCategory = () => new Response(null, { status: 500 })
   handleSpending = () => Response.json({ total: 0, slices: [] })
   handleMonthlySpending = (from, to) => Response.json(monthlySpending(from, to))
@@ -1484,6 +1485,16 @@ describe('Transactions page', () => {
     },
   ]
 
+  const octoberTransaction = {
+    id: 9,
+    date: '2026-10-02',
+    description: 'Kiwi',
+    amount: -89.9,
+    reference: null,
+    categoryId: 1,
+    aiPlacedInOther: false,
+  }
+
   // A month with a Transaction AI-placed in Other, one the user put in Other, and one in another Category.
   const aiPlacedTransactions = [
     septemberTransactions[0],
@@ -1514,7 +1525,7 @@ describe('Transactions page', () => {
     return user
   }
 
-  function requestedMonths() {
+  function requestedPeriods() {
     return fetchMock.mock.calls
       .map(([url]) => url)
       .filter((url) => url.startsWith('/api/transactions?'))
@@ -1547,7 +1558,7 @@ describe('Transactions page', () => {
 
   async function openSeptember() {
     months = [{ year: 2026, month: 9 }]
-    handleListMonth = () => Response.json(septemberTransactions)
+    handleListPeriod = () => Response.json(septemberTransactions)
     const user = await openTransactionsPage()
     await screen.findByRole('cell', { name: 'Rema 1000' })
     return user
@@ -1559,7 +1570,7 @@ describe('Transactions page', () => {
       { year: 2026, month: 8 },
       { year: 2025, month: 12 },
     ]
-    handleListMonth = (year, month) =>
+    handleListPeriod = (year, month) =>
       Response.json(year === 2026 && month === 9 ? septemberTransactions : [])
 
     await openTransactionsPage()
@@ -1567,12 +1578,12 @@ describe('Transactions page', () => {
     await screen.findByRole('cell', { name: 'Rema 1000' })
     expect(screen.getByLabelText('Year')).toHaveValue('2026')
     expect(screen.getByLabelText('Month')).toHaveValue('9')
-    expect(requestedMonths()).toEqual(['/api/transactions?year=2026&month=9'])
+    expect(requestedPeriods()).toEqual(['/api/transactions?year=2026&month=9'])
   })
 
   it('shows the date, Description, Category or Uncategorized, and the Amount in NOK', async () => {
     months = [{ year: 2026, month: 9 }]
-    handleListMonth = () => Response.json(septemberTransactions)
+    handleListPeriod = () => Response.json(septemberTransactions)
 
     await openTransactionsPage()
 
@@ -1583,7 +1594,7 @@ describe('Transactions page', () => {
     ])
   })
 
-  it('offers the years with Transactions plus the current year, and all twelve months', async () => {
+  it('offers the years with Transactions plus the current year, and all twelve months after All months', async () => {
     months = [
       { year: 2024, month: 3 },
       { year: 2022, month: 1 },
@@ -1597,7 +1608,30 @@ describe('Transactions page', () => {
     const yearOptions = within(screen.getByLabelText('Year')).getAllByRole('option')
     expect(yearOptions.map((option) => option.textContent)).toEqual(expectedYears)
     const monthOptions = within(screen.getByLabelText('Month')).getAllByRole('option')
-    expect(monthOptions.map((option) => option.textContent)).toEqual(monthNames)
+    expect(monthOptions.map((option) => option.textContent)).toEqual(['All months', ...monthNames])
+  })
+
+  it("lists the whole year's Transactions when All months is chosen", async () => {
+    months = [
+      { year: 2026, month: 9 },
+      { year: 2025, month: 3 },
+    ]
+    handleListPeriod = (year, month) =>
+      Response.json(
+        year !== 2026 ? [] : month === undefined ? [octoberTransaction, ...septemberTransactions] : septemberTransactions,
+      )
+    const user = await openTransactionsPage()
+    await screen.findByRole('cell', { name: 'Rema 1000' })
+
+    await user.selectOptions(screen.getByLabelText('Month'), 'All months')
+
+    expect(await screen.findByRole('cell', { name: 'Kiwi' })).toBeInTheDocument()
+    expect(rowCells().map((cells) => cells[1])).toEqual(['Kiwi', 'Rema 1000', 'Lønn Fra: Testfirma AS'])
+    expect(requestedPeriods()).toEqual(['/api/transactions?year=2026&month=9', '/api/transactions?year=2026'])
+
+    await user.selectOptions(screen.getByLabelText('Year'), '2025')
+    expect(await screen.findByText('No transactions in 2025')).toBeInTheDocument()
+    expect(screen.getByLabelText('Month')).toHaveValue('')
   })
 
   it('opens on the current month and says it is empty when there are no Transactions', async () => {
@@ -1617,7 +1651,7 @@ describe('Transactions page', () => {
       { year: 2026, month: 9 },
       { year: 2025, month: 9 },
     ]
-    handleListMonth = (year, month) =>
+    handleListPeriod = (year, month) =>
       Response.json(year === 2026 && month === 9 ? septemberTransactions : [])
     const user = await openTransactionsPage()
     await screen.findByRole('cell', { name: 'Rema 1000' })
@@ -1627,11 +1661,98 @@ describe('Transactions page', () => {
 
     await user.selectOptions(screen.getByLabelText('Year'), '2025')
     expect(await screen.findByText('No transactions in August 2025')).toBeInTheDocument()
-    expect(requestedMonths()).toEqual([
+    expect(requestedPeriods()).toEqual([
       '/api/transactions?year=2026&month=9',
       '/api/transactions?year=2026&month=8',
       '/api/transactions?year=2025&month=8',
     ])
+  })
+
+  it('filters the rows by Category, or to the Uncategorized ones', async () => {
+    months = [{ year: 2026, month: 9 }]
+    handleListPeriod = () => Response.json(aiPlacedTransactions.concat(septemberTransactions[1]))
+    const user = await openTransactionsPage()
+    await screen.findByRole('cell', { name: 'Rema 1000' })
+
+    const filter = screen.getByRole<HTMLSelectElement>('combobox', { name: 'Category' })
+    expect(filter).toHaveValue('')
+    expect(optionsOf(filter).map((option) => option.name)).toEqual([
+      'All categories',
+      'Groceries',
+      'Other',
+      'Uncategorized',
+    ])
+
+    await user.selectOptions(filter, 'Other')
+    expect(rowCells().map((cells) => cells[1])).toEqual(['Vipps *Ola Nordmann', 'Gave'])
+
+    await user.selectOptions(filter, 'Uncategorized')
+    expect(rowCells().map((cells) => cells[1])).toEqual(['Lønn Fra: Testfirma AS'])
+
+    await user.selectOptions(filter, 'All categories')
+    expect(rowCells()).toHaveLength(4)
+  })
+
+  it('narrows the rows to matching descriptions as the search is typed, ignoring case and surrounding spaces', async () => {
+    const bøker = { ...septemberTransactions[0], id: 10, description: 'Bøker Og Blader' }
+    months = [{ year: 2026, month: 9 }]
+    handleListPeriod = () => Response.json([...aiPlacedTransactions, bøker])
+    const user = await openTransactionsPage()
+    await screen.findByRole('cell', { name: 'Rema 1000' })
+    const search = screen.getByRole('searchbox', { name: 'Search' })
+
+    await user.type(search, 'g')
+    expect(rowCells().map((cells) => cells[1])).toEqual(['Gave', 'Bøker Og Blader'])
+    await user.type(search, 'a')
+    expect(rowCells().map((cells) => cells[1])).toEqual(['Gave'])
+
+    await user.clear(search)
+    await user.type(search, '  OLA nord ')
+    expect(rowCells().map((cells) => cells[1])).toEqual(['Vipps *Ola Nordmann'])
+
+    await user.clear(search)
+    await user.type(search, 'boker')
+    expect(screen.queryByRole('table')).not.toBeInTheDocument()
+  })
+
+  it('keeps the Category filter and search when the Period changes', async () => {
+    months = [{ year: 2026, month: 9 }]
+    handleListPeriod = (_year, month) =>
+      Response.json(month === undefined ? [octoberTransaction, ...septemberTransactions] : septemberTransactions)
+    const user = await openTransactionsPage()
+    await screen.findByRole('cell', { name: 'Rema 1000' })
+
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Category' }), 'Groceries')
+    await user.type(screen.getByRole('searchbox', { name: 'Search' }), 'i')
+    await user.selectOptions(screen.getByLabelText('Month'), 'All months')
+
+    expect(await screen.findByRole('cell', { name: 'Kiwi' })).toBeInTheDocument()
+    expect(rowCells().map((cells) => cells[1])).toEqual(['Kiwi'])
+    expect(screen.getByRole('combobox', { name: 'Category' })).toHaveValue('1')
+    expect(screen.getByRole('searchbox', { name: 'Search' })).toHaveValue('i')
+  })
+
+  it('drops a row from the filtered list once its Category is changed to one the filter leaves out', async () => {
+    handleChangeCategory = () => Response.json({ ...septemberTransactions[1], categoryId: 1 })
+    const user = await openSeptember()
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Category' }), 'Uncategorized')
+
+    await user.selectOptions(categorySelect('Lønn Fra: Testfirma AS'), 'Groceries')
+
+    expect(await screen.findByRole('status')).toHaveTextContent('Category changed')
+    expect(screen.queryByRole('cell', { name: 'Lønn Fra: Testfirma AS' })).not.toBeInTheDocument()
+  })
+
+  it('says no transactions match when the filters leave none', async () => {
+    const user = await openSeptember()
+
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Category' }), 'Other')
+    expect(screen.getByText('No transactions match')).toBeInTheDocument()
+    expect(screen.queryByRole('table')).not.toBeInTheDocument()
+
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Category' }), 'All categories')
+    await user.type(screen.getByRole('searchbox', { name: 'Search' }), 'xyz')
+    expect(screen.getByText('No transactions match')).toBeInTheDocument()
   })
 
   it('says when the Transactions could not be loaded', async () => {
@@ -1705,7 +1826,7 @@ describe('Transactions page', () => {
 
   async function openAiPlacedMonth() {
     months = [{ year: 2026, month: 9 }]
-    handleListMonth = () => Response.json(aiPlacedTransactions)
+    handleListPeriod = () => Response.json(aiPlacedTransactions)
     const user = await openTransactionsPage()
     await screen.findByRole('cell', { name: 'Rema 1000' })
     return user

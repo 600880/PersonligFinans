@@ -3,10 +3,11 @@ import {
   changeTransactionCategory,
   fetchCategories,
   fetchTransactionMonths,
-  fetchTransactionsOfMonth,
+  fetchTransactionsOf,
   type Category,
   type Transaction,
   type TransactionMonth,
+  type TransactionPeriod,
 } from '../lib/api'
 import { formatAmount } from '../lib/amount'
 import { formatNorwegianDate } from '../lib/date'
@@ -18,22 +19,43 @@ const inputClass = 'rounded-lg border border-slate-300 px-3 py-2 font-normal'
 const categorySelectClass =
   'rounded-lg border border-slate-300 px-2 py-1 disabled:cursor-not-allowed disabled:bg-slate-100'
 
-// A month's Transactions, remembered with the month they were loaded for.
-interface LoadedMonth extends TransactionMonth {
+// A Period's Transactions, remembered with the Period they were loaded for.
+interface LoadedPeriod extends TransactionPeriod {
   transactions: Transaction[]
+}
+
+// The Category filter's value: '' for all Categories, UNCATEGORIZED, or a Category's id.
+const UNCATEGORIZED = 'uncategorized'
+
+function matchesCategory(transaction: Transaction, categoryFilter: string) {
+  if (categoryFilter === '') return true
+  if (categoryFilter === UNCATEGORIZED) return transaction.categoryId === null
+  return transaction.categoryId === Number(categoryFilter)
+}
+
+// Whether the description contains the search text, ignoring case and the text's surrounding spaces.
+// Æ, Ø and Å are letters of their own, so "o" never matches "ø".
+function matchesSearch(transaction: Transaction, search: string) {
+  return transaction.description.toLowerCase().includes(search.trim().toLowerCase())
+}
+
+function periodName({ year, month }: TransactionPeriod) {
+  return month === null ? String(year) : `${MONTH_NAMES[month - 1]} ${year}`
 }
 
 export function TransactionsPage() {
   const [categories, setCategories] = useState<Category[]>([])
   const [monthsWithTransactions, setMonthsWithTransactions] = useState<TransactionMonth[]>([])
   // Null until the months are loaded, which decides the month the page opens on.
-  const [selected, setSelected] = useState<TransactionMonth | null>(null)
-  const [loaded, setLoaded] = useState<LoadedMonth | null>(null)
+  const [selected, setSelected] = useState<TransactionPeriod | null>(null)
+  const [loaded, setLoaded] = useState<LoadedPeriod | null>(null)
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   // The Transactions whose Category is being saved. Their selects are disabled until it is, so a
   // failed save never goes back over a later choice.
   const [savingIds, setSavingIds] = useState<ReadonlySet<number>>(new Set())
+  const [categoryFilter, setCategoryFilter] = useState('')
+  const [search, setSearch] = useState('')
 
   useEffect(() => {
     let ignore = false
@@ -55,7 +77,7 @@ export function TransactionsPage() {
   useEffect(() => {
     if (!selected) return
     let ignore = false
-    fetchTransactionsOfMonth(selected)
+    fetchTransactionsOf(selected)
       .then((transactions) => {
         if (!ignore) setLoaded({ ...selected, transactions })
       })
@@ -74,8 +96,11 @@ export function TransactionsPage() {
     loaded && loaded.year === selected?.year && loaded.month === selected.month
       ? loaded.transactions
       : null
+  const isFiltering = categoryFilter !== '' || search.trim() !== ''
+  const shownTransactions =
+    transactions?.filter((t) => matchesCategory(t, categoryFilter) && matchesSearch(t, search)) ?? null
 
-  function chooseMonth(change: Partial<TransactionMonth>) {
+  function choosePeriod(change: Partial<TransactionPeriod>) {
     if (!selected) return
     setStatusMessage(null)
     setErrorMessage(null)
@@ -128,12 +153,12 @@ export function TransactionsPage() {
       <h2 className="text-lg font-semibold text-slate-900">Transactions</h2>
 
       {selected && (
-        <div className="mt-4 flex gap-3">
+        <div className="mt-4 flex flex-wrap gap-3">
           <label className="flex flex-col gap-1 text-sm font-medium text-slate-700">
             Year
             <select
               value={selected.year}
-              onChange={(event) => chooseMonth({ year: Number(event.target.value) })}
+              onChange={(event) => choosePeriod({ year: Number(event.target.value) })}
               className={inputClass}
             >
               {years.map((year) => (
@@ -146,16 +171,44 @@ export function TransactionsPage() {
           <label className="flex flex-col gap-1 text-sm font-medium text-slate-700">
             Month
             <select
-              value={selected.month}
-              onChange={(event) => chooseMonth({ month: Number(event.target.value) })}
+              value={selected.month ?? ''}
+              onChange={(event) =>
+                choosePeriod({ month: event.target.value === '' ? null : Number(event.target.value) })
+              }
               className={inputClass}
             >
+              <option value="">All months</option>
               {MONTH_NAMES.map((name, index) => (
                 <option key={name} value={index + 1}>
                   {name}
                 </option>
               ))}
             </select>
+          </label>
+          <label className="flex flex-col gap-1 text-sm font-medium text-slate-700">
+            Category
+            <select
+              value={categoryFilter}
+              onChange={(event) => setCategoryFilter(event.target.value)}
+              className={inputClass}
+            >
+              <option value="">All categories</option>
+              {categories.map((category) => (
+                <option key={category.id} value={category.id}>
+                  {category.name}
+                </option>
+              ))}
+              <option value={UNCATEGORIZED}>Uncategorized</option>
+            </select>
+          </label>
+          <label className="flex flex-1 flex-col gap-1 text-sm font-medium text-slate-700">
+            Search
+            <input
+              type="search"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              className={inputClass}
+            />
           </label>
         </div>
       )}
@@ -170,14 +223,13 @@ export function TransactionsPage() {
         </p>
       )}
 
-      {selected && transactions?.length === 0 && (
+      {selected && shownTransactions?.length === 0 && (
         <p className="mt-6 text-sm text-slate-500">
-          No transactions in {MONTH_NAMES[selected.month - 1]}{' '}
-          {selected.year}
+          {isFiltering ? 'No transactions match' : `No transactions in ${periodName(selected)}`}
         </p>
       )}
 
-      {transactions && transactions.length > 0 && (
+      {shownTransactions && shownTransactions.length > 0 && (
         <table className="mt-4 w-full text-left text-sm">
           <thead className="text-slate-500">
             <tr>
@@ -188,7 +240,7 @@ export function TransactionsPage() {
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-200 text-slate-900">
-            {transactions.map((transaction) => (
+            {shownTransactions.map((transaction) => (
               <tr key={transaction.id}>
                 <td className="py-2 pr-3 whitespace-nowrap">{formatNorwegianDate(transaction.date)}</td>
                 <td className="py-2 pr-3">{transaction.description}</td>

@@ -152,8 +152,14 @@ export async function fetchTransactionMonths(): Promise<TransactionMonth[]> {
   return (await response.json()) as TransactionMonth[]
 }
 
-export async function fetchTransactionsOfMonth({ year, month }: TransactionMonth): Promise<Transaction[]> {
-  const response = await fetch(`/api/transactions?year=${year}&month=${month}`)
+// A month, or a whole year when month is null.
+export interface TransactionPeriod {
+  year: number
+  month: number | null
+}
+
+export async function fetchTransactionsOf({ year, month }: TransactionPeriod): Promise<Transaction[]> {
+  const response = await fetch(`/api/transactions?year=${year}${month === null ? '' : `&month=${month}`}`)
   if (!response.ok) throw new Error(`Loading transactions failed (${response.status})`)
   return (await response.json()) as Transaction[]
 }
