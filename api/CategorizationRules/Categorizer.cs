@@ -25,6 +25,9 @@ public static class Categorizer
     // The same test, for Transactions changed in memory but not yet saved.
     private static readonly Func<Transaction, bool> IsRuleEligibleInMemory = IsRuleEligible.Compile();
 
+    // Locked: the rules will never change its Category. Manually entered, or categorized manually.
+    public static bool IsLocked(Transaction transaction) => !IsRuleEligibleInMemory(transaction);
+
     // The rule whose keyword the description contains, ignoring case. The longest keyword wins, so
     // a specific rule overrides a general one; between equally long keywords the oldest rule wins.
     public static CategorizationRule? ChooseRule(string description, IEnumerable<CategorizationRule> rules) =>

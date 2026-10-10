@@ -128,8 +128,8 @@ async function saveCategory(
   return { ok: false, fieldErrors: {}, message: `Saving failed (${response.status}).` }
 }
 
-// categoryId is null for an Uncategorized Transaction. aiPlacedInOther is set while the LLM's choice
-// of Other stands: no rule holds the Transaction and the user hasn't changed its Category.
+// categoryId is null for an Uncategorized Transaction. locked is set when the Categorization Rules
+// will never change its Category: it was entered manually, or its Category was chosen manually.
 export interface Transaction {
   id: number
   date: string
@@ -137,7 +137,7 @@ export interface Transaction {
   amount: number
   reference: string | null
   categoryId: number | null
-  aiPlacedInOther: boolean
+  locked: boolean
 }
 
 export interface TransactionMonth {

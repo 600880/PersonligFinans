@@ -20,8 +20,8 @@ public record TransactionResponse(
     decimal Amount,
     string? Reference,
     int? CategoryId,
-    // In Other because the LLM put it there, with no rule holding it now.
-    bool AiPlacedInOther);
+    // Locked: the rules will never change its Category.
+    bool Locked);
 
 public record TransactionMonthResponse(int Year, int Month);
 
@@ -142,7 +142,7 @@ public static class TransactionEndpoints
     }
 
     // Categorizes one Transaction manually: an imported Transaction loses its rule link and its
-    // AI-placed in Other mark, so rules never change it again. Never creates, changes or deletes a
+    // AI-placed in Other flag, so rules never change it again. Never creates, changes or deletes a
     // Categorization Rule.
     private static async Task<IResult> ChangeCategory(int id, ChangeCategoryRequest request, AppDbContext db)
     {
@@ -178,5 +178,5 @@ public static class TransactionEndpoints
             transaction.Amount,
             transaction.Reference,
             transaction.CategoryId,
-            transaction.AiPlacedInOther && transaction.CategorizationRuleId == null);
+            Categorizer.IsLocked(transaction));
 }

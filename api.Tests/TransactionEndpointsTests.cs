@@ -310,7 +310,7 @@ public class TransactionEndpointsTests
 
         var changed = await CategoryChanged(imported.Id, RestaurantsCategoryId);
 
-        Assert.Equal(imported with { CategoryId = RestaurantsCategoryId }, changed);
+        Assert.Equal(imported with { CategoryId = RestaurantsCategoryId, Locked = true }, changed);
         Assert.Equal(RestaurantsCategoryId, (await Own("Kafé")).CategoryId);
     }
 
@@ -425,23 +425,45 @@ public class TransactionEndpointsTests
     }
 
     [Fact]
-    public async Task Get_Month_ShowsATransactionTheLlmDeclinedAsAiPlacedInOther()
+    public async Task Get_Month_ShowsATransactionTheLlmPlacedInOtherAsNotLocked()
     {
         await ImportForCorrection(new FakeRuleGenerator(), "Frisør");
 
         var placed = await Own("Frisør");
 
-        Assert.Equal((OtherCategoryId, true), (placed.CategoryId, placed.AiPlacedInOther));
+        Assert.Equal((OtherCategoryId, false), (placed.CategoryId, placed.Locked));
     }
 
     [Fact]
-    public async Task Get_Month_ShowsNoTransactionAsAiPlacedInOtherWhenTheGeneratorIsUnavailable()
+    public async Task Get_Month_ShowsAnUncategorizedImportedTransactionAsNotLocked()
     {
         await ImportForCorrection(new FakeRuleGenerator { Unavailable = true }, "Frisør");
 
         var uncategorized = await Own("Frisør");
 
-        Assert.Equal((null, false), (uncategorized.CategoryId, uncategorized.AiPlacedInOther));
+        Assert.Equal((null, false), (uncategorized.CategoryId, uncategorized.Locked));
+    }
+
+    [Fact]
+    public async Task Get_Month_ShowsATransactionCategorizedByARuleAsNotLocked()
+    {
+        await AddRule($"{_token} kafé", RestaurantsCategoryId);
+        await ImportForCorrection("Kafé");
+
+        var categorized = await Own("Kafé");
+
+        Assert.Equal((RestaurantsCategoryId, false), (categorized.CategoryId, categorized.Locked));
+    }
+
+    [Fact]
+    public async Task Post_ManuallyEnteredTransaction_IsLocked()
+    {
+        var response = await _client.PostAsJsonAsync(
+            "/api/transactions", ValidRequest(date: "2044-01-20", description: $"{_token} Lunsj"));
+
+        var created = (await response.Content.ReadFromJsonAsync<TransactionResponse>())!;
+        Assert.True(created.Locked);
+        Assert.True((await Own("Lunsj")).Locked);
     }
 
     [Fact]
@@ -452,7 +474,7 @@ public class TransactionEndpointsTests
         await AddRule($"{_token} frisør", ShoppingCategoryId);
 
         var claimed = await Own("Frisør Nord");
-        Assert.Equal((ShoppingCategoryId, false), (claimed.CategoryId, claimed.AiPlacedInOther));
+        Assert.Equal((ShoppingCategoryId, false), (claimed.CategoryId, claimed.Locked));
     }
 
     [Fact]
@@ -465,11 +487,11 @@ public class TransactionEndpointsTests
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var placed = await Own("Frisør Nord");
-        Assert.Equal((OtherCategoryId, true), (placed.CategoryId, placed.AiPlacedInOther));
+        Assert.Equal((OtherCategoryId, false), (placed.CategoryId, placed.Locked));
     }
 
     [Fact]
-    public async Task Put_Category_OfTransactionAiPlacedInOther_MakesItManual()
+    public async Task Put_Category_OfTransactionAiPlacedInOther_LocksIt()
     {
         await ImportForCorrection(new FakeRuleGenerator(), "Frisør Nord");
 
@@ -477,8 +499,20 @@ public class TransactionEndpointsTests
         var changed = await CategoryChanged((await Own("Frisør Nord")).Id, OtherCategoryId);
         await AddRule($"{_token} frisør", ShoppingCategoryId);
 
-        Assert.Equal((OtherCategoryId, false), (changed.CategoryId, changed.AiPlacedInOther));
+        Assert.Equal((OtherCategoryId, true), (changed.CategoryId, changed.Locked));
         Assert.Equal(changed, await Own("Frisør Nord"));
+    }
+
+    [Fact]
+    public async Task Put_Category_OfTransactionCategorizedByARule_LocksIt()
+    {
+        await AddRule($"{_token} kafé", RestaurantsCategoryId);
+        await ImportForCorrection("Kafé");
+
+        var changed = await CategoryChanged((await Own("Kafé")).Id, GroceriesCategoryId);
+
+        Assert.True(changed.Locked);
+        Assert.Equal(changed, await Own("Kafé"));
     }
 
     [Fact]

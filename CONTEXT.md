@@ -41,8 +41,12 @@ A Categorization Rule created by an LLM during import, for an imported Transacti
 _Avoid_: Suggested rule, suggestion, unconfirmed rule
 
 **AI-placed in Other**:
-The state of an imported Transaction the LLM put in the Other Category during import, without creating a rule, because it could not write a confident one. It stays open to Categorization Rules: a matching rule takes it, and if no rule matches any more it returns to Other rather than becoming Uncategorized. The mark lets the user spot and review such Transactions, and is removed once the user changes the Transaction's Category, which then counts as chosen manually.
+The state of an imported Transaction the LLM put in the Other Category during import, without creating a rule, because it could not write a confident one. It stays open to Categorization Rules: a matching rule takes it, and if no rule matches any more it returns to Other rather than becoming Uncategorized. It ends once the user changes the Transaction's Category, which then counts as chosen manually. It is not shown to the user.
 _Avoid_: AI fallback, auto-Other, AI-categorized
+
+**Locked**:
+The state of a Transaction whose Category the Categorization Rules will never change: every manually-entered Transaction (even an Uncategorized one), and every imported Transaction whose Category was chosen manually. It is marked so the user can see which Transactions a rule change won't touch. An imported Transaction stops being Locked if its Category is deleted without a replacement, since it is then matched against the rules again. There is no way to unlock a Transaction.
+_Avoid_: Pinned, frozen, edited, manual
 
 **Spending**:
 The money that left during a Period: the sum of the negative Amounts, shown as a positive figure and grouped by Category (Uncategorized Transactions count as their own group). Positive Amounts, such as refunds, never reduce it. Transactions in the Transfers Category are left out unless the user chooses to include them, since moving money between the user's own accounts is not spending.

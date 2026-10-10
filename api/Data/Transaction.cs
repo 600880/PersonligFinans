@@ -21,7 +21,7 @@ public class Transaction
     public CategorizationRule? CategorizationRule { get; set; }
 
     // AI-placed in Other: the LLM put this imported Transaction in Other during import, without a
-    // rule. Rules may still claim it, and it falls back to Other when none matches, so the mark is
+    // rule. Rules may still claim it, and it falls back to Other when none matches, so the flag is
     // kept while a rule holds it. Cleared when the user changes its Category.
     public bool AiPlacedInOther { get; set; }
 

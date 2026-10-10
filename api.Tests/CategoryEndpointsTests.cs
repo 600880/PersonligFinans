@@ -616,6 +616,30 @@ public class CategoryEndpointsTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Delete_WithItsRules_ManuallyCategorizedImportedTransactionsStopBeingLockedButManuallyEnteredOnesDoNot()
+    {
+        var id = await CreateCategory($"{_token} Garden");
+        var manual = (await Imported($"{_token} Plantasjen"))[0];
+        await CategorizeManually(manual, id);
+        var manuallyEntered = await ManuallyEntered($"{_token} Felleskjøpet", id);
+        var before = await LockedOf(manual, manuallyEntered);
+
+        await TransactionsChangedByDeletingWithItsRules(id);
+        var after = await LockedOf(manual, manuallyEntered);
+
+        Assert.Equal([true, true], before);
+        Assert.Equal([false, true], after);
+    }
+
+    // Whether each Transaction is Locked, as August 2026's list shows it.
+    private async Task<bool[]> LockedOf(params int[] transactionIds)
+    {
+        var transactions = (await _client.GetFromJsonAsync<List<TransactionResponse>>(
+            "/api/transactions?year=2026&month=8"))!;
+        return transactionIds.Select(id => transactions.Single(t => t.Id == id).Locked).ToArray();
+    }
+
+    [Fact]
     public async Task Delete_WithItsRules_TransactionsAiPlacedInOtherGoBackToOther()
     {
         var id = await CreateCategory($"{_token} Garden");

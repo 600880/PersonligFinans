@@ -123,7 +123,8 @@ export function TransactionsPage() {
   }
 
   // Shows the chosen Category at once, and goes back to the previous one when saving fails, so the
-  // page never keeps a Category that wasn't saved. The AI marker goes once the change is saved.
+  // page never keeps a Category that wasn't saved. Once saved, the row shows whether the server
+  // now has it Locked.
   async function changeCategory(transaction: Transaction, categoryId: number) {
     setStatusMessage(null)
     setErrorMessage(null)
@@ -135,8 +136,8 @@ export function TransactionsPage() {
     )
 
     if (result.ok) {
-      const { categoryId: savedCategoryId, aiPlacedInOther } = result.transaction
-      showChange(transaction.id, { categoryId: savedCategoryId, aiPlacedInOther })
+      const { categoryId: savedCategoryId, locked } = result.transaction
+      showChange(transaction.id, { categoryId: savedCategoryId, locked })
       setStatusMessage('Category changed')
     } else {
       showChange(transaction.id, { categoryId: transaction.categoryId })
@@ -265,16 +266,17 @@ export function TransactionsPage() {
                       </option>
                     ))}
                   </select>
-                  {transaction.aiPlacedInOther && (
-                    <>
-                      {' '}
-                      <span
-                        title="AI-placed in Other"
-                        className="ml-1 rounded bg-violet-100 px-1.5 py-0.5 text-xs font-medium text-violet-700"
-                      >
-                        AI
-                      </span>
-                    </>
+                  {transaction.locked && (
+                    <span
+                      role="img"
+                      aria-label="Locked"
+                      title="Locked: rules won't change this Category"
+                      className="ml-1.5 inline-block align-middle text-slate-400"
+                    >
+                      <svg viewBox="0 0 16 16" fill="currentColor" fillRule="evenodd" aria-hidden="true" className="h-3.5 w-3.5">
+                        <path d="M8 1a3.5 3.5 0 0 0-3.5 3.5V7H4a1.5 1.5 0 0 0-1.5 1.5v5A1.5 1.5 0 0 0 4 15h8a1.5 1.5 0 0 0 1.5-1.5v-5A1.5 1.5 0 0 0 12 7h-.5V4.5A3.5 3.5 0 0 0 8 1Zm2 6V4.5a2 2 0 1 0-4 0V7h4Z" />
+                      </svg>
+                    </span>
                   )}
                 </td>
                 <td className="py-2 text-right whitespace-nowrap tabular-nums">

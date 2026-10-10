@@ -1472,7 +1472,7 @@ describe('Transactions page', () => {
       amount: -1249.9,
       reference: null,
       categoryId: 1,
-      aiPlacedInOther: false,
+      locked: false,
     },
     {
       id: 4,
@@ -1481,7 +1481,7 @@ describe('Transactions page', () => {
       amount: 24500,
       reference: null,
       categoryId: null,
-      aiPlacedInOther: false,
+      locked: false,
     },
   ]
 
@@ -1492,11 +1492,12 @@ describe('Transactions page', () => {
     amount: -89.9,
     reference: null,
     categoryId: 1,
-    aiPlacedInOther: false,
+    locked: false,
   }
 
-  // A month with a Transaction AI-placed in Other, one the user put in Other, and one in another Category.
-  const aiPlacedTransactions = [
+  // A month with a Transaction AI-placed in Other, one the user put in Other (so Locked), and one a
+  // rule put in another Category.
+  const otherCategoryTransactions = [
     septemberTransactions[0],
     {
       id: 8,
@@ -1505,7 +1506,7 @@ describe('Transactions page', () => {
       amount: -200,
       reference: null,
       categoryId: 13,
-      aiPlacedInOther: true,
+      locked: false,
     },
     {
       id: 7,
@@ -1514,7 +1515,7 @@ describe('Transactions page', () => {
       amount: -500,
       reference: null,
       categoryId: 13,
-      aiPlacedInOther: false,
+      locked: true,
     },
   ]
 
@@ -1670,7 +1671,7 @@ describe('Transactions page', () => {
 
   it('filters the rows by Category, or to the Uncategorized ones', async () => {
     months = [{ year: 2026, month: 9 }]
-    handleListPeriod = () => Response.json(aiPlacedTransactions.concat(septemberTransactions[1]))
+    handleListPeriod = () => Response.json(otherCategoryTransactions.concat(septemberTransactions[1]))
     const user = await openTransactionsPage()
     await screen.findByRole('cell', { name: 'Rema 1000' })
 
@@ -1696,7 +1697,7 @@ describe('Transactions page', () => {
   it('narrows the rows to matching descriptions as the search is typed, ignoring case and surrounding spaces', async () => {
     const bøker = { ...septemberTransactions[0], id: 10, description: 'Bøker Og Blader' }
     months = [{ year: 2026, month: 9 }]
-    handleListPeriod = () => Response.json([...aiPlacedTransactions, bøker])
+    handleListPeriod = () => Response.json([...otherCategoryTransactions, bøker])
     const user = await openTransactionsPage()
     await screen.findByRole('cell', { name: 'Rema 1000' })
     const search = screen.getByRole('searchbox', { name: 'Search' })
@@ -1840,45 +1841,48 @@ describe('Transactions page', () => {
     return row
   }
 
-  async function openAiPlacedMonth() {
+  async function openOtherCategoryMonth() {
     months = [{ year: 2026, month: 9 }]
-    handleListPeriod = () => Response.json(aiPlacedTransactions)
+    handleListPeriod = () => Response.json(otherCategoryTransactions)
     const user = await openTransactionsPage()
     await screen.findByRole('cell', { name: 'Rema 1000' })
     return user
   }
 
-  it('shows an AI marker next to Other only for Transactions AI-placed in Other, with no filter for them', async () => {
-    await openAiPlacedMonth()
+  function lockMark(description: string) {
+    return within(transactionRow(description)).queryByRole('img', { name: 'Locked' })
+  }
 
-    expect(categorySelect('Vipps *Ola Nordmann')).toHaveValue('13')
-    expect(within(transactionRow('Vipps *Ola Nordmann')).getByText('AI')).toBeInTheDocument()
-    expect(within(transactionRow('Gave')).queryByText('AI')).not.toBeInTheDocument()
-    expect(within(transactionRow('Rema 1000')).queryByText('AI')).not.toBeInTheDocument()
-    expect(screen.queryByRole('checkbox', { name: 'AI-placed only' })).not.toBeInTheDocument()
+  it('marks only Locked Transactions, not those AI-placed in Other', async () => {
+    await openOtherCategoryMonth()
+
+    expect(lockMark('Gave')).toHaveAttribute('title', "Locked: rules won't change this Category")
+    expect(lockMark('Vipps *Ola Nordmann')).not.toBeInTheDocument()
+    expect(lockMark('Rema 1000')).not.toBeInTheDocument()
+    expect(screen.queryByText('AI')).not.toBeInTheDocument()
   })
 
-  it('drops the AI marker once the Category of a Transaction AI-placed in Other is changed', async () => {
+  it('marks a Transaction Locked once its Category is changed', async () => {
     handleChangeCategory = (_id, body) =>
-      Response.json({ ...aiPlacedTransactions[1], ...(body as object), aiPlacedInOther: false })
-    const user = await openAiPlacedMonth()
+      Response.json({ ...otherCategoryTransactions[1], ...(body as object), locked: true })
+    const user = await openOtherCategoryMonth()
 
     await user.selectOptions(categorySelect('Vipps *Ola Nordmann'), 'Groceries')
 
     expect(await screen.findByRole('status')).toHaveTextContent('Category changed')
     expect(categorySelect('Vipps *Ola Nordmann')).toHaveValue('1')
-    expect(within(transactionRow('Vipps *Ola Nordmann')).queryByText('AI')).not.toBeInTheDocument()
+    expect(lockMark('Vipps *Ola Nordmann')).toBeInTheDocument()
   })
 
-  it('keeps the AI marker when changing the Category of a Transaction AI-placed in Other fails', async () => {
+  it('leaves a Transaction unmarked when changing its Category fails', async () => {
     handleChangeCategory = () => new Response(null, { status: 500 })
-    const user = await openAiPlacedMonth()
+    const user = await openOtherCategoryMonth()
 
     await user.selectOptions(categorySelect('Vipps *Ola Nordmann'), 'Groceries')
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Saving failed (500).')
     expect(categorySelect('Vipps *Ola Nordmann')).toHaveValue('13')
-    expect(within(transactionRow('Vipps *Ola Nordmann')).getByText('AI')).toBeInTheDocument()
+    expect(lockMark('Vipps *Ola Nordmann')).not.toBeInTheDocument()
   })
 })
 
