@@ -1391,7 +1391,7 @@ describe('Rules page', () => {
 
     expect(within(ruleRow('café løkka AI')).getByText('AI')).toBeInTheDocument()
     expect(within(ruleRow('kiwi')).queryByText('AI')).not.toBeInTheDocument()
-    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument()
+    expect(screen.queryByRole('checkbox', { name: 'AI only' })).not.toBeInTheDocument()
   })
 
   it('drops the AI badge once an AI-generated rule is saved, even unchanged', async () => {
@@ -1718,7 +1718,7 @@ describe('Transactions page', () => {
     expect(within(transactionRow('Vipps *Ola Nordmann')).getByText('AI')).toBeInTheDocument()
     expect(within(transactionRow('Gave')).queryByText('AI')).not.toBeInTheDocument()
     expect(within(transactionRow('Rema 1000')).queryByText('AI')).not.toBeInTheDocument()
-    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument()
+    expect(screen.queryByRole('checkbox', { name: 'AI-placed only' })).not.toBeInTheDocument()
   })
 
   it('drops the AI marker once the Category of a Transaction AI-placed in Other is changed', async () => {
