@@ -31,8 +31,7 @@ public class AzureRuleGenerator(ChatClient chat, ILogger<AzureRuleGenerator> log
         - or a decline, with keyword and category both null. A declined row is
           put in the "Other" category, without a rule. Decline whenever you can't name both a
           merchant keyword and a category you are confident of, such as when the row has no
-          recognizable merchant (a payment to or from a private person) or when you are unsure of
-          the category.
+          recognizable merchant or when there is no matching category.
         """;
 
     private static readonly JsonSerializerOptions PromptJson = new(JsonSerializerDefaults.Web)
