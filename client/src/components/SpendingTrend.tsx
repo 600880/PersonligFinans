@@ -68,7 +68,7 @@ function trendRows(monthly: MonthSpending[], categories: Category[] | null): Tre
     ...trendCategories(monthly).map((categoryId) => ({
       key: categoryRow(categoryId),
       name: categoryName(categoryId, categories),
-      colour: categoryColour(categoryId),
+      colour: categoryColour(categoryId, categories),
     })),
   ]
 }

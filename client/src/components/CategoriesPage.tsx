@@ -1,5 +1,12 @@
-import { useEffect, useState } from 'react'
-import { deleteCategory, editCategory, fetchCategories, type Category, type CategoryFieldErrors } from '../lib/api'
+import { useEffect, useState, type FormEvent } from 'react'
+import {
+  addCategory,
+  deleteCategory,
+  editCategory,
+  fetchCategories,
+  type Category,
+  type CategoryFieldErrors,
+} from '../lib/api'
 
 function byName(a: Category, b: Category) {
   return a.name.localeCompare(b.name)
@@ -36,11 +43,14 @@ function changedMessage(action: string, transactionsChanged: number) {
   return `${action} ${transactionsChanged} ${transactions} changed category.`
 }
 
-// Every Category in the order the API lists them, alphabetically, with what uses it. Each can be
-// edited inline, and one that isn't Built-in can be deleted after a confirmation.
+// Every Category in the order the API lists them, alphabetically, with what uses it, and a form to
+// add one. Each can be edited inline, and one that isn't Built-in can be deleted after a confirmation.
 export function CategoriesPage() {
   const [categories, setCategories] = useState<Category[]>([])
+  const [name, setName] = useState('')
+  const [description, setDescription] = useState('')
   const [isSaving, setIsSaving] = useState(false)
+  const [fieldErrors, setFieldErrors] = useState<CategoryFieldErrors>({})
   // The id of the Category whose delete is waiting for confirmation.
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<number | null>(null)
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
@@ -119,9 +129,71 @@ export function CategoriesPage() {
     }
   }
 
+  async function handleAdd(event: FormEvent) {
+    event.preventDefault()
+    if (isSaving) return
+
+    setIsSaving(true)
+    setFieldErrors({})
+    setStatusMessage(null)
+    setErrorMessage(null)
+
+    const result = await addCategory({ name: name.trim(), description: description.trim() }).finally(() =>
+      setIsSaving(false),
+    )
+
+    if (result.ok) {
+      setCategories((current) => [...current, result.category].sort(byName))
+      setName('')
+      setDescription('')
+      setStatusMessage('Category added.')
+    } else {
+      setFieldErrors(result.fieldErrors)
+      setErrorMessage(result.message)
+    }
+  }
+
   return (
     <section className="w-full max-w-2xl">
       <h2 className="text-lg font-semibold text-slate-900">Categories</h2>
+
+      <form className="mt-4 flex items-start gap-3" onSubmit={handleAdd}>
+        <div className="flex w-40 flex-col gap-1">
+          <label className="flex flex-col gap-1 text-sm font-medium text-slate-700">
+            Name
+            <input
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              aria-describedby="category-name-error"
+              className={inputClass}
+            />
+          </label>
+          <span id="category-name-error" className="text-xs text-red-600">
+            {fieldErrors.name}
+          </span>
+        </div>
+        <div className="flex flex-1 flex-col gap-1">
+          <label className="flex flex-col gap-1 text-sm font-medium text-slate-700">
+            Description
+            <input
+              value={description}
+              onChange={(event) => setDescription(event.target.value)}
+              aria-describedby="category-description-error"
+              className={inputClass}
+            />
+          </label>
+          <span id="category-description-error" className="text-xs text-red-600">
+            {fieldErrors.description}
+          </span>
+        </div>
+        <button
+          type="submit"
+          disabled={isSaving}
+          className="mt-6 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+        >
+          Add category
+        </button>
+      </form>
 
       {errorMessage ? (
         <p role="alert" className="mt-3 min-h-5 text-sm text-red-700">
@@ -133,7 +205,7 @@ export function CategoriesPage() {
         </p>
       )}
 
-      <table className="mt-4 w-full text-left text-sm">
+      <table className="mt-2 w-full text-left text-sm">
         <thead className="text-slate-500">
           <tr>
             <th className="py-2 font-medium">Name</th>

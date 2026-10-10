@@ -55,7 +55,7 @@ function toSliceViews(spending: Spending, categories: Category[]): SliceView[] {
     name: categoryName(categoryId, categories),
     amount,
     share: amount / spending.total,
-    colour: categoryColour(categoryId),
+    colour: categoryColour(categoryId, categories),
   }))
 }
 

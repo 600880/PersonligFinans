@@ -56,9 +56,9 @@ public class TransactionEndpointsTests
     [Fact]
     public async Task Get_Categories_ReturnsSeededList()
     {
-        var categories = await _client.GetFromJsonAsync<List<CategoryResponse>>("/api/categories");
+        var categories = (await _client.GetFromJsonAsync<List<CategoryResponse>>("/api/categories"))!;
 
-        Assert.Equal(15, categories!.Count);
+        // Other tests add Categories of their own, so only the seeded ones are checked.
         Assert.Contains(categories, c => c.Name == "Groceries");
         Assert.Contains(categories, c => c is { Id: OtherCategoryId, Name: "Other" });
         Assert.Contains(categories, c => c is { Id: ClothingCategoryId, Name: "Clothing" });

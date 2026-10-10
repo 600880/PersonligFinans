@@ -2,11 +2,13 @@ import { periodQuery, type Period } from './period'
 import { spanQuery, type Span } from './span'
 import type { CreateTransactionRequest } from './transactionForm'
 
-// transactionCount and ruleCount are how many Transactions and Categorization Rules have the Category.
+// colour is what the Dashboard draws the Category in, as #rrggbb. transactionCount and ruleCount are
+// how many Transactions and Categorization Rules have the Category.
 export interface Category {
   id: number
   name: string
   description: string
+  colour: string
   builtIn: boolean
   transactionCount: number
   ruleCount: number
@@ -67,6 +69,10 @@ export type CategoryFieldErrors = Partial<Record<keyof CategoryRequest, string>>
 export type SaveCategoryResult =
   | { ok: true; category: Category }
   | { ok: false; fieldErrors: CategoryFieldErrors; message: string | null }
+
+export function addCategory(request: CategoryRequest): Promise<SaveCategoryResult> {
+  return saveCategory('/api/categories', 'POST', request)
+}
 
 // A Built-in Category must be sent with its name unchanged.
 export function editCategory(id: number, request: CategoryRequest): Promise<SaveCategoryResult> {

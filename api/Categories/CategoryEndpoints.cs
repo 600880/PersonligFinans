@@ -12,6 +12,7 @@ public record CategoryResponse(
     int Id,
     string Name,
     string Description,
+    string Colour,
     bool BuiltIn,
     int TransactionCount,
     int RuleCount);
@@ -31,13 +32,64 @@ public static class CategoryEndpoints
                     c.Id,
                     c.Name,
                     c.Description,
+                    c.Colour,
                     c.BuiltIn,
                     db.Transactions.Count(t => t.CategoryId == c.Id),
                     db.CategorizationRules.Count(r => r.CategoryId == c.Id)))
                 .ToListAsync());
 
+        api.MapPost("/", AddCategory);
         api.MapPut("/{id:int}", EditCategory);
         api.MapDelete("/{id:int}", DeleteCategory);
+    }
+
+    // A new Category is never built-in, and nothing uses it yet.
+    private static async Task<IResult> AddCategory(CategoryRequest request, AppDbContext db)
+    {
+        var (name, description, errors) = await Validate(request, db, editedCategory: null);
+        if (errors.Count > 0)
+            return Results.ValidationProblem(errors);
+
+        var category = new Category
+        {
+            Name = name,
+            Description = description,
+            Colour = CategoryColours.Next(await db.Categories.Select(c => c.Colour).ToListAsync()),
+        };
+        db.Categories.Add(category);
+
+        if (!await SaveCategory(db))
+            return await NameAlreadyExists(db, name);
+
+        return Results.Created(
+            $"/api/categories/{category.Id}",
+            new CategoryResponse(category.Id, category.Name, category.Description, category.Colour, category.BuiltIn, 0, 0));
+    }
+
+    private static async Task<IResult> EditCategory(int id, CategoryRequest request, AppDbContext db)
+    {
+        var category = await db.Categories.FindAsync(id);
+        if (category is null)
+            return Results.NotFound();
+
+        var (name, description, errors) = await Validate(request, db, editedCategory: category);
+        if (errors.Count > 0)
+            return Results.ValidationProblem(errors);
+
+        category.Name = name;
+        category.Description = description;
+
+        if (!await SaveCategory(db))
+            return await NameAlreadyExists(db, name);
+
+        return Results.Ok(new CategoryResponse(
+            category.Id,
+            category.Name,
+            category.Description,
+            category.Colour,
+            category.BuiltIn,
+            await db.Transactions.CountAsync(t => t.CategoryId == id),
+            await db.CategorizationRules.CountAsync(r => r.CategoryId == id)));
     }
 
     // Deletes a Category that nothing uses. Built-in Categories can't be deleted.
@@ -76,31 +128,6 @@ public static class CategoryEndpoints
 
     private static IResult CategoryProblem(string message) =>
         Results.ValidationProblem(new Dictionary<string, string[]> { ["category"] = [message] });
-
-    private static async Task<IResult> EditCategory(int id, CategoryRequest request, AppDbContext db)
-    {
-        var category = await db.Categories.FindAsync(id);
-        if (category is null)
-            return Results.NotFound();
-
-        var (name, description, errors) = await Validate(request, db, editedCategory: category);
-        if (errors.Count > 0)
-            return Results.ValidationProblem(errors);
-
-        category.Name = name;
-        category.Description = description;
-
-        if (!await SaveCategory(db))
-            return await NameAlreadyExists(db, name);
-
-        return Results.Ok(new CategoryResponse(
-            category.Id,
-            category.Name,
-            category.Description,
-            category.BuiltIn,
-            await db.Transactions.CountAsync(t => t.CategoryId == id),
-            await db.CategorizationRules.CountAsync(r => r.CategoryId == id)));
-    }
 
     // The trimmed name and description, and the validation errors keyed on the request's fields.
     // When editing, the edited Category's own name doesn't count as a duplicate, and a Built-in

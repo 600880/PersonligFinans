@@ -118,6 +118,12 @@ namespace PersonligFinans.Api.Data.Migrations
                         .HasColumnType("boolean")
                         .HasColumnName("built_in");
 
+                    b.Property<string>("Colour")
+                        .IsRequired()
+                        .HasMaxLength(7)
+                        .HasColumnType("character varying(7)")
+                        .HasColumnName("colour");
+
                     b.Property<string>("Description")
                         .IsRequired()
                         .HasMaxLength(200)
@@ -140,6 +146,7 @@ namespace PersonligFinans.Api.Data.Migrations
                         {
                             Id = 1,
                             BuiltIn = true,
+                            Colour = "#2a78d6",
                             Description = "All groceries.",
                             Name = "Groceries"
                         },
@@ -147,6 +154,7 @@ namespace PersonligFinans.Api.Data.Migrations
                         {
                             Id = 2,
                             BuiltIn = false,
+                            Colour = "#eb6834",
                             Description = "Restaurant, takeaway, bakery etc.",
                             Name = "Restaurants"
                         },
@@ -154,6 +162,7 @@ namespace PersonligFinans.Api.Data.Migrations
                         {
                             Id = 3,
                             BuiltIn = true,
+                            Colour = "#1baf7a",
                             Description = "All transport.",
                             Name = "Transport"
                         },
@@ -161,6 +170,7 @@ namespace PersonligFinans.Api.Data.Migrations
                         {
                             Id = 4,
                             BuiltIn = true,
+                            Colour = "#eda100",
                             Description = "Mortgage, common costs and insurance.",
                             Name = "Housing"
                         },
@@ -168,6 +178,7 @@ namespace PersonligFinans.Api.Data.Migrations
                         {
                             Id = 5,
                             BuiltIn = false,
+                            Colour = "#e87ba4",
                             Description = "Electricity, water, phone, internet etc.",
                             Name = "Utilities"
                         },
@@ -175,6 +186,7 @@ namespace PersonligFinans.Api.Data.Migrations
                         {
                             Id = 6,
                             BuiltIn = false,
+                            Colour = "#008300",
                             Description = "All subscriptions.",
                             Name = "Subscriptions"
                         },
@@ -182,6 +194,7 @@ namespace PersonligFinans.Api.Data.Migrations
                         {
                             Id = 7,
                             BuiltIn = false,
+                            Colour = "#4a3aa7",
                             Description = "Pharmacy etc.",
                             Name = "Health"
                         },
@@ -189,6 +202,7 @@ namespace PersonligFinans.Api.Data.Migrations
                         {
                             Id = 8,
                             BuiltIn = false,
+                            Colour = "#e34948",
                             Description = "All shopping.",
                             Name = "Shopping"
                         },
@@ -196,6 +210,7 @@ namespace PersonligFinans.Api.Data.Migrations
                         {
                             Id = 9,
                             BuiltIn = false,
+                            Colour = "#104281",
                             Description = "Movies, video games etc.",
                             Name = "Entertainment"
                         },
@@ -203,6 +218,7 @@ namespace PersonligFinans.Api.Data.Migrations
                         {
                             Id = 10,
                             BuiltIn = false,
+                            Colour = "#86b6ef",
                             Description = "All travel.",
                             Name = "Travel"
                         },
@@ -210,6 +226,7 @@ namespace PersonligFinans.Api.Data.Migrations
                         {
                             Id = 11,
                             BuiltIn = true,
+                            Colour = "#8a5a1c",
                             Description = "All income.",
                             Name = "Income"
                         },
@@ -217,6 +234,7 @@ namespace PersonligFinans.Api.Data.Migrations
                         {
                             Id = 12,
                             BuiltIn = true,
+                            Colour = "#0f766e",
                             Description = "All private transfers.",
                             Name = "Transfers"
                         },
@@ -224,6 +242,7 @@ namespace PersonligFinans.Api.Data.Migrations
                         {
                             Id = 13,
                             BuiltIn = true,
+                            Colour = "#9085e9",
                             Description = "Costs that don't belong in any other category.",
                             Name = "Other"
                         },
@@ -231,6 +250,7 @@ namespace PersonligFinans.Api.Data.Migrations
                         {
                             Id = 14,
                             BuiltIn = true,
+                            Colour = "#b8336a",
                             Description = "All clothing.",
                             Name = "Clothing"
                         },
@@ -238,6 +258,7 @@ namespace PersonligFinans.Api.Data.Migrations
                         {
                             Id = 15,
                             BuiltIn = false,
+                            Colour = "#6b8e23",
                             Description = "All electronics.",
                             Name = "Electronics"
                         });

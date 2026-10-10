@@ -48,7 +48,13 @@ public class CategoryEndpointsTests : IAsyncLifetime
     {
         using var scope = _factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var category = new Category { Name = name, Description = description, BuiltIn = builtIn };
+        var category = new Category
+        {
+            Name = name,
+            Description = description,
+            Colour = CategoryColours.Fallback,
+            BuiltIn = builtIn,
+        };
         db.Categories.Add(category);
         await db.SaveChangesAsync();
         return category.Id;
@@ -57,10 +63,14 @@ public class CategoryEndpointsTests : IAsyncLifetime
     private async Task<List<CategoryResponse>> ListCategories() =>
         (await _client.GetFromJsonAsync<List<CategoryResponse>>("/api/categories"))!;
 
+    // Other tests add Categories of their own, which these leave out.
+    private async Task<List<CategoryResponse>> ListSeededCategories() =>
+        (await ListCategories()).Where(c => SeedCategories.All.Any(s => s.Id == c.Id)).ToList();
+
     [Fact]
     public async Task Get_FreshDatabase_ListsTheSeededCategoriesWithDescriptionsAndBuiltInFlags()
     {
-        var categories = await ListCategories();
+        var categories = await ListSeededCategories();
 
         var byName = categories.ToDictionary(c => c.Name);
         Assert.Equal(
@@ -83,6 +93,33 @@ public class CategoryEndpointsTests : IAsyncLifetime
                 ["Other"] = ("Costs that don't belong in any other category.", true),
             },
             byName.ToDictionary(c => c.Key, c => (c.Value.Description, c.Value.BuiltIn)));
+    }
+
+    [Fact]
+    public async Task Get_FreshDatabase_GivesTheSeededCategoriesTheirColours()
+    {
+        var colours = (await ListSeededCategories()).ToDictionary(c => c.Id, c => c.Colour);
+
+        Assert.Equal(
+            new Dictionary<int, string>
+            {
+                [1] = "#2a78d6",
+                [2] = "#eb6834",
+                [3] = "#1baf7a",
+                [4] = "#eda100",
+                [5] = "#e87ba4",
+                [6] = "#008300",
+                [7] = "#4a3aa7",
+                [8] = "#e34948",
+                [9] = "#104281",
+                [10] = "#86b6ef",
+                [11] = "#8a5a1c",
+                [12] = "#0f766e",
+                [13] = "#9085e9",
+                [14] = "#b8336a",
+                [15] = "#6b8e23",
+            },
+            colours);
     }
 
     [Fact]
@@ -127,10 +164,10 @@ public class CategoryEndpointsTests : IAsyncLifetime
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         // Rolled back when disposed, so the Categories never reach the other tests.
         await using var transaction = await db.Database.BeginTransactionAsync();
-        db.Categories.Add(new Category { Name = $"{_token} Hobby", Description = "Hobbies." });
+        db.Categories.Add(new Category { Name = $"{_token} Hobby", Description = "Hobbies.", Colour = CategoryColours.Fallback });
         await db.SaveChangesAsync();
 
-        db.Categories.Add(new Category { Name = $"{_token.ToUpperInvariant()} HOBBY", Description = "Hobbies." });
+        db.Categories.Add(new Category { Name = $"{_token.ToUpperInvariant()} HOBBY", Description = "Hobbies.", Colour = CategoryColours.Fallback });
 
         await Assert.ThrowsAsync<DbUpdateException>(() => db.SaveChangesAsync());
     }
@@ -231,7 +268,7 @@ public class CategoryEndpointsTests : IAsyncLifetime
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var expected = new CategoryResponse(
-            id, $"{_token} Fritid", "Hobbies and sports.", BuiltIn: false, TransactionCount: 0, RuleCount: 1);
+            id, $"{_token} Fritid", "Hobbies and sports.", CategoryColours.Fallback, BuiltIn: false, TransactionCount: 0, RuleCount: 1);
         Assert.Equal(expected, await response.Content.ReadFromJsonAsync<CategoryResponse>());
         Assert.Contains(expected, await ListCategories());
     }
@@ -271,7 +308,7 @@ public class CategoryEndpointsTests : IAsyncLifetime
         Assert.Equal(["Name must be at most 50 characters."], errors["name"]);
         Assert.Equal(["Description must be at most 200 characters."], errors["description"]);
         Assert.Contains(
-            new CategoryResponse(id, $"{_token} Hobby", "Hobbies.", BuiltIn: false, 0, 0),
+            new CategoryResponse(id, $"{_token} Hobby", "Hobbies.", CategoryColours.Fallback, BuiltIn: false, 0, 0),
             await ListCategories());
     }
 
@@ -333,5 +370,121 @@ public class CategoryEndpointsTests : IAsyncLifetime
         var response = await EditCategory(int.MaxValue, $"{_token} Hobby", "Hobbies.");
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    private Task<HttpResponseMessage> AddCategory(string? name, string? description) =>
+        _client.PostAsJsonAsync("/api/categories", new { name, description });
+
+    private async Task<CategoryResponse> AddedCategory(string name, string description = "Hobbies.")
+    {
+        var response = await AddCategory(name, description);
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        return (await response.Content.ReadFromJsonAsync<CategoryResponse>())!;
+    }
+
+    private async Task<Dictionary<string, string[]>> AddCategoryExpectingValidationErrors(
+        string? name, string? description)
+    {
+        var response = await AddCategory(name, description);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var problem = await response.Content.ReadFromJsonAsync<ValidationProblemDetails>();
+        return new Dictionary<string, string[]>(problem!.Errors);
+    }
+
+    // The colour a Category added now gets: the first of the palette no Category uses, or the
+    // fallback once they are all used.
+    private async Task<string> NextColour()
+    {
+        var used = (await ListCategories()).Select(c => c.Colour).ToHashSet();
+        return CategoryColours.Palette.FirstOrDefault(c => !used.Contains(c)) ?? CategoryColours.Fallback;
+    }
+
+    [Fact]
+    public async Task Post_ValidCategory_AddsItAsNotBuiltInAndReturnsCreated()
+    {
+        var response = await AddCategory($"  {_token} Hobby  ", "  Hobby supplies.  ");
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var added = await response.Content.ReadFromJsonAsync<CategoryResponse>();
+        Assert.Equal($"/api/categories/{added!.Id}", response.Headers.Location?.ToString());
+        Assert.Equal((Name: $"{_token} Hobby", Description: "Hobby supplies.", BuiltIn: false), (added.Name, added.Description, added.BuiltIn));
+        Assert.Equal((0, 0), (added.TransactionCount, added.RuleCount));
+        Assert.Equivalent(added, (await ListCategories()).Single(c => c.Id == added.Id));
+    }
+
+    [Fact]
+    public async Task Post_NewCategories_EachGetTheFirstPaletteColourNoCategoryUses()
+    {
+        var expectedFirst = await NextColour();
+        var first = await AddedCategory($"{_token} Hobby");
+        var expectedSecond = await NextColour();
+        var second = await AddedCategory($"{_token} Garden");
+
+        Assert.Equal(expectedFirst, first.Colour);
+        Assert.Equal(expectedSecond, second.Colour);
+        if (expectedSecond != CategoryColours.Fallback)
+            Assert.NotEqual(first.Colour, second.Colour);
+    }
+
+    [Fact]
+    public async Task Post_PaletteUsedUp_GivesTheFallbackAndNeverTheUncategorizedGrey()
+    {
+        var added = 0;
+        while (await NextColour() != CategoryColours.Fallback)
+            await AddedCategory($"{_token} Filler {added++}");
+
+        var first = await AddedCategory($"{_token} Hobby");
+        var second = await AddedCategory($"{_token} Garden");
+
+        Assert.Equal(CategoryColours.Fallback, first.Colour);
+        Assert.Equal(CategoryColours.Fallback, second.Colour);
+        Assert.DoesNotContain(CategoryColours.Uncategorized, CategoryColours.Palette);
+        Assert.NotEqual(CategoryColours.Uncategorized, CategoryColours.Fallback);
+    }
+
+    [Fact]
+    public async Task Post_MissingNameAndDescription_ReturnsErrorPerField()
+    {
+        var errors = await AddCategoryExpectingValidationErrors("   ", null);
+
+        Assert.Equal(["Name is required."], errors["name"]);
+        Assert.Equal(["Description is required."], errors["description"]);
+    }
+
+    [Fact]
+    public async Task Post_TooLongNameAndDescription_ReturnsErrorPerField()
+    {
+        var errors = await AddCategoryExpectingValidationErrors(
+            _token + new string('n', 51 - _token.Length), new string('d', 201));
+
+        Assert.Equal(["Name must be at most 50 characters."], errors["name"]);
+        Assert.Equal(["Description must be at most 200 characters."], errors["description"]);
+    }
+
+    [Fact]
+    public async Task Post_LongestNameAndDescription_AreAccepted()
+    {
+        var added = await AddedCategory(_token + new string('n', 50 - _token.Length), new string('d', 200));
+
+        Assert.Equal(50, added.Name.Length);
+        Assert.Equal(200, added.Description.Length);
+    }
+
+    [Fact]
+    public async Task Post_NameOfAnotherCategoryIgnoringCase_IsRejected()
+    {
+        await AddedCategory($"{_token} Hobby");
+
+        var errors = await AddCategoryExpectingValidationErrors($"{_token.ToUpperInvariant()} HOBBY", "Hobbies.");
+
+        Assert.Equal([$"A category named '{_token} Hobby' already exists."], errors["name"]);
+    }
+
+    [Fact]
+    public async Task Post_NameOfASeededCategoryIgnoringCase_IsRejected()
+    {
+        var errors = await AddCategoryExpectingValidationErrors("groceries", "Food.");
+
+        Assert.Equal(["A category named 'Groceries' already exists."], errors["name"]);
     }
 }
