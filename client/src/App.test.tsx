@@ -50,6 +50,7 @@ let handleAddRule: PostHandler
 let handleEditRule: (id: number, body: unknown) => Response
 let handleDeleteRule: (id: number) => Response
 let handleDeleteCategory: (id: number) => Response
+let handleEditCategory: (id: number, body: unknown) => Response
 let months: { year: number; month: number }[] | Response
 let handleListMonth: (year: number, month: number) => Response
 let handleChangeCategory: (id: number, body: unknown) => Response | Promise<Response>
@@ -95,6 +96,9 @@ const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
   }
   if (ruleUrl && init?.method === 'DELETE') return handleDeleteRule(Number(ruleUrl[1]))
   const categoryUrlMatch = /^\/api\/categories\/(\d+)$/.exec(url)
+  if (categoryUrlMatch && init?.method === 'PUT') {
+    return handleEditCategory(Number(categoryUrlMatch[1]), JSON.parse(init.body as string))
+  }
   if (categoryUrlMatch && init?.method === 'DELETE') return handleDeleteCategory(Number(categoryUrlMatch[1]))
   if (url === '/api/categories') {
     return categoriesServed instanceof Response ? categoriesServed : Response.json(categoriesServed)
@@ -127,6 +131,10 @@ beforeEach(() => {
     Response.json({ id, ...(body as object), aiGenerated: false, transactionsChanged: 0 })
   handleDeleteRule = () => Response.json({ transactionsChanged: 0 })
   handleDeleteCategory = () => Response.json({ transactionsChanged: 0 })
+  handleEditCategory = (id, body) => {
+    const category = categories.find((c) => c.id === id)
+    return Response.json({ ...category, id, ...(body as object) })
+  }
   months = []
   handleListMonth = () => Response.json([])
   handleChangeCategory = () => new Response(null, { status: 500 })
@@ -585,7 +593,12 @@ describe('Categories page', () => {
     return screen
       .getAllByRole('row')
       .slice(1)
-      .map((row) => within(row).getAllByRole('cell').map((cell) => cell.textContent))
+      .map((row) =>
+        within(row)
+          .getAllByRole('cell')
+          .slice(0, 4)
+          .map((cell) => cell.textContent),
+      )
   }
 
   it('opens from the header and lists each Category with its description and counts, in the order served', async () => {
@@ -629,108 +642,230 @@ describe('Categories page', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Could not load the categories.')
   })
 
-  const health = { id: 7, name: 'Health', description: 'Pharmacy etc.', builtIn: false, transactionCount: 0, ruleCount: 0 }
+  describe('deleting', () => {
+    const health = { id: 7, name: 'Health', description: 'Pharmacy etc.', builtIn: false, transactionCount: 0, ruleCount: 0 }
 
-  function categoryRow(name: string) {
-    return screen.getByRole('row', { name: new RegExp(`^${name}`) })
-  }
-
-  it('offers delete only on Categories that are not Built-in', async () => {
-    categoriesServed = [categories[0], health, categories[1]]
-    await openCategoriesPage()
-    await listedRows()
-
-    expect(within(categoryRow('Health')).getByRole('button', { name: 'Delete' })).toBeInTheDocument()
-    expect(within(categoryRow('Groceries')).queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument()
-    expect(within(categoryRow('Other')).queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument()
-  })
-
-  it('asks for confirmation, then deletes the Category and removes its row', async () => {
-    categoriesServed = [categories[0], health]
-    let deletedId: number | undefined
-    handleDeleteCategory = (id) => {
-      deletedId = id
-      return Response.json({ transactionsChanged: 0 })
+    function categoryRow(name: string) {
+      return screen.getByRole('row', { name: new RegExp(`^${name}`) })
     }
-    const user = await openCategoriesPage()
-    await listedRows()
 
-    await user.click(within(categoryRow('Health')).getByRole('button', { name: 'Delete' }))
+    it('offers delete only on Categories that are not Built-in', async () => {
+      categoriesServed = [categories[0], health, categories[1]]
+      await openCategoriesPage()
+      await listedRows()
 
-    expect(deletedId).toBeUndefined()
-    expect(within(categoryRow('Health')).getByText('Delete Health?')).toBeInTheDocument()
+      expect(within(categoryRow('Health')).getByRole('button', { name: 'Delete' })).toBeInTheDocument()
+      expect(within(categoryRow('Groceries')).queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument()
+      expect(within(categoryRow('Other')).queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument()
+    })
 
-    await user.click(within(categoryRow('Health')).getByRole('button', { name: 'Confirm delete' }))
+    it('asks for confirmation, then deletes the Category and removes its row', async () => {
+      categoriesServed = [categories[0], health]
+      let deletedId: number | undefined
+      handleDeleteCategory = (id) => {
+        deletedId = id
+        return Response.json({ transactionsChanged: 0 })
+      }
+      const user = await openCategoriesPage()
+      await listedRows()
 
-    expect(deletedId).toBe(7)
-    expect(await screen.findByRole('status')).toHaveTextContent(
-      'Category deleted. 0 transactions changed category.',
-    )
-    expect(screen.queryByRole('row', { name: /^Health/ })).not.toBeInTheDocument()
-  })
+      await user.click(within(categoryRow('Health')).getByRole('button', { name: 'Delete' }))
 
-  it('keeps the Category when the confirmation is cancelled', async () => {
-    categoriesServed = [categories[0], health]
-    let deleted = false
-    handleDeleteCategory = () => {
-      deleted = true
-      return Response.json({ transactionsChanged: 0 })
-    }
-    const user = await openCategoriesPage()
-    await listedRows()
+      expect(deletedId).toBeUndefined()
+      expect(within(categoryRow('Health')).getByText('Delete Health?')).toBeInTheDocument()
 
-    await user.click(within(categoryRow('Health')).getByRole('button', { name: 'Delete' }))
-    await user.click(within(categoryRow('Health')).getByRole('button', { name: 'Cancel' }))
+      await user.click(within(categoryRow('Health')).getByRole('button', { name: 'Confirm delete' }))
 
-    expect(deleted).toBe(false)
-    expect(within(categoryRow('Health')).getByRole('button', { name: 'Delete' })).toBeInTheDocument()
-    expect(screen.queryByText('Delete Health?')).not.toBeInTheDocument()
-  })
-
-  it("shows the server's reason and keeps the row when the delete is refused", async () => {
-    categoriesServed = [categories[0], { ...health, transactionCount: 2 }]
-    handleDeleteCategory = () =>
-      Response.json(
-        { status: 400, errors: { category: ["Health is in use, so it can't be deleted."] } },
-        { status: 400 },
+      expect(deletedId).toBe(7)
+      expect(await screen.findByRole('status')).toHaveTextContent(
+        'Category deleted. 0 transactions changed category.',
       )
-    const user = await openCategoriesPage()
-    await listedRows()
+      expect(screen.queryByRole('row', { name: /^Health/ })).not.toBeInTheDocument()
+    })
 
-    await user.click(within(categoryRow('Health')).getByRole('button', { name: 'Delete' }))
-    await user.click(within(categoryRow('Health')).getByRole('button', { name: 'Confirm delete' }))
+    it('keeps the Category when the confirmation is cancelled', async () => {
+      categoriesServed = [categories[0], health]
+      let deleted = false
+      handleDeleteCategory = () => {
+        deleted = true
+        return Response.json({ transactionsChanged: 0 })
+      }
+      const user = await openCategoriesPage()
+      await listedRows()
 
-    expect(await screen.findByRole('alert')).toHaveTextContent("Health is in use, so it can't be deleted.")
-    expect(within(categoryRow('Health')).getByRole('button', { name: 'Delete' })).toBeInTheDocument()
+      await user.click(within(categoryRow('Health')).getByRole('button', { name: 'Delete' }))
+      await user.click(within(categoryRow('Health')).getByRole('button', { name: 'Cancel' }))
+
+      expect(deleted).toBe(false)
+      expect(within(categoryRow('Health')).getByRole('button', { name: 'Delete' })).toBeInTheDocument()
+      expect(screen.queryByText('Delete Health?')).not.toBeInTheDocument()
+    })
+
+    it("shows the server's reason and keeps the row when the delete is refused", async () => {
+      categoriesServed = [categories[0], { ...health, transactionCount: 2 }]
+      handleDeleteCategory = () =>
+        Response.json(
+          { status: 400, errors: { category: ["Health is in use, so it can't be deleted."] } },
+          { status: 400 },
+        )
+      const user = await openCategoriesPage()
+      await listedRows()
+
+      await user.click(within(categoryRow('Health')).getByRole('button', { name: 'Delete' }))
+      await user.click(within(categoryRow('Health')).getByRole('button', { name: 'Confirm delete' }))
+
+      expect(await screen.findByRole('alert')).toHaveTextContent("Health is in use, so it can't be deleted.")
+      expect(within(categoryRow('Health')).getByRole('button', { name: 'Delete' })).toBeInTheDocument()
+    })
+
+    it('removes a Category that was already deleted elsewhere', async () => {
+      categoriesServed = [categories[0], health]
+      handleDeleteCategory = () => Response.json({ title: 'Not Found', status: 404 }, { status: 404 })
+      const user = await openCategoriesPage()
+      await listedRows()
+
+      await user.click(within(categoryRow('Health')).getByRole('button', { name: 'Delete' }))
+      await user.click(within(categoryRow('Health')).getByRole('button', { name: 'Confirm delete' }))
+
+      expect(await screen.findByRole('status')).toHaveTextContent('The category was already deleted.')
+      expect(screen.queryByRole('row', { name: /^Health/ })).not.toBeInTheDocument()
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    })
+
+    it('shows a general error when a delete cannot reach the server', async () => {
+      categoriesServed = [categories[0], health]
+      handleDeleteCategory = () => {
+        throw new TypeError('Failed to fetch')
+      }
+      const user = await openCategoriesPage()
+      await listedRows()
+
+      await user.click(within(categoryRow('Health')).getByRole('button', { name: 'Delete' }))
+      await user.click(within(categoryRow('Health')).getByRole('button', { name: 'Confirm delete' }))
+
+      expect(await screen.findByRole('alert')).toHaveTextContent('Could not reach the server.')
+      expect(categoryRow('Health')).toBeInTheDocument()
+    })
   })
 
-  it('removes a Category that was already deleted elsewhere', async () => {
-    categoriesServed = [categories[0], health]
-    handleDeleteCategory = () => Response.json({ title: 'Not Found', status: 404 }, { status: 404 })
-    const user = await openCategoriesPage()
-    await listedRows()
+  describe('editing', () => {
+    const health = { id: 7, name: 'Health', description: 'Pharmacy etc.', builtIn: false, transactionCount: 4, ruleCount: 2 }
 
-    await user.click(within(categoryRow('Health')).getByRole('button', { name: 'Delete' }))
-    await user.click(within(categoryRow('Health')).getByRole('button', { name: 'Confirm delete' }))
-
-    expect(await screen.findByRole('status')).toHaveTextContent('The category was already deleted.')
-    expect(screen.queryByRole('row', { name: /^Health/ })).not.toBeInTheDocument()
-    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
-  })
-
-  it('shows a general error when a delete cannot reach the server', async () => {
-    categoriesServed = [categories[0], health]
-    handleDeleteCategory = () => {
-      throw new TypeError('Failed to fetch')
+    function categoryRow(name: RegExp) {
+      return screen.getByRole('row', { name })
     }
-    const user = await openCategoriesPage()
-    await listedRows()
 
-    await user.click(within(categoryRow('Health')).getByRole('button', { name: 'Delete' }))
-    await user.click(within(categoryRow('Health')).getByRole('button', { name: 'Confirm delete' }))
+    async function startEditing(user: ReturnType<typeof userEvent.setup>, name: RegExp) {
+      await user.click(within(categoryRow(name)).getByRole('button', { name: 'Edit' }))
+      const row = screen.getByRole('button', { name: 'Save' }).closest('tr')!
+      return within(row)
+    }
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('Could not reach the server.')
-    expect(categoryRow('Health')).toBeInTheDocument()
+    it('edits a Category inline and keeps the list sorted by name', async () => {
+      categoriesServed = [categories[0], health, categories[1]]
+      let edited: { id: number; body: unknown } | undefined
+      handleEditCategory = (id, body) => {
+        edited = { id, body }
+        return Response.json({ ...health, name: 'Wellness', description: 'Pharmacy, gym etc.' })
+      }
+      const user = await openCategoriesPage()
+      await listedRows()
+
+      const row = await startEditing(user, /Health/)
+      expect(row.getByLabelText('Name')).toHaveValue('Health')
+      expect(row.getByLabelText('Description')).toHaveValue('Pharmacy etc.')
+      await user.clear(row.getByLabelText('Name'))
+      await user.type(row.getByLabelText('Name'), ' Wellness ')
+      await user.clear(row.getByLabelText('Description'))
+      await user.type(row.getByLabelText('Description'), 'Pharmacy, gym etc. ')
+      await user.click(row.getByRole('button', { name: 'Save' }))
+
+      expect(edited).toEqual({ id: 7, body: { name: 'Wellness', description: 'Pharmacy, gym etc.' } })
+      expect(await screen.findByRole('status')).toHaveTextContent('Category updated.')
+      expect(await listedRows()).toEqual([
+        ['Groceries Built-in', 'All groceries.', '12', '3'],
+        ['Other Built-in', "Costs that don't belong in any other category.", '1', '0'],
+        ['Wellness', 'Pharmacy, gym etc.', '4', '2'],
+      ])
+      expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument()
+    })
+
+    it("edits only a Built-in Category's description, sending its name unchanged", async () => {
+      let edited: unknown
+      handleEditCategory = (_id, body) => {
+        edited = body
+        return Response.json({ ...categories[0], description: 'Food and drink.' })
+      }
+      const user = await openCategoriesPage()
+      await listedRows()
+
+      const row = await startEditing(user, /Groceries/)
+      expect(row.queryByLabelText('Name')).not.toBeInTheDocument()
+      expect(row.getByText('Groceries')).toBeInTheDocument()
+      await user.clear(row.getByLabelText('Description'))
+      await user.type(row.getByLabelText('Description'), 'Food and drink.')
+      await user.click(row.getByRole('button', { name: 'Save' }))
+
+      expect(edited).toEqual({ name: 'Groceries', description: 'Food and drink.' })
+      expect(await screen.findByRole('status')).toHaveTextContent('Category updated.')
+      expect(within(categoryRow(/Groceries/)).getByText('Food and drink.')).toBeInTheDocument()
+    })
+
+    it('cancels an edit and restores the row', async () => {
+      categoriesServed = [health]
+      const user = await openCategoriesPage()
+      await screen.findByText('Pharmacy etc.')
+
+      const row = await startEditing(user, /Health/)
+      await user.type(row.getByLabelText('Name'), ' extra')
+      await user.click(row.getByRole('button', { name: 'Cancel' }))
+
+      expect(categoryRow(/Health/)).toHaveTextContent('HealthPharmacy etc.42')
+      expect(fetchMock).not.toHaveBeenCalledWith('/api/categories/7', expect.anything())
+    })
+
+    it("shows the server's field errors on an edit and keeps the input", async () => {
+      categoriesServed = [categories[0], health]
+      handleEditCategory = () =>
+        Response.json(
+          {
+            errors: {
+              name: ["A category named 'Groceries' already exists."],
+              description: ['Description is required.'],
+            },
+          },
+          { status: 400 },
+        )
+      const user = await openCategoriesPage()
+      await listedRows()
+
+      const row = await startEditing(user, /Health/)
+      await user.clear(row.getByLabelText('Name'))
+      await user.type(row.getByLabelText('Name'), 'GROCERIES')
+      await user.clear(row.getByLabelText('Description'))
+      await user.click(row.getByRole('button', { name: 'Save' }))
+
+      const nameError = await row.findByText("A category named 'Groceries' already exists.")
+      expect(row.getByLabelText('Name')).toHaveAccessibleDescription(nameError.textContent!)
+      expect(row.getByLabelText('Description')).toHaveAccessibleDescription('Description is required.')
+      expect(row.getByLabelText('Name')).toHaveValue('GROCERIES')
+    })
+
+    it('shows a general error when an edit cannot reach the server', async () => {
+      categoriesServed = [health]
+      handleEditCategory = () => {
+        throw new TypeError('Failed to fetch')
+      }
+      const user = await openCategoriesPage()
+      await screen.findByText('Pharmacy etc.')
+
+      const row = await startEditing(user, /Health/)
+      await user.type(row.getByLabelText('Name'), ' extra')
+      await user.click(row.getByRole('button', { name: 'Save' }))
+
+      expect(await screen.findByRole('alert')).toHaveTextContent('Could not reach the server.')
+      expect(row.getByLabelText('Name')).toHaveValue('Health extra')
+    })
   })
 })
 

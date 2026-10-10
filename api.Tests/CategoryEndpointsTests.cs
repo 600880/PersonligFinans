@@ -11,6 +11,7 @@ namespace PersonligFinans.Api.Tests;
 [Collection(ApiCollection.Name)]
 public class CategoryEndpointsTests : IAsyncLifetime
 {
+    private const int GroceriesId = 1;
     private const int TravelId = 10;
     private const int ElectronicsId = 15;
 
@@ -27,30 +28,29 @@ public class CategoryEndpointsTests : IAsyncLifetime
         _client = factory.CreateClient();
     }
 
-    // The Categories this test created, removed afterwards with whatever still uses them, so that
-    // the other tests see only the seeded Categories.
-    private readonly List<int> _createdCategoryIds = [];
-
     public Task InitializeAsync() => Task.CompletedTask;
 
+    // Removes the Categories the test created, and the rules and Transactions using them, since
+    // other tests expect only the seeded Categories, e.g. among those offered to the rule generator.
     public async Task DisposeAsync()
     {
         using var scope = _factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        await db.Transactions.Where(t => _createdCategoryIds.Contains(t.CategoryId!.Value)).ExecuteDeleteAsync();
-        await db.CategorizationRules.Where(r => _createdCategoryIds.Contains(r.CategoryId)).ExecuteDeleteAsync();
-        await db.Categories.Where(c => _createdCategoryIds.Contains(c.Id)).ExecuteDeleteAsync();
+        var created = db.Categories.Where(c => c.Name.ToLower().Contains(_token));
+        await db.Transactions.Where(t => created.Any(c => c.Id == t.CategoryId)).ExecuteDeleteAsync();
+        await db.CategorizationRules.Where(r => created.Any(c => c.Id == r.CategoryId)).ExecuteDeleteAsync();
+        await created.ExecuteDeleteAsync();
     }
 
-    // Adds a Category straight to the database, and returns its id.
-    private async Task<int> CreateCategory(string name, bool builtIn = false)
+    // Adds a Category straight to the database, and returns its id. Its name must contain the
+    // test's token, so that it is removed afterwards.
+    private async Task<int> CreateCategory(string name, string description = "Made by a test.", bool builtIn = false)
     {
         using var scope = _factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var category = new Category { Name = $"{_token} {name}", Description = "Made by a test.", BuiltIn = builtIn };
+        var category = new Category { Name = name, Description = description, BuiltIn = builtIn };
         db.Categories.Add(category);
         await db.SaveChangesAsync();
-        _createdCategoryIds.Add(category.Id);
         return category.Id;
     }
 
@@ -138,7 +138,7 @@ public class CategoryEndpointsTests : IAsyncLifetime
     [Fact]
     public async Task Delete_UnusedCategory_DeletesItAndChangesNoTransactions()
     {
-        var id = await CreateCategory("Hobby");
+        var id = await CreateCategory($"{_token} Hobby");
 
         var response = await _client.DeleteAsync($"/api/categories/{id}");
 
@@ -159,7 +159,7 @@ public class CategoryEndpointsTests : IAsyncLifetime
     [Fact]
     public async Task Delete_BuiltInCategory_IsAValidationProblem()
     {
-        var id = await CreateCategory("Pets", builtIn: true);
+        var id = await CreateCategory($"{_token} Pets", builtIn: true);
 
         var response = await _client.DeleteAsync($"/api/categories/{id}");
 
@@ -170,7 +170,7 @@ public class CategoryEndpointsTests : IAsyncLifetime
     [Fact]
     public async Task Delete_CategoryATransactionUses_IsAValidationProblem()
     {
-        var id = await CreateCategory("Garden");
+        var id = await CreateCategory($"{_token} Garden");
         var transaction = await _client.PostAsJsonAsync("/api/transactions", new
         {
             date = "2026-08-03",
@@ -189,7 +189,7 @@ public class CategoryEndpointsTests : IAsyncLifetime
     [Fact]
     public async Task Delete_CategoryARuleUses_IsAValidationProblem()
     {
-        var id = await CreateCategory("Garden");
+        var id = await CreateCategory($"{_token} Garden");
         var rule = await _client.PostAsJsonAsync(
             "/api/categorization-rules", new { keyword = $"{_token} plantasjen", categoryId = id });
         Assert.Equal(HttpStatusCode.Created, rule.StatusCode);
@@ -205,5 +205,133 @@ public class CategoryEndpointsTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         var problem = await response.Content.ReadFromJsonAsync<ValidationProblemDetails>();
         Assert.Equal([message], problem!.Errors["category"]);
+    }
+
+    private async Task<HttpResponseMessage> EditCategory(int id, string? name, string? description) =>
+        await _client.PutAsJsonAsync($"/api/categories/{id}", new { name, description });
+
+    private async Task<Dictionary<string, string[]>> EditCategoryExpectingValidationErrors(
+        int id, string? name, string? description)
+    {
+        var response = await EditCategory(id, name, description);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var problem = await response.Content.ReadFromJsonAsync<ValidationProblemDetails>();
+        return new Dictionary<string, string[]>(problem!.Errors);
+    }
+
+    [Fact]
+    public async Task Put_NewNameAndDescription_RenamesAndRedescribesTheCategory()
+    {
+        var id = await CreateCategory($"{_token} Hobby", "Hobbies.");
+        var rule = await _client.PostAsJsonAsync(
+            "/api/categorization-rules", new { keyword = $"{_token} hobby", categoryId = id });
+        Assert.Equal(HttpStatusCode.Created, rule.StatusCode);
+
+        var response = await EditCategory(id, $" {_token} Fritid ", " Hobbies and sports. ");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var expected = new CategoryResponse(
+            id, $"{_token} Fritid", "Hobbies and sports.", BuiltIn: false, TransactionCount: 0, RuleCount: 1);
+        Assert.Equal(expected, await response.Content.ReadFromJsonAsync<CategoryResponse>());
+        Assert.Contains(expected, await ListCategories());
+    }
+
+    [Fact]
+    public async Task Put_OnlyTheNamesCase_IsAllowed()
+    {
+        var id = await CreateCategory($"{_token} Hobby", "Hobbies.");
+
+        var response = await EditCategory(id, $"{_token.ToUpperInvariant()} HOBBY", "Hobbies.");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(
+            $"{_token.ToUpperInvariant()} HOBBY",
+            (await response.Content.ReadFromJsonAsync<CategoryResponse>())!.Name);
+    }
+
+    [Fact]
+    public async Task Put_MissingNameAndDescription_IsRejectedWithErrorPerField()
+    {
+        var id = await CreateCategory($"{_token} Hobby", "Hobbies.");
+
+        var errors = await EditCategoryExpectingValidationErrors(id, "  ", null);
+
+        Assert.Equal(["Name is required."], errors["name"]);
+        Assert.Equal(["Description is required."], errors["description"]);
+    }
+
+    [Fact]
+    public async Task Put_TooLongNameAndDescription_IsRejectedWithErrorPerField()
+    {
+        var id = await CreateCategory($"{_token} Hobby", "Hobbies.");
+
+        var errors = await EditCategoryExpectingValidationErrors(
+            id, $"{_token} " + new string('x', 50), new string('x', 201));
+
+        Assert.Equal(["Name must be at most 50 characters."], errors["name"]);
+        Assert.Equal(["Description must be at most 200 characters."], errors["description"]);
+        Assert.Contains(
+            new CategoryResponse(id, $"{_token} Hobby", "Hobbies.", BuiltIn: false, 0, 0),
+            await ListCategories());
+    }
+
+    [Fact]
+    public async Task Put_NameAndDescriptionAtTheirMaximumLength_AreAllowed()
+    {
+        var id = await CreateCategory($"{_token} Hobby", "Hobbies.");
+        var name = $"{_token} ".PadRight(50, 'x');
+
+        var response = await EditCategory(id, name, new string('x', 200));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Put_NameOfAnotherCategoryInDifferentCase_IsRejected()
+    {
+        await CreateCategory($"{_token} Hobby", "Hobbies.");
+        var id = await CreateCategory($"{_token} Sport", "Sports.");
+
+        var errors = await EditCategoryExpectingValidationErrors(
+            id, $"{_token.ToUpperInvariant()} HOBBY", "Sports.");
+
+        Assert.Equal([$"A category named '{_token} Hobby' already exists."], errors["name"]);
+    }
+
+    [Fact]
+    public async Task Put_BuiltInCategoryRenamed_IsRejected()
+    {
+        var errors = await EditCategoryExpectingValidationErrors(GroceriesId, $"{_token} Food", "All groceries.");
+
+        Assert.Equal(["A Built-in Category can't be renamed."], errors["name"]);
+        Assert.Contains(
+            (await ListCategories()),
+            c => c.Id == GroceriesId && c.Name == "Groceries");
+    }
+
+    [Fact]
+    public async Task Put_BuiltInCategoryWithItsNameUnchanged_ChangesItsDescription()
+    {
+        try
+        {
+            var response = await EditCategory(GroceriesId, "Groceries", $"{_token} Food and drink.");
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var edited = await response.Content.ReadFromJsonAsync<CategoryResponse>();
+            Assert.Equal(("Groceries", $"{_token} Food and drink.", true), (edited!.Name, edited.Description, edited.BuiltIn));
+        }
+        finally
+        {
+            // Other tests assert the seeded description.
+            await EditCategory(GroceriesId, "Groceries", "All groceries.");
+        }
+    }
+
+    [Fact]
+    public async Task Put_UnknownCategory_ReturnsNotFound()
+    {
+        var response = await EditCategory(int.MaxValue, $"{_token} Hobby", "Hobbies.");
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 }

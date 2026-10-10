@@ -57,6 +57,54 @@ export async function deleteCategory(id: number): Promise<DeleteCategoryResult> 
   return { ok: false, message: `Deleting failed (${response.status}).` }
 }
 
+export interface CategoryRequest {
+  name: string
+  description: string
+}
+
+export type CategoryFieldErrors = Partial<Record<keyof CategoryRequest, string>>
+
+export type SaveCategoryResult =
+  | { ok: true; category: Category }
+  | { ok: false; fieldErrors: CategoryFieldErrors; message: string | null }
+
+// A Built-in Category must be sent with its name unchanged.
+export function editCategory(id: number, request: CategoryRequest): Promise<SaveCategoryResult> {
+  return saveCategory(`/api/categories/${id}`, 'PUT', request)
+}
+
+async function saveCategory(
+  url: string,
+  method: 'POST' | 'PUT',
+  request: CategoryRequest,
+): Promise<SaveCategoryResult> {
+  let response: Response
+  try {
+    response = await fetch(url, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request),
+    })
+  } catch {
+    return { ok: false, fieldErrors: {}, message: 'Could not reach the server.' }
+  }
+
+  if (response.ok) return { ok: true, category: (await response.json()) as Category }
+
+  if (response.status === 400) {
+    const problem = (await response.json().catch(() => null)) as {
+      errors?: Record<string, string[]>
+    } | null
+    const fieldErrors: CategoryFieldErrors = {}
+    for (const [field, messages] of Object.entries(problem?.errors ?? {})) {
+      fieldErrors[field as keyof CategoryFieldErrors] = messages[0]
+    }
+    if (Object.keys(fieldErrors).length > 0) return { ok: false, fieldErrors, message: null }
+  }
+
+  return { ok: false, fieldErrors: {}, message: `Saving failed (${response.status}).` }
+}
+
 // categoryId is null for an Uncategorized Transaction. aiPlacedInOther is set while the LLM's choice
 // of Other stands: no rule holds the Transaction and the user hasn't changed its Category.
 export interface Transaction {
