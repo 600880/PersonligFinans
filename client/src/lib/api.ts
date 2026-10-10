@@ -24,7 +24,8 @@ export async function fetchCategories(): Promise<Category[]> {
   return (await response.json()) as Category[]
 }
 
-// categoryId is null for an Uncategorized Transaction.
+// categoryId is null for an Uncategorized Transaction. aiPlacedInOther is set while the LLM's choice
+// of Other stands: no rule holds the Transaction and the user hasn't changed its Category.
 export interface Transaction {
   id: number
   date: string
@@ -32,6 +33,7 @@ export interface Transaction {
   amount: number
   reference: string | null
   categoryId: number | null
+  aiPlacedInOther: boolean
 }
 
 export interface TransactionMonth {

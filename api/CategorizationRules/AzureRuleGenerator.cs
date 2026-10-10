@@ -6,7 +6,8 @@ namespace PersonligFinans.Api.CategorizationRules;
 
 // The rule generator backed by a chat model deployed on Azure: one call per import, answered with
 // JSON that must follow a schema. Only each row's description and sign, and the Category names,
-// are sent; never existing rules, Amounts, dates or account numbers.
+// are sent; never existing rules, Amounts, dates or account numbers. The import leaves "Other" out
+// of the Category names, since it AI-places a row the model declines in Other itself.
 public class AzureRuleGenerator(ChatClient chat, ILogger<AzureRuleGenerator> logger, TimeSpan? timeLimit = null)
     : IRuleGenerator
 {
@@ -26,9 +27,11 @@ public class AzureRuleGenerator(ChatClient chat, ILogger<AzureRuleGenerator> log
           matches this merchant's future transactions at any of its locations. Leave out city, area
           and place names, store numbers, dates, card numbers and payment prefixes. For example,
           "Kiwi 512 Bergen Sentrum" gives "kiwi", and "Peppes Pizza Lille Torget" gives "peppes pizza".
-        - or a decline, with keyword and category both null: when the row has no recognizable
-          merchant, such as a payment to or from a private person, or when you are unsure of the
-          category. Never use a catch-all category for a row you can't place; decline it instead.
+        - or a decline, with keyword and category both null. A declined row is
+          put in the "Other" category, without a rule. Decline whenever you can't name both a
+          merchant keyword and a category you are confident of, such as when the row has no
+          recognizable merchant (a payment to or from a private person) or when you are unsure of
+          the category.
         """;
 
     private static readonly JsonSerializerOptions PromptJson = new(JsonSerializerDefaults.Web)

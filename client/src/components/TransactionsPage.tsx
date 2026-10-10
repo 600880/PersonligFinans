@@ -34,6 +34,7 @@ export function TransactionsPage() {
   // The Transactions whose Category is being saved. Their selects are disabled until it is, so a
   // failed save never goes back over a later choice.
   const [savingIds, setSavingIds] = useState<ReadonlySet<number>>(new Set())
+  const [aiPlacedOnly, setAiPlacedOnly] = useState(false)
 
   useEffect(() => {
     let ignore = false
@@ -74,6 +75,8 @@ export function TransactionsPage() {
     loaded && loaded.year === selected?.year && loaded.month === selected.month
       ? loaded.transactions
       : null
+  const shownTransactions =
+    transactions && aiPlacedOnly ? transactions.filter((t) => t.aiPlacedInOther) : transactions
 
   function chooseMonth(change: Partial<TransactionMonth>) {
     if (!selected) return
@@ -82,12 +85,12 @@ export function TransactionsPage() {
     setSelected({ ...selected, ...change })
   }
 
-  function showCategory(id: number, categoryId: number | null) {
+  function showChange(id: number, change: Partial<Transaction>) {
     setLoaded(
       (current) =>
         current && {
           ...current,
-          transactions: current.transactions.map((t) => (t.id === id ? { ...t, categoryId } : t)),
+          transactions: current.transactions.map((t) => (t.id === id ? { ...t, ...change } : t)),
         },
     )
   }
@@ -102,22 +105,23 @@ export function TransactionsPage() {
   }
 
   // Shows the chosen Category at once, and goes back to the previous one when saving fails, so the
-  // page never keeps a Category that wasn't saved.
+  // page never keeps a Category that wasn't saved. The AI marker goes once the change is saved.
   async function changeCategory(transaction: Transaction, categoryId: number) {
     setStatusMessage(null)
     setErrorMessage(null)
     setSaving(transaction.id, true)
-    showCategory(transaction.id, categoryId)
+    showChange(transaction.id, { categoryId })
 
     const result = await changeTransactionCategory(transaction.id, categoryId).finally(() =>
       setSaving(transaction.id, false),
     )
 
     if (result.ok) {
-      showCategory(transaction.id, result.transaction.categoryId)
+      const { categoryId: savedCategoryId, aiPlacedInOther } = result.transaction
+      showChange(transaction.id, { categoryId: savedCategoryId, aiPlacedInOther })
       setStatusMessage('Category changed')
     } else {
-      showCategory(transaction.id, transaction.categoryId)
+      showChange(transaction.id, { categoryId: transaction.categoryId })
       setErrorMessage(result.message)
     }
   }
@@ -169,13 +173,26 @@ export function TransactionsPage() {
         </p>
       )}
 
-      {selected && transactions?.length === 0 && (
+      {selected && (
+        <label className="mt-2 flex items-center justify-end gap-2 text-sm font-medium text-slate-700">
+          <input
+            type="checkbox"
+            checked={aiPlacedOnly}
+            onChange={(event) => setAiPlacedOnly(event.target.checked)}
+            className="size-4 rounded border-slate-300"
+          />
+          AI-placed only
+        </label>
+      )}
+
+      {selected && shownTransactions?.length === 0 && (
         <p className="mt-6 text-sm text-slate-500">
-          No transactions in {MONTH_NAMES[selected.month - 1]} {selected.year}
+          No {aiPlacedOnly ? 'AI-placed transactions' : 'transactions'} in {MONTH_NAMES[selected.month - 1]}{' '}
+          {selected.year}
         </p>
       )}
 
-      {transactions && transactions.length > 0 && (
+      {shownTransactions && shownTransactions.length > 0 && (
         <table className="mt-4 w-full text-left text-sm">
           <thead className="text-slate-500">
             <tr>
@@ -186,7 +203,7 @@ export function TransactionsPage() {
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-200 text-slate-900">
-            {transactions.map((transaction) => (
+            {shownTransactions.map((transaction) => (
               <tr key={transaction.id}>
                 <td className="py-2 pr-3 whitespace-nowrap">{formatNorwegianDate(transaction.date)}</td>
                 <td className="py-2 pr-3">{transaction.description}</td>
@@ -211,6 +228,17 @@ export function TransactionsPage() {
                       </option>
                     ))}
                   </select>
+                  {transaction.aiPlacedInOther && (
+                    <>
+                      {' '}
+                      <span
+                        title="AI-placed in Other"
+                        className="ml-1 rounded bg-violet-100 px-1.5 py-0.5 text-xs font-medium text-violet-700"
+                      >
+                        AI
+                      </span>
+                    </>
+                  )}
                 </td>
                 <td className="py-2 text-right whitespace-nowrap tabular-nums">
                   {formatAmount(transaction.amount)}
