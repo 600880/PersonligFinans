@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { AddTransactionModal } from './components/AddTransactionModal'
 import { CategoriesPage } from './components/CategoriesPage'
 import { Dashboard } from './components/Dashboard'
@@ -7,8 +7,6 @@ import { RulesPage } from './components/RulesPage'
 import { TransactionsPage } from './components/TransactionsPage'
 import { uploadBankStatement, type ImportedBankStatement } from './lib/api'
 import { formatNorwegianDate } from './lib/date'
-
-const CONFIRMATION_MS = 3000
 
 type View = 'home' | 'transactions' | 'categories' | 'rules'
 
@@ -35,16 +33,22 @@ function App() {
   const [dashboardVersion, setDashboardVersion] = useState(0)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  useEffect(() => {
-    if (!showSavedMessage) return
-    const timeout = setTimeout(() => setShowSavedMessage(false), CONFIRMATION_MS)
-    return () => clearTimeout(timeout)
-  }, [showSavedMessage])
+  function clearHomeMessages() {
+    setShowSavedMessage(false)
+    setImportMessage(null)
+    setRejections([])
+  }
+
+  // Leaving Home clears its messages. An upload that finishes while away sets them again, so they
+  // are seen on return.
+  function chooseView(next: View) {
+    if (view === 'home' && next !== 'home') clearHomeMessages()
+    setView(next)
+  }
 
   function handleSaved() {
     setIsModalOpen(false)
-    setImportMessage(null)
-    setRejections([])
+    clearHomeMessages()
     setShowSavedMessage(true)
     setDashboardVersion((version) => version + 1)
   }
@@ -55,9 +59,7 @@ function App() {
   async function handleFilesChosen(files: File[]) {
     if (files.length === 0) return
     setUploadProgress({ finished: 0, picked: files.length })
-    setShowSavedMessage(false)
-    setImportMessage(null)
-    setRejections([])
+    clearHomeMessages()
 
     const imported: ImportedBankStatement[] = []
     const rejected: Rejection[] = []
@@ -72,6 +74,8 @@ function App() {
         }
         setUploadProgress({ finished: index + 1, picked: files.length })
       }
+      // Replaces a Transaction saved during the upload, so the result is never hidden.
+      setShowSavedMessage(false)
       setImportMessage(imported.length > 0 ? importSummary(imported) : null)
       setRejections(rejected)
     } finally {
@@ -83,7 +87,7 @@ function App() {
     <div className="min-h-screen bg-slate-50">
       <header className="flex items-center justify-between border-b border-slate-200 bg-white px-6 py-4">
         <h1 className="text-xl font-semibold tracking-tight text-slate-900">
-          <button type="button" onClick={() => setView('home')}>
+          <button type="button" onClick={() => chooseView('home')}>
             PersonligFinans
           </button>
         </h1>
@@ -92,7 +96,7 @@ function App() {
             <button
               key={item.view}
               type="button"
-              onClick={() => setView(item.view)}
+              onClick={() => chooseView(item.view)}
               aria-current={view === item.view ? 'page' : undefined}
               className={`rounded-lg px-3 py-1.5 text-sm font-medium ${
                 view === item.view ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'

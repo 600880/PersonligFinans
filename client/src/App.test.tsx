@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
@@ -601,6 +601,109 @@ describe('App', () => {
       'Imported 38 transactions from statement 01.08.2026–31.08.2026',
     )
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  describe('leaving Home', () => {
+    it('clears the import summary', async () => {
+      const user = userEvent.setup()
+      render(<App />)
+      await user.upload(screen.getByLabelText(/bank statement pdf/i), statementPdf)
+      expect(await screen.findByRole('status')).toHaveTextContent('Imported 38 transactions')
+
+      await user.click(screen.getByRole('button', { name: 'Transactions' }))
+      await user.click(screen.getByRole('button', { name: 'PersonligFinans' }))
+
+      expect(screen.getByRole('status')).toBeEmptyDOMElement()
+    })
+
+    it('clears the rejected PDFs', async () => {
+      handleUpload = () => new Response(null, { status: 500 })
+      const user = userEvent.setup()
+      render(<App />)
+      await user.upload(screen.getByLabelText(/bank statement pdf/i), statementPdf)
+      expect(await screen.findByRole('alert')).toHaveTextContent('kontoutskrift.pdf: Upload failed (500).')
+
+      await user.click(screen.getByRole('button', { name: 'Rules' }))
+      await user.click(screen.getByRole('button', { name: 'PersonligFinans' }))
+
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    })
+
+    it('clears Transaction saved', async () => {
+      const user = await openModal()
+      await fillValidForm(user)
+      await user.click(screen.getByRole('button', { name: /^save$/i }))
+      expect(screen.getByRole('status')).toHaveTextContent('Transaction saved')
+
+      await user.click(screen.getByRole('button', { name: 'Categories' }))
+      await user.click(screen.getByRole('button', { name: 'PersonligFinans' }))
+
+      expect(screen.getByRole('status')).toBeEmptyDOMElement()
+    })
+
+    it('still shows an upload that finished while away, even after moving between other pages', async () => {
+      let respond: (response: Response) => void = () => {}
+      handleUpload = () => new Promise((resolve) => (respond = resolve))
+      const user = userEvent.setup()
+      render(<App />)
+      await user.upload(screen.getByLabelText(/bank statement pdf/i), statementPdf)
+
+      await user.click(screen.getByRole('button', { name: 'Transactions' }))
+      const response = Response.json(importedStatement, { status: 201 })
+      const read = vi.spyOn(response, 'json')
+      respond(response)
+      // Lets the upload finish while away, before moving on to another page.
+      await waitFor(() => expect(read).toHaveBeenCalled())
+      await act(async () => {})
+      await user.click(screen.getByRole('button', { name: 'Categories' }))
+      await user.click(screen.getByRole('button', { name: 'PersonligFinans' }))
+
+      expect(await screen.findByRole('button', { name: /upload transactions/i })).toBeEnabled()
+      expect(screen.getByRole('status')).toHaveTextContent('Imported 38 transactions')
+    })
+
+    it('is not clicking the title while on Home, which keeps the messages', async () => {
+      const user = userEvent.setup()
+      render(<App />)
+      await user.upload(screen.getByLabelText(/bank statement pdf/i), statementPdf)
+      expect(await screen.findByRole('status')).toHaveTextContent('Imported 38 transactions')
+
+      await user.click(screen.getByRole('button', { name: 'PersonligFinans' }))
+
+      expect(screen.getByRole('status')).toHaveTextContent('Imported 38 transactions')
+    })
+  })
+
+  it('shows the import summary in place of Transaction saved when a transaction is saved during an upload', async () => {
+    let respond: (response: Response) => void = () => {}
+    handleUpload = () => new Promise((resolve) => (respond = resolve))
+    const user = await openModal()
+    await user.click(screen.getByRole('button', { name: /cancel/i }))
+    await user.upload(screen.getByLabelText(/bank statement pdf/i), statementPdf)
+
+    await user.click(screen.getByRole('button', { name: /add transaction/i }))
+    await fillValidForm(user)
+    await user.click(screen.getByRole('button', { name: /^save$/i }))
+    expect(screen.getByRole('status')).toHaveTextContent('Transaction saved')
+    respond(Response.json(importedStatement, { status: 201 }))
+
+    expect(await screen.findByRole('button', { name: /upload transactions/i })).toBeEnabled()
+    expect(screen.getByRole('status')).toHaveTextContent('Imported 38 transactions')
+  })
+
+  it('keeps Transaction saved on screen until something replaces it', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      const user = await openModal()
+      await fillValidForm(user)
+      await user.click(screen.getByRole('button', { name: /^save$/i }))
+
+      await act(() => vi.advanceTimersByTimeAsync(60_000))
+
+      expect(screen.getByRole('status')).toHaveTextContent('Transaction saved')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
 
