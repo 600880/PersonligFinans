@@ -21,7 +21,8 @@ public record TransactionResponse(
     string? Reference,
     int? CategoryId,
     // Locked: the rules will never change its Category.
-    bool Locked);
+    bool Locked,
+    bool Imported);
 
 public record TransactionMonthResponse(int Year, int Month);
 
@@ -49,6 +50,7 @@ public static class TransactionEndpoints
         api.MapGet("/transactions", ListPeriod);
         api.MapPost("/transactions", CreateTransaction);
         api.MapPut("/transactions/{id:int}/category", ChangeCategory);
+        api.MapDelete("/transactions/{id:int}", DeleteTransaction);
     }
 
     // A month's Transactions, or a whole year's when no month is given, imported and manual, newest
@@ -167,6 +169,25 @@ public static class TransactionEndpoints
         return Results.Ok(ToResponse(transaction));
     }
 
+    // Deletes a manually-entered Transaction for good. An imported one can't be deleted, so every
+    // imported Bank Statement stays whole and reconciled.
+    private static async Task<IResult> DeleteTransaction(int id, AppDbContext db)
+    {
+        var transaction = await db.Transactions.FindAsync(id);
+        if (transaction is null)
+            return Results.NotFound();
+
+        if (transaction.IsImported)
+            return Results.Problem(
+                detail: "Imported Transactions can't be deleted.",
+                statusCode: StatusCodes.Status409Conflict);
+
+        db.Transactions.Remove(transaction);
+        await db.SaveChangesAsync();
+
+        return Results.NoContent();
+    }
+
     private static IResult CategoryProblem(string message) =>
         Results.ValidationProblem(new Dictionary<string, string[]> { ["categoryId"] = [message] });
 
@@ -178,5 +199,6 @@ public static class TransactionEndpoints
             transaction.Amount,
             transaction.Reference,
             transaction.CategoryId,
-            Categorizer.IsLocked(transaction));
+            Categorizer.IsLocked(transaction),
+            transaction.IsImported);
 }

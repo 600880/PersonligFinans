@@ -537,4 +537,45 @@ public class TransactionEndpointsTests
         Assert.Equal(["categoryId"], problem!.Errors.Keys);
         Assert.Null((await Own("Kafé")).CategoryId);
     }
+
+    [Fact]
+    public async Task Get_Month_ShowsWhichTransactionsWereImported()
+    {
+        await AddManualTransaction("2044-01-10", $"{_token} manual");
+        await ImportForCorrection("imported");
+
+        Assert.False((await Own("manual")).Imported);
+        Assert.True((await Own("imported")).Imported);
+    }
+
+    [Fact]
+    public async Task Delete_ManualTransaction_RemovesIt()
+    {
+        await AddManualTransaction("2044-01-10", $"{_token} manual");
+
+        var response = await _client.DeleteAsync($"/api/transactions/{(await Own("manual")).Id}");
+
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        Assert.Empty(await OwnTransactionsOf(2044, 1));
+    }
+
+    [Fact]
+    public async Task Delete_ImportedTransaction_IsRefusedAndKeepsIt()
+    {
+        await ImportForCorrection("imported");
+        var imported = await Own("imported");
+
+        var response = await _client.DeleteAsync($"/api/transactions/{imported.Id}");
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        Assert.Equal(imported, await Own("imported"));
+    }
+
+    [Fact]
+    public async Task Delete_UnknownTransaction_ReturnsNotFound()
+    {
+        var response = await _client.DeleteAsync($"/api/transactions/{int.MaxValue}");
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
 }

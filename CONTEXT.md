@@ -5,7 +5,7 @@ A personal finance web app for tracking spending from uploaded bank transactions
 ## Language
 
 **Transaction**:
-A single financial record — either imported from a Bank Statement or entered manually — with a posted date, an Amount, a required description, and a Category (or Uncategorized). An imported Transaction's posted date is the date the bank booked it, and its description is the cleaned merchant or payee name.
+A single financial record — either imported from a Bank Statement or entered manually — with a posted date, an Amount, a required description, and a Category (or Uncategorized). An imported Transaction's posted date is the date the bank booked it, and its description is the cleaned merchant or payee name. A manually-entered Transaction can be deleted, permanently; an imported one cannot, so every imported Bank Statement stays whole and reconciled.
 _Avoid_: Entry, record, purchase
 
 **Bank Statement**:

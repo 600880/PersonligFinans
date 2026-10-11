@@ -66,6 +66,7 @@ let months: { year: number; month: number }[] | Response
 // month is undefined for a whole year.
 let handleListPeriod: (year: number, month: number | undefined) => Response
 let handleChangeCategory: (id: number, body: unknown) => Response | Promise<Response>
+let handleDeleteTransaction: (id: number) => Response | Promise<Response>
 // What the categories endpoint returns: `categories` unless a test adds to it or makes it fail.
 let categoriesServed: ServedCategory[] | Response
 // The month or quarter is undefined when the Spending of a whole year, or of a quarter, is asked for.
@@ -99,6 +100,8 @@ const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
   if (categoryUrl && init?.method === 'PUT') {
     return handleChangeCategory(Number(categoryUrl[1]), JSON.parse(init.body as string))
   }
+  const transactionUrl = /^\/api\/transactions\/(\d+)$/.exec(url)
+  if (transactionUrl && init?.method === 'DELETE') return handleDeleteTransaction(Number(transactionUrl[1]))
   if (url === '/api/transactions/months') {
     return months instanceof Response ? months : Response.json(months)
   }
@@ -160,6 +163,7 @@ beforeEach(() => {
   months = []
   handleListPeriod = () => Response.json([])
   handleChangeCategory = () => new Response(null, { status: 500 })
+  handleDeleteTransaction = () => new Response(null, { status: 204 })
   handleSpending = () => Response.json({ total: 0, slices: [] })
   handleMonthlySpending = (from, to) => Response.json(monthlySpending(from, to))
   categoriesServed = categories
@@ -1473,6 +1477,7 @@ describe('Transactions page', () => {
       reference: null,
       categoryId: 1,
       locked: false,
+      imported: true,
     },
     {
       id: 4,
@@ -1482,6 +1487,7 @@ describe('Transactions page', () => {
       reference: null,
       categoryId: null,
       locked: false,
+      imported: true,
     },
   ]
 
@@ -1493,6 +1499,7 @@ describe('Transactions page', () => {
     reference: null,
     categoryId: 1,
     locked: false,
+    imported: true,
   }
 
   // A month with a Transaction AI-placed in Other, one the user put in Other (so Locked), and one a
@@ -1507,6 +1514,7 @@ describe('Transactions page', () => {
       reference: null,
       categoryId: 13,
       locked: false,
+      imported: true,
     },
     {
       id: 7,
@@ -1516,6 +1524,7 @@ describe('Transactions page', () => {
       reference: null,
       categoryId: 13,
       locked: true,
+      imported: true,
     },
   ]
 
@@ -1590,8 +1599,8 @@ describe('Transactions page', () => {
 
     await screen.findByRole('cell', { name: 'Rema 1000' })
     expect(rowCells()).toEqual([
-      ['24.09.2026', 'Rema 1000', 'Groceries', '-1\u00a0249,90\u00a0kr'],
-      ['03.09.2026', 'Lønn Fra: Testfirma AS', 'Uncategorized', '24\u00a0500,00\u00a0kr'],
+      ['24.09.2026', 'Rema 1000', 'Groceries', '-1\u00a0249,90\u00a0kr', ''],
+      ['03.09.2026', 'Lønn Fra: Testfirma AS', 'Uncategorized', '24\u00a0500,00\u00a0kr', ''],
     ])
   })
 
@@ -1883,6 +1892,187 @@ describe('Transactions page', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Saving failed (500).')
     expect(categorySelect('Vipps *Ola Nordmann')).toHaveValue('13')
     expect(lockMark('Vipps *Ola Nordmann')).not.toBeInTheDocument()
+  })
+
+  describe('deleting', () => {
+    const manualTransaction = {
+      id: 6,
+      date: '2026-09-15',
+      description: 'Frisør',
+      amount: -450,
+      reference: 'KVITT-7',
+      categoryId: 13,
+      locked: true,
+      imported: false,
+    }
+
+    // getByText collapses the Amount's no-break space into a plain one.
+    const confirmation = `Delete "Frisør" (-450,00 kr on 15.09.2026)? This can't be undone.`
+
+    // Opens September 2026 listing the given Transactions, which include the manual one.
+    async function openMonthWithManualTransaction(transactions = [septemberTransactions[0], manualTransaction]) {
+      months = [{ year: 2026, month: 9 }]
+      handleListPeriod = () => Response.json(transactions)
+      const user = await openTransactionsPage()
+      await screen.findByRole('cell', { name: 'Frisør' })
+      return user
+    }
+
+    function deleteButton(description: string) {
+      return within(transactionRow(description)).getByRole('button', { name: `Delete ${description}` })
+    }
+
+    it('offers delete on manually-entered Transactions, and explains why it is disabled on imported ones', async () => {
+      await openMonthWithManualTransaction()
+
+      expect(deleteButton('Frisør')).toBeEnabled()
+      expect(deleteButton('Rema 1000')).toBeDisabled()
+      expect(deleteButton('Rema 1000')).toHaveAttribute('title', "Imported Transactions can't be deleted")
+    })
+
+    it('asks for confirmation naming the Transaction, then deletes it and removes its row', async () => {
+      let deletedId: number | undefined
+      handleDeleteTransaction = (id) => {
+        deletedId = id
+        return new Response(null, { status: 204 })
+      }
+      const user = await openMonthWithManualTransaction()
+
+      await user.click(deleteButton('Frisør'))
+
+      expect(deletedId).toBeUndefined()
+      expect(screen.getByText(confirmation)).toBeInTheDocument()
+
+      await user.click(screen.getByRole('button', { name: 'Confirm delete' }))
+
+      expect(await screen.findByRole('status')).toHaveTextContent('Transaction deleted.')
+      expect(deletedId).toBe(6)
+      expect(screen.queryByRole('cell', { name: 'Frisør' })).not.toBeInTheDocument()
+      expect(screen.queryByText(confirmation)).not.toBeInTheDocument()
+      expect(screen.getByRole('cell', { name: 'Rema 1000' })).toBeInTheDocument()
+    })
+
+    it('keeps the Transaction when the confirmation is cancelled', async () => {
+      let deleted = false
+      handleDeleteTransaction = () => {
+        deleted = true
+        return new Response(null, { status: 204 })
+      }
+      const user = await openMonthWithManualTransaction()
+
+      await user.click(deleteButton('Frisør'))
+      await user.click(screen.getByRole('button', { name: 'Cancel' }))
+
+      expect(deleted).toBe(false)
+      expect(screen.queryByText(confirmation)).not.toBeInTheDocument()
+      expect(screen.getByRole('cell', { name: 'Frisør' })).toBeInTheDocument()
+    })
+
+    it('asks about one Transaction at a time', async () => {
+      const otherManual = { ...manualTransaction, id: 3, description: 'Parkering', date: '2026-09-02' }
+      const user = await openMonthWithManualTransaction([manualTransaction, otherManual])
+
+      await user.click(deleteButton('Frisør'))
+      await user.click(deleteButton('Parkering'))
+
+      expect(screen.queryByText(confirmation)).not.toBeInTheDocument()
+      expect(screen.getByText(/^Delete "Parkering"/)).toBeInTheDocument()
+      expect(screen.getAllByRole('button', { name: 'Confirm delete' })).toHaveLength(1)
+    })
+
+    it('stays on the month once its last Transaction is deleted, and reloads the months', async () => {
+      const user = await openMonthWithManualTransaction([manualTransaction])
+      const monthsRequests = () => fetchMock.mock.calls.filter(([url]) => url === '/api/transactions/months').length
+      const before = monthsRequests()
+
+      await user.click(deleteButton('Frisør'))
+      months = []
+      await user.click(screen.getByRole('button', { name: 'Confirm delete' }))
+
+      expect(await screen.findByText('No transactions in September 2026')).toBeInTheDocument()
+      expect(screen.getByLabelText('Month')).toHaveValue('9')
+      expect(monthsRequests()).toBe(before + 1)
+    })
+
+    it("keeps the year chosen once the last of that year's Transactions is deleted", async () => {
+      const lastOf2024 = { ...manualTransaction, date: '2024-03-15' }
+      months = [{ year: 2024, month: 3 }]
+      handleListPeriod = (year) => Response.json(year === 2024 ? [lastOf2024] : [])
+      const user = await openTransactionsPage()
+      await screen.findByRole('cell', { name: 'Frisør' })
+
+      await user.click(deleteButton('Frisør'))
+      months = []
+      await user.click(screen.getByRole('button', { name: 'Confirm delete' }))
+
+      expect(await screen.findByText('No transactions in March 2024')).toBeInTheDocument()
+      expect(screen.getByLabelText('Year')).toHaveValue('2024')
+    })
+
+    it('closes the confirmation when the Period, Category filter or search changes', async () => {
+      const user = await openMonthWithManualTransaction()
+
+      await user.click(deleteButton('Frisør'))
+      await user.type(screen.getByLabelText('Search'), 'x')
+      await user.clear(screen.getByLabelText('Search'))
+      expect(screen.queryByText(confirmation)).not.toBeInTheDocument()
+
+      await user.click(deleteButton('Frisør'))
+      await user.selectOptions(screen.getByLabelText('Category'), 'Groceries')
+      await user.selectOptions(screen.getByLabelText('Category'), 'All categories')
+      expect(screen.queryByText(confirmation)).not.toBeInTheDocument()
+
+      await user.click(deleteButton('Frisør'))
+      await user.selectOptions(screen.getByLabelText('Month'), 'August')
+      await user.selectOptions(screen.getByLabelText('Month'), 'September')
+      await screen.findByRole('cell', { name: 'Frisør' })
+      expect(screen.queryByText(confirmation)).not.toBeInTheDocument()
+    })
+
+    it("shows the server's reason and keeps the row when the delete is refused", async () => {
+      handleDeleteTransaction = () =>
+        Response.json({ detail: "Imported Transactions can't be deleted." }, { status: 409 })
+      const user = await openMonthWithManualTransaction()
+
+      await user.click(deleteButton('Frisør'))
+      await user.click(screen.getByRole('button', { name: 'Confirm delete' }))
+
+      expect(await screen.findByRole('alert')).toHaveTextContent("Imported Transactions can't be deleted.")
+      expect(screen.getByRole('cell', { name: 'Frisør' })).toBeInTheDocument()
+    })
+
+    it('removes a Transaction that was already deleted elsewhere', async () => {
+      handleDeleteTransaction = () => new Response(null, { status: 404 })
+      const user = await openMonthWithManualTransaction()
+
+      await user.click(deleteButton('Frisør'))
+      await user.click(screen.getByRole('button', { name: 'Confirm delete' }))
+
+      expect(await screen.findByRole('status')).toHaveTextContent('The transaction was already deleted.')
+      expect(screen.queryByRole('cell', { name: 'Frisør' })).not.toBeInTheDocument()
+    })
+
+    it('keeps the Transaction and shows an error when the delete fails', async () => {
+      handleDeleteTransaction = () => new Response(null, { status: 500 })
+      const user = await openMonthWithManualTransaction()
+
+      await user.click(deleteButton('Frisør'))
+      await user.click(screen.getByRole('button', { name: 'Confirm delete' }))
+
+      expect(await screen.findByRole('alert')).toHaveTextContent('Deleting failed (500).')
+      expect(screen.getByRole('cell', { name: 'Frisør' })).toBeInTheDocument()
+    })
+
+    it('shows an error when a delete cannot reach the server', async () => {
+      handleDeleteTransaction = () => Promise.reject(new TypeError('Failed to fetch'))
+      const user = await openMonthWithManualTransaction()
+
+      await user.click(deleteButton('Frisør'))
+      await user.click(screen.getByRole('button', { name: 'Confirm delete' }))
+
+      expect(await screen.findByRole('alert')).toHaveTextContent('Could not reach the server.')
+      expect(screen.getByRole('cell', { name: 'Frisør' })).toBeInTheDocument()
+    })
   })
 })
 

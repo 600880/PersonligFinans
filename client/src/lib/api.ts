@@ -130,6 +130,7 @@ async function saveCategory(
 
 // categoryId is null for an Uncategorized Transaction. locked is set when the Categorization Rules
 // will never change its Category: it was entered manually, or its Category was chosen manually.
+// imported is set when it came from a Bank Statement, so it can't be deleted.
 export interface Transaction {
   id: number
   date: string
@@ -138,6 +139,7 @@ export interface Transaction {
   reference: string | null
   categoryId: number | null
   locked: boolean
+  imported: boolean
 }
 
 export interface TransactionMonth {
@@ -219,6 +221,31 @@ export async function changeTransactionCategory(
   if (response.ok) return { ok: true, transaction: (await response.json()) as Transaction }
 
   return { ok: false, message: `Saving failed (${response.status}).` }
+}
+
+// alreadyDeleted: the Transaction was gone before this delete, so nothing changed.
+export type DeleteTransactionResult = { ok: true; alreadyDeleted: boolean } | { ok: false; message: string }
+
+// Deletes a manually-entered Transaction for good; the server refuses an imported one.
+export async function deleteTransaction(id: number): Promise<DeleteTransactionResult> {
+  let response: Response
+  try {
+    response = await fetch(`/api/transactions/${id}`, { method: 'DELETE' })
+  } catch {
+    return { ok: false, message: 'Could not reach the server.' }
+  }
+
+  if (response.ok) return { ok: true, alreadyDeleted: false }
+
+  if (response.status === 404) return { ok: true, alreadyDeleted: true }
+
+  // 409 is a problem whose detail says why the Transaction can't be deleted.
+  if (response.status === 409) {
+    const problem = (await response.json().catch(() => null)) as { detail?: string } | null
+    if (problem?.detail) return { ok: false, message: problem.detail }
+  }
+
+  return { ok: false, message: `Deleting failed (${response.status}).` }
 }
 
 export async function createTransaction(

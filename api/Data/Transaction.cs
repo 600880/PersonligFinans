@@ -28,4 +28,7 @@ public class Transaction
     // Null for manually-entered Transactions.
     public int? BankStatementId { get; set; }
     public BankStatement? BankStatement { get; set; }
+
+    // Imported from a Bank Statement rather than entered manually, so it can't be deleted.
+    public bool IsImported => BankStatementId is not null;
 }
