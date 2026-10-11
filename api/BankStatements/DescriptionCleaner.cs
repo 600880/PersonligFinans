@@ -12,9 +12,17 @@ public static partial class DescriptionCleaner
     [GeneratedRegex(@"^\*\d{4} \d{2}\.\d{2} [A-Za-z]{3} [\d.]+ (?<merchant>.+?)(?: Kurs:.*)?$")]
     private static partial Regex CardPattern();
 
-    // "Til: Fjordkraft AS Betalt: 17.08.26" → "Fjordkraft AS".
+    // "Til: Fjordkraft AS Betalt: 17.08.26" → "Fjordkraft AS", and
+    // "Til: 9999.88.77777 Betalt: 13.08.26" → "Overføring til konto 9999.88.77777".
     [GeneratedRegex(@"^Til: (?<payee>.+?) Betalt: \d{2}\.\d{2}\.\d{2}$")]
     private static partial Regex PaymentPattern();
+
+    // A payee that is only an account number: "Til: 9999.88.77777 Betalt: 13.08.26".
+    [GeneratedRegex(@"^\d{4}\.\d{2}\.\d{5}$")]
+    private static partial Regex AccountNumberPattern();
+
+    // Payments to a bare account number get this prefix, so one Categorization Rule can match them all.
+    public const string AccountTransferPrefix = "Overføring til konto";
 
     // "Varer 04.08 Rema Storgata Nedre Torget Oslo" → "Rema Storgata Nedre Torget Oslo".
     [GeneratedRegex(@"^Varer \d{2}\.\d{2} (?<shop>.+)$")]
@@ -28,7 +36,10 @@ public static partial class DescriptionCleaner
         if (CardPattern().Match(text) is { Success: true } card)
             description = card.Groups["merchant"].Value;
         else if (PaymentPattern().Match(text) is { Success: true } payment)
-            description = payment.Groups["payee"].Value;
+        {
+            var payee = payment.Groups["payee"].Value;
+            description = AccountNumberPattern().IsMatch(payee) ? $"{AccountTransferPrefix} {payee}" : payee;
+        }
         else if (GoodsPattern().Match(text) is { Success: true } goods)
             description = goods.Groups["shop"].Value;
 

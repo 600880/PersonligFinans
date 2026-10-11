@@ -16,8 +16,9 @@ public class AzureRuleGenerator(ChatClient chat, ILogger<AzureRuleGenerator> log
     private static readonly TimeSpan DefaultTimeLimit = TimeSpan.FromSeconds(60);
 
     private const string Instructions = """
-        You create categorization rules for a personal finance app's bank transactions. You get the
-        list of categories, each with a name and a description of what belongs in it, and the rows to
+        You create categorization rules for a personal finance app's bank transactions. The bank is
+        norwegian so use what you know about norwegian merchants and services. You get the list of
+        categories, each with a name and a description of what belongs in it, and the rows to
         categorize. Each row has an index, the description from the bank statement, and a sign:
         "negative" means money was spent, "positive" means money was received.
 
@@ -30,8 +31,8 @@ public class AzureRuleGenerator(ChatClient chat, ILogger<AzureRuleGenerator> log
           "Kiwi 512 Bergen Sentrum" gives "kiwi", and "Peppes Pizza Lille Torget" gives "peppes pizza".
         - or a decline, with keyword and category both null. A declined row is
           put in the "Other" category, without a rule. Decline whenever you can't name both a
-          merchant keyword and a category you are confident of, such as when the row has no
-          recognizable merchant or when there is no matching category.
+          merchant keyword and a category, such as when the row has no recognizable merchant
+          or when there is no matching category.
         """;
 
     private static readonly JsonSerializerOptions PromptJson = new(JsonSerializerDefaults.Web)

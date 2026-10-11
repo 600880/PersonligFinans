@@ -349,6 +349,22 @@ public class BankStatementEndpointsTests
     }
 
     [Fact]
+    public async Task Post_PaymentToABareAccountNumber_IsCategorizedAsTransfersBySeededRule()
+    {
+        var pdf = StatementPdf.Create(
+            UniqueAccountNumber(),
+            period: "01.08.2026 - 31.08.2026",
+            openingBalance: "1.000,00",
+            rows: [new("Til: 9999.88.77777 Betalt: 13.08.26", "1308", "100,00", null, "1308", "21", "12345678")],
+            closingBalance: "900,00");
+
+        var created = await Created(await Upload(pdf));
+
+        var stored = (await StoredTransactions(created.Id)).Single();
+        Assert.Equal(("Overføring til konto 9999.88.77777", (int?)TransfersId), (stored.Description, stored.CategoryId));
+    }
+
+    [Fact]
     public async Task Post_Statement_SeededRulesCategorizeClothingAndElectronics()
     {
         var response = await Upload(StatementWithPurchasesFrom("Cubus Bergen Storsenter", "Komplett.no"));
