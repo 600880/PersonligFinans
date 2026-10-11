@@ -14,6 +14,7 @@ import { categoryName } from '../lib/categoryName'
 import { percent } from '../lib/percent'
 import { currentMonth } from '../lib/month'
 import { GranularitySelect } from './GranularitySelect'
+import { ErrorMessage } from './Messages'
 import { SpendingTrend } from './SpendingTrend'
 import {
   periodLabel,
@@ -182,11 +183,7 @@ export function Dashboard({ version }: { version: number }) {
           Include transfers
         </label>
 
-        {errorMessage && (
-          <p role="alert" className="mt-3 text-sm text-red-700">
-            {errorMessage}
-          </p>
-        )}
+        {errorMessage && <ErrorMessage className="mt-3">{errorMessage}</ErrorMessage>}
 
         <div className="mt-6 flex flex-col items-center gap-8 sm:flex-row sm:items-start">
           <div className="relative shrink-0" style={{ width: CHART_SIZE, height: CHART_SIZE }}>

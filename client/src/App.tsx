@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { AddTransactionModal } from './components/AddTransactionModal'
 import { CategoriesPage } from './components/CategoriesPage'
 import { Dashboard } from './components/Dashboard'
+import { ErrorMessage, StatusMessage } from './components/Messages'
 import { RulesPage } from './components/RulesPage'
 import { TransactionsPage } from './components/TransactionsPage'
 import { uploadBankStatement, type ImportedBankStatement } from './lib/api'
@@ -150,25 +151,23 @@ function App() {
             <button
               type="button"
               onClick={() => setIsModalOpen(true)}
-              className="rounded-lg bg-slate-900 px-5 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-slate-700"
+              className="rounded-lg border border-slate-300 bg-white px-5 py-2.5 text-sm font-medium text-slate-900 shadow-sm hover:bg-slate-100"
             >
               Add transaction
             </button>
           </div>
 
           {(rejections.length === 0 || importMessage || showSavedMessage) && (
-            <p role="status" className="h-5 text-sm text-emerald-700">
-              {showSavedMessage ? 'Transaction saved' : importMessage}
-            </p>
+            <StatusMessage message={showSavedMessage ? 'Transaction saved' : importMessage} />
           )}
           {rejections.length > 0 && (
-            <div role="alert" className="text-sm text-red-700">
+            <ErrorMessage>
               {rejections.map((rejection, index) => (
                 <p key={index}>
                   {rejection.filename}: {rejection.message}
                 </p>
               ))}
-            </div>
+            </ErrorMessage>
           )}
 
           <Dashboard version={dashboardVersion} />

@@ -9,6 +9,7 @@ import {
   type Category,
   type RuleFieldErrors,
 } from '../lib/api'
+import { ErrorMessage, StatusMessage } from './Messages'
 
 function changedMessage(action: string, transactionsChanged: number) {
   const transactions = transactionsChanged === 1 ? 'transaction' : 'transactions'
@@ -188,13 +189,9 @@ export function RulesPage() {
       </form>
 
       {errorMessage ? (
-        <p role="alert" className="mt-3 min-h-5 text-sm text-red-700">
-          {errorMessage}
-        </p>
+        <ErrorMessage className="mt-3">{errorMessage}</ErrorMessage>
       ) : (
-        <p role="status" className="mt-3 h-5 text-sm text-emerald-700">
-          {statusMessage}
-        </p>
+        <StatusMessage message={statusMessage} className="mt-3" />
       )}
 
       <table className="mt-2 w-full text-left text-sm">

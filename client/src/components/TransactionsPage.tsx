@@ -14,6 +14,7 @@ import { formatAmount } from '../lib/amount'
 import { formatNorwegianDate } from '../lib/date'
 import { currentMonth, MONTH_NAMES } from '../lib/month'
 import { periodLabel, periodValue } from '../lib/period'
+import { ErrorMessage, StatusMessage } from './Messages'
 
 const LOAD_ERROR = 'Could not load the transactions.'
 
@@ -268,13 +269,9 @@ export function TransactionsPage() {
       )}
 
       {errorMessage ? (
-        <p role="alert" className="mt-3 min-h-5 text-sm text-red-700">
-          {errorMessage}
-        </p>
+        <ErrorMessage className="mt-3">{errorMessage}</ErrorMessage>
       ) : (
-        <p role="status" className="mt-3 h-5 text-sm text-emerald-700">
-          {statusMessage}
-        </p>
+        <StatusMessage message={statusMessage} className="mt-3" />
       )}
 
       {selected && shownTransactions?.length === 0 && (

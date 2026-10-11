@@ -8,6 +8,7 @@ import {
   type CategoryFieldErrors,
   type DeleteCategoryChoice,
 } from '../lib/api'
+import { ErrorMessage, StatusMessage } from './Messages'
 
 // The API's order: the Built-in Categories first, kept in the order they were served (they can't
 // be renamed or added), then the rest by name in the Norwegian alphabet, ignoring case.
@@ -258,13 +259,9 @@ export function CategoriesPage() {
       </form>
 
       {errorMessage ? (
-        <p role="alert" className="mt-3 min-h-5 text-sm text-red-700">
-          {errorMessage}
-        </p>
+        <ErrorMessage className="mt-3">{errorMessage}</ErrorMessage>
       ) : (
-        <p role="status" className="mt-3 h-5 text-sm text-emerald-700">
-          {statusMessage}
-        </p>
+        <StatusMessage message={statusMessage} className="mt-3" />
       )}
 
       <table className="mt-2 w-full text-left text-sm">

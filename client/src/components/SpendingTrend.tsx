@@ -26,6 +26,7 @@ import {
   type TrendPoint,
 } from '../lib/trend'
 import { GranularitySelect } from './GranularitySelect'
+import { ErrorMessage } from './Messages'
 
 const LOAD_ERROR = 'Could not load the Spending trend.'
 
@@ -194,11 +195,7 @@ export function SpendingTrend({ months, categories }: { months: TransactionMonth
             Include transfers
           </label>
 
-          {current && !current.monthly && (
-            <p role="alert" className="mt-3 text-sm text-red-700">
-              {LOAD_ERROR}
-            </p>
-          )}
+          {current && !current.monthly && <ErrorMessage className="mt-3">{LOAD_ERROR}</ErrorMessage>}
 
           {first && last && (
             <>
