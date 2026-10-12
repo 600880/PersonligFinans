@@ -1,10 +1,12 @@
 using System.Text.RegularExpressions;
+using PersonligFinans.Api.CategorizationRules;
 using PersonligFinans.Api.Data;
 
 namespace PersonligFinans.Api.BankStatements;
 
 // Turns a Bank Statement row's raw "Forklaring" text into the Description of an imported
-// Transaction: the merchant or payee name without the bank's card, currency and date details.
+// Transaction: the merchant or payee name without the bank's card, currency and date details, or
+// the Payment Channel in front of it.
 public static partial class DescriptionCleaner
 {
     // "*1111 31.07 Nok 296.60 Rema 1000 Sentrum Kurs: 1.0000" → "Rema 1000 Sentrum".
@@ -28,6 +30,11 @@ public static partial class DescriptionCleaner
     [GeneratedRegex(@"^Varer \d{2}\.\d{2} (?<shop>.+)$")]
     private static partial Regex GoodsPattern();
 
+    // "Vipps*kitch n Netthandel" → "kitch n Netthandel", and "PAYPAL *STEAM" → "STEAM". The "*" is
+    // required, so a payee such as "Klarna Bank AB" is kept whole.
+    [GeneratedRegex(@"^(?<channel>[A-Za-z]+) *\* *(?<merchant>\S.*)$")]
+    private static partial Regex PaymentChannelPattern();
+
     // Other rows (e.g. "Overføring mellom egne kontoer") are kept as-is. The result is truncated
     // to the Description max length.
     public static string Clean(string text)
@@ -42,6 +49,10 @@ public static partial class DescriptionCleaner
         }
         else if (GoodsPattern().Match(text) is { Success: true } goods)
             description = goods.Groups["shop"].Value;
+
+        if (PaymentChannelPattern().Match(description) is { Success: true } channel &&
+            Categorizer.PaymentChannels.Contains(channel.Groups["channel"].Value.ToLowerInvariant()))
+            description = channel.Groups["merchant"].Value;
 
         return description.Length > AppDbContext.DescriptionMaxLength
             ? description[..AppDbContext.DescriptionMaxLength]

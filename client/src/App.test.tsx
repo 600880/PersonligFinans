@@ -1605,7 +1605,7 @@ describe('Transactions page', () => {
     imported: true,
   }
 
-  // A month with a Transaction AI-placed in Other, one the user put in Other (so Locked), and one a
+  // A month with a Transaction a rule put in Other, one the user put in Other (so Locked), and one a
   // rule put in another Category.
   const otherCategoryTransactions = [
     septemberTransactions[0],
@@ -1965,7 +1965,7 @@ describe('Transactions page', () => {
     return within(transactionRow(description)).queryByRole('img', { name: 'Locked' })
   }
 
-  it('marks only Locked Transactions, not those AI-placed in Other', async () => {
+  it('marks only Locked Transactions, not those a rule put in Other', async () => {
     await openOtherCategoryMonth()
 
     expect(lockMark('Gave')).toHaveAttribute('title', "Locked: rules won't change this Category")

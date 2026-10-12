@@ -180,6 +180,13 @@ public class StatementParserTests
     [InlineData("Varer 04.08 Rema Storgata Nedre Torget Oslo", "Rema Storgata Nedre Torget Oslo")]
     [InlineData("Overføring mellom egne kontoer", "Overføring mellom egne kontoer")]
     [InlineData("Lønn Fra: Testfirma AS", "Lønn Fra: Testfirma AS")]
+    [InlineData("*1111 14.08 Nok 709.00 Vipps*kitch n Netthandel Kurs: 1.0000", "kitch n Netthandel")]
+    [InlineData("*1111 14.08 Nok 99.00 PAYPAL *STEAM GAMES Kurs: 1.0000", "STEAM GAMES")]
+    [InlineData("Varer 04.08 Klarna* Zalando", "Zalando")]
+    [InlineData("Til: Klarna Bank AB Betalt: 17.08.26", "Klarna Bank AB")]
+    [InlineData("*1111 14.08 Nok 50.00 Vipps* Kurs: 1.0000", "Vipps*")]
+    [InlineData("Varer 04.08 Vipps*  kitch n", "kitch n")]
+    [InlineData("Varer 04.08 Vipps*   ", "Vipps*   ")]
     public void Parse_RowDescription_IsCleaned(string text, string expected) =>
         Assert.Equal(expected, DescriptionOf(text));
 

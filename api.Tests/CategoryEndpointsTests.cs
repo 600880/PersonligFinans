@@ -438,7 +438,7 @@ public class CategoryEndpointsTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Delete_WithOtherAsReplacement_ClearsTheAiMarkOnMovedRules()
+    public async Task Delete_WithOtherAsReplacement_KeepsTheAiMarkOnMovedRules()
     {
         var id = await CreateCategory($"{_token} Garden");
         var aiRuleId = await AddedRuleId($"{_token} plantasjen", id);
@@ -448,7 +448,7 @@ public class CategoryEndpointsTests : IAsyncLifetime
         {
             await TransactionsChangedByDeleting(id, OtherId);
 
-            Assert.Equal(new CategorizationRuleResponse(aiRuleId, $"{_token} plantasjen", OtherId, AiGenerated: false), await Rule(aiRuleId));
+            Assert.Equal(new CategorizationRuleResponse(aiRuleId, $"{_token} plantasjen", OtherId, AiGenerated: true), await Rule(aiRuleId));
             Assert.Equal(new CategorizationRuleResponse(ordinaryRuleId, $"{_token} hageland", OtherId, AiGenerated: false), await Rule(ordinaryRuleId));
         }
         finally
@@ -524,17 +524,6 @@ public class CategoryEndpointsTests : IAsyncLifetime
         var response = await _client.PutAsJsonAsync(
             $"/api/transactions/{transactionId}/category", new { categoryId });
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-    }
-
-    // Only an import sets the mark, so the tests set it directly in the database.
-    private async Task PlaceInOther(int transactionId)
-    {
-        using var scope = _factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var transaction = await db.Transactions.SingleAsync(t => t.Id == transactionId);
-        transaction.CategoryId = OtherId;
-        transaction.AiPlacedInOther = true;
-        await db.SaveChangesAsync();
     }
 
     [Fact]
@@ -637,21 +626,6 @@ public class CategoryEndpointsTests : IAsyncLifetime
         var transactions = (await _client.GetFromJsonAsync<List<TransactionResponse>>(
             "/api/transactions?year=2026&month=8"))!;
         return transactionIds.Select(id => transactions.Single(t => t.Id == id).Locked).ToArray();
-    }
-
-    [Fact]
-    public async Task Delete_WithItsRules_TransactionsAiPlacedInOtherGoBackToOther()
-    {
-        var id = await CreateCategory($"{_token} Garden");
-        var transactionId = (await Imported($"{_token} Plantasjen"))[0];
-        await PlaceInOther(transactionId);
-        await AddedRuleId($"{_token} plantasjen", id);
-        Assert.Equal([id], await CategoriesOf(transactionId));
-
-        var changed = await TransactionsChangedByDeletingWithItsRules(id);
-
-        Assert.Equal(1, changed);
-        Assert.Equal([OtherId], await CategoriesOf(transactionId));
     }
 
     [Fact]

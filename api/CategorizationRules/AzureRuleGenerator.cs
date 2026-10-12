@@ -6,8 +6,8 @@ namespace PersonligFinans.Api.CategorizationRules;
 
 // The rule generator backed by a chat model deployed on Azure: one call per import, answered with
 // JSON that must follow a schema. Only each row's description and sign, and each Category's name and
-// description, are sent; never existing rules, Amounts, dates or account numbers. The import leaves
-// "Other" out of the Categories, since it AI-places a row the model declines in Other itself.
+// description, are sent; never existing rules, Amounts, dates or account numbers. Every row is
+// answered with a keyword and one of the given Categories; the model can't decline.
 public class AzureRuleGenerator(ChatClient chat, ILogger<AzureRuleGenerator> logger, TimeSpan? timeLimit = null)
     : IRuleGenerator
 {
@@ -22,17 +22,14 @@ public class AzureRuleGenerator(ChatClient chat, ILogger<AzureRuleGenerator> log
         categorize. Each row has an index, the description from the bank statement, and a sign:
         "negative" means money was spent, "positive" means money was received.
 
-        For each row, answer with its index and either:
-        - a category and a keyword: the category must be the name of one of the given categories,
-          chosen by what the categories' descriptions say belongs in them. The keyword
-          is a short merchant name, in lowercase, copied literally from the description so that it
-          matches this merchant's future transactions at any of its locations. Leave out city, area
-          and place names, store numbers, dates, card numbers and payment prefixes. For example,
-          "Kiwi 512 Bergen Sentrum" gives "kiwi", and "Peppes Pizza Lille Torget" gives "peppes pizza".
-        - or a decline, with keyword and category both null. A declined row is
-          put in the "Other" category, without a rule. Decline whenever you can't name both a
-          merchant keyword and a category, such as when the row has no recognizable merchant
-          or when there is no matching category.
+        For each row, answer with its index, a category and a keyword. The category must be the
+        name of one of the given categories, chosen by what the categories' descriptions say belongs
+        in them; use "Other" when no other category fits. The keyword is a short merchant or payee
+        name, in lowercase, copied literally from the description so that it matches this merchant's
+        future transactions at any of its locations. Leave out city, area and place names, store
+        numbers, dates, card numbers and payment prefixes. For example, "Kiwi 512 Bergen Sentrum"
+        gives "kiwi", and "Peppes Pizza Lille Torget" gives "peppes pizza". When the description
+        names no merchant, use its most distinctive words.
         """;
 
     private static readonly JsonSerializerOptions PromptJson = new(JsonSerializerDefaults.Web)
@@ -52,7 +49,7 @@ public class AzureRuleGenerator(ChatClient chat, ILogger<AzureRuleGenerator> log
 
     private record Prompt(IReadOnlyList<CategoryChoice> Categories, IReadOnlyList<PromptRow> Rows);
 
-    private record AnswerRow(int Index, string? Keyword, string? Category);
+    private record AnswerRow(int Index, string Keyword, string Category);
 
     private record Answer(IReadOnlyList<AnswerRow> Rows);
 
@@ -88,16 +85,16 @@ public class AzureRuleGenerator(ChatClient chat, ILogger<AzureRuleGenerator> log
         }
     }
 
-    // A proposal for each row the answer gives both a keyword and a Category, matched to the row by
-    // the index it was sent with. Entries for unknown indexes are ignored, and the first entry for a
-    // row wins. The import checks each proposal before it becomes a rule.
+    // A proposal for each row the answer gives a keyword that isn't blank, matched to the row by the
+    // index it was sent with. Entries for unknown indexes are ignored, and the first entry for a row
+    // wins. The import checks each proposal before it becomes a rule.
     private static Dictionary<UnmatchedRow, RuleProposal> Proposals(Answer answer, IReadOnlyList<UnmatchedRow> rows)
     {
         var proposals = new Dictionary<UnmatchedRow, RuleProposal>();
         foreach (var entry in answer.Rows)
         {
             if (entry.Index < 0 || entry.Index >= rows.Count ||
-                string.IsNullOrWhiteSpace(entry.Keyword) || string.IsNullOrWhiteSpace(entry.Category))
+                string.IsNullOrWhiteSpace(entry.Keyword))
                 continue;
             proposals.TryAdd(rows[entry.Index], new RuleProposal(entry.Keyword, entry.Category));
         }
@@ -105,7 +102,7 @@ public class AzureRuleGenerator(ChatClient chat, ILogger<AzureRuleGenerator> log
     }
 
     // The schema the answer must follow. Strict mode needs every property required and no others;
-    // a decline is a null keyword and Category. The Category is given by name alone.
+    // there is no way to decline. The Category is given by name alone.
     private static BinaryData AnswerSchema(IEnumerable<string> categoryNames) =>
         BinaryData.FromObjectAsJson(new
         {
@@ -121,12 +118,8 @@ public class AzureRuleGenerator(ChatClient chat, ILogger<AzureRuleGenerator> log
                         properties = new
                         {
                             index = new { type = "integer" },
-                            keyword = new { type = new[] { "string", "null" } },
-                            category = new
-                            {
-                                type = new[] { "string", "null" },
-                                @enum = categoryNames.Cast<string?>().Append(null).ToArray(),
-                            },
+                            keyword = new { type = "string" },
+                            category = new { type = "string", @enum = categoryNames.ToArray() },
                         },
                         required = new[] { "index", "keyword", "category" },
                         additionalProperties = false,

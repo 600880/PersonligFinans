@@ -2,8 +2,8 @@ using PersonligFinans.Api.CategorizationRules;
 
 namespace PersonligFinans.Api.Tests;
 
-// Stands in for the LLM: proposes what the test scripted for each description, declines every
-// other row, and remembers what it was asked.
+// Stands in for the LLM: proposes what the test scripted for each description, proposes nothing
+// for every other row, and remembers what it was asked.
 public class FakeRuleGenerator : IRuleGenerator
 {
     private readonly Dictionary<string, RuleProposal> _proposals = [];

@@ -143,9 +143,8 @@ public static class TransactionEndpoints
         return Results.Created($"/api/transactions/{transaction.Id}", ToResponse(transaction));
     }
 
-    // Categorizes one Transaction manually: an imported Transaction loses its rule link and its
-    // AI-placed in Other flag, so rules never change it again. Never creates, changes or deletes a
-    // Categorization Rule.
+    // Categorizes one Transaction manually: an imported Transaction loses its rule link, so rules
+    // never change it again. Never creates, changes or deletes a Categorization Rule.
     private static async Task<IResult> ChangeCategory(int id, ChangeCategoryRequest request, AppDbContext db)
     {
         await using var dbTransaction = await Categorizer.BeginManualCategorizationAsync(db);
@@ -162,7 +161,6 @@ public static class TransactionEndpoints
 
         transaction.CategoryId = request.CategoryId;
         transaction.CategorizationRuleId = null;
-        transaction.AiPlacedInOther = false;
         await db.SaveChangesAsync();
         await dbTransaction.CommitAsync();
 

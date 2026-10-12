@@ -425,16 +425,6 @@ public class TransactionEndpointsTests
     }
 
     [Fact]
-    public async Task Get_Month_ShowsATransactionTheLlmPlacedInOtherAsNotLocked()
-    {
-        await ImportForCorrection(new FakeRuleGenerator(), "Frisør");
-
-        var placed = await Own("Frisør");
-
-        Assert.Equal((OtherCategoryId, false), (placed.CategoryId, placed.Locked));
-    }
-
-    [Fact]
     public async Task Get_Month_ShowsAnUncategorizedImportedTransactionAsNotLocked()
     {
         await ImportForCorrection(new FakeRuleGenerator { Unavailable = true }, "Frisør");
@@ -464,43 +454,6 @@ public class TransactionEndpointsTests
         var created = (await response.Content.ReadFromJsonAsync<TransactionResponse>())!;
         Assert.True(created.Locked);
         Assert.True((await Own("Lunsj")).Locked);
-    }
-
-    [Fact]
-    public async Task Post_Rule_ClaimsATransactionAiPlacedInOther()
-    {
-        await ImportForCorrection(new FakeRuleGenerator(), "Frisør Nord");
-
-        await AddRule($"{_token} frisør", ShoppingCategoryId);
-
-        var claimed = await Own("Frisør Nord");
-        Assert.Equal((ShoppingCategoryId, false), (claimed.CategoryId, claimed.Locked));
-    }
-
-    [Fact]
-    public async Task Delete_Rule_SendsATransactionAiPlacedInOtherBackToOther()
-    {
-        await ImportForCorrection(new FakeRuleGenerator(), "Frisør Nord");
-        var ruleId = await AddRule($"{_token} frisør", ShoppingCategoryId);
-
-        var response = await _client.DeleteAsync($"/api/categorization-rules/{ruleId}");
-
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var placed = await Own("Frisør Nord");
-        Assert.Equal((OtherCategoryId, false), (placed.CategoryId, placed.Locked));
-    }
-
-    [Fact]
-    public async Task Put_Category_OfTransactionAiPlacedInOther_LocksIt()
-    {
-        await ImportForCorrection(new FakeRuleGenerator(), "Frisør Nord");
-
-        // Choosing Other itself still counts as the user's decision.
-        var changed = await CategoryChanged((await Own("Frisør Nord")).Id, OtherCategoryId);
-        await AddRule($"{_token} frisør", ShoppingCategoryId);
-
-        Assert.Equal((OtherCategoryId, true), (changed.CategoryId, changed.Locked));
-        Assert.Equal(changed, await Own("Frisør Nord"));
     }
 
     [Fact]

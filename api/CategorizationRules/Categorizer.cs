@@ -6,21 +6,21 @@ using PersonligFinans.Api.Data;
 namespace PersonligFinans.Api.CategorizationRules;
 
 // Owns what a Categorization Rule means. The invariant it keeps: every rule-eligible Transaction
-// (imported, and not categorized manually) has the Category of its best-matching current rule.
-// When no rule matches, it is in Other if it is AI-placed in Other, and Uncategorized otherwise.
+// (imported, and not categorized manually) has the Category of its best-matching current rule, or
+// is Uncategorized when no rule matches.
 public static class Categorizer
 {
     // A one-letter keyword would match nearly every description.
     public const int KeywordMinLength = 2;
 
-    // "Other" is a decision, never something a rule falls back on, so no AI-generated rule gets it.
-    // The LLM places single Transactions in it instead (AI-placed in Other).
-    public const string OtherCategoryName = "Other";
+    // Payment Channels: services that carry payments for many unrelated merchants or people, so their
+    // name says nothing about what was bought and no AI-generated rule is keyed on one. Lowercase,
+    // as keywords are.
+    public static readonly IReadOnlySet<string> PaymentChannels = new HashSet<string> { "vipps", "klarna", "paypal" };
 
-    // Imported, and not categorized manually: categorized by a rule, Uncategorized, or AI-placed in Other.
+    // Imported, and not categorized manually: categorized by a rule, or Uncategorized.
     private static readonly Expression<Func<Transaction, bool>> IsRuleEligible =
-        t => t.BankStatementId != null &&
-            (t.CategorizationRuleId != null || t.CategoryId == null || t.AiPlacedInOther);
+        t => t.BankStatementId != null && (t.CategorizationRuleId != null || t.CategoryId == null);
 
     // The same test, for Transactions changed in memory but not yet saved.
     private static readonly Func<Transaction, bool> IsRuleEligibleInMemory = IsRuleEligible.Compile();
@@ -76,12 +76,11 @@ public static class Categorizer
     // including the added ones. Each proposal is checked against the rules as they stand at its
     // turn, including the ones added before it, and dropped unless:
     // - no rule matches its row's description;
-    // - its Category exists and is not "Other";
-    // - its keyword, trimmed and lowercased, is within the length limits, appears in the row's
-    //   description ignoring case, and is unique ignoring case;
+    // - its Category exists;
+    // - its keyword, trimmed and lowercased, is within the length limits, is not a Payment Channel,
+    //   appears in the row's description ignoring case, and is unique ignoring case;
     // - it would change the Category of nothing that has one: no rule-eligible Transaction, and none
-    //   of the descriptions about to be imported. It may only categorize what is Uncategorized or
-    //   AI-placed in Other, since no rule holds either.
+    //   of the descriptions about to be imported. It may only categorize what is Uncategorized.
     // Each added rule is saved at once, so that the uniqueness check is made by the database,
     // comparing keywords exactly as its unique index does. Call it inside the database transaction
     // of a rule change, so the checks see every rule and the rules are undone with the change.
@@ -92,9 +91,7 @@ public static class Categorizer
     {
         await db.CategorizationRules.LoadAsync();
         var rules = db.CategorizationRules.Local.ToList();
-        var categoryIdByName = await db.Categories
-            .Where(c => c.Name != OtherCategoryName)
-            .ToDictionaryAsync(c => c.Name, c => c.Id);
+        var categoryIdByName = await db.Categories.ToDictionaryAsync(c => c.Name, c => c.Id);
         var eligibleDescriptions = await db.Transactions.Where(IsRuleEligible).Select(t => t.Description).ToListAsync();
         var descriptions = eligibleDescriptions.Concat(importedDescriptions).Distinct().ToList();
         var now = DateTimeOffset.UtcNow;
@@ -105,6 +102,7 @@ public static class Categorizer
             if (ChooseRule(description, rules) is not null ||
                 !categoryIdByName.TryGetValue(proposal.CategoryName, out var categoryId) ||
                 keyword.Length is < KeywordMinLength or > AppDbContext.KeywordMaxLength ||
+                PaymentChannels.Contains(keyword) ||
                 !description.Contains(keyword, StringComparison.OrdinalIgnoreCase))
                 continue;
 
@@ -147,7 +145,6 @@ public static class Categorizer
     {
         await db.CategorizationRules.LoadAsync();
         var rules = db.CategorizationRules.Local.ToList();
-        var otherId = await OtherCategoryIdAsync(db);
 
         var eligible = await db.Transactions.Where(IsRuleEligible).ToListAsync();
         eligible = eligible.Union(db.Transactions.Local.Where(IsRuleEligibleInMemory)).ToList();
@@ -156,7 +153,7 @@ public static class Categorizer
         foreach (var transaction in eligible)
         {
             var rule = ChooseRule(transaction.Description, rules);
-            var categoryId = rule?.CategoryId ?? (transaction.AiPlacedInOther ? otherId : null);
+            var categoryId = rule?.CategoryId;
             if (transaction.CategoryId != categoryId)
                 changed.Add(transaction);
             transaction.CategoryId = categoryId;
@@ -171,18 +168,12 @@ public static class Categorizer
     // Moves a Category's Categorization Rules and Transactions to the replacement Category, then
     // re-matches, and returns how many Transactions changed Category, counting each once. Each
     // Transaction keeps how it was categorized: a manual one stays manual, and one categorized by a
-    // rule follows its rule. Moved AI-generated rules lose their mark when the replacement is Other,
-    // since no AI-generated rule has Other. Call it inside the database transaction of a rule
-    // change; nothing is saved.
+    // rule follows its rule. Call it inside the database transaction of a rule change; nothing is
+    // saved.
     public static async Task<int> MoveToReplacementAsync(AppDbContext db, int categoryId, int replacementId)
     {
-        var replacementIsOther = replacementId == await OtherCategoryIdAsync(db);
         foreach (var rule in await RulesOf(db, categoryId))
-        {
             rule.CategoryId = replacementId;
-            if (replacementIsOther)
-                rule.AiGenerated = false;
-        }
 
         var moved = await db.Transactions.Where(t => t.CategoryId == categoryId).ToListAsync();
         foreach (var transaction in moved)
@@ -195,10 +186,9 @@ public static class Categorizer
     // Deletes a Category's Categorization Rules and makes its Transactions Uncategorized, then
     // re-matches, and returns how many Transactions changed Category, counting each once. Its
     // imported Transactions, including those categorized manually, are then matched against the
-    // remaining rules like any rule change: a rule that still matches takes them, one AI-placed in
-    // Other goes back to Other, and the rest stay Uncategorized. Its manually-entered Transactions
-    // stay Uncategorized, since rules never apply to them. Call it inside the database transaction
-    // of a rule change; nothing is saved.
+    // remaining rules like any rule change: a rule that still matches takes them, and the rest stay
+    // Uncategorized. Its manually-entered Transactions stay Uncategorized, since rules never apply
+    // to them. Call it inside the database transaction of a rule change; nothing is saved.
     public static async Task<int> DeleteRulesAndUncategorizeAsync(AppDbContext db, int categoryId)
     {
         db.CategorizationRules.RemoveRange(await RulesOf(db, categoryId));
@@ -226,21 +216,4 @@ public static class Categorizer
 
     private static Task<List<CategorizationRule>> RulesOf(AppDbContext db, int categoryId) =>
         db.CategorizationRules.Where(r => r.CategoryId == categoryId).ToListAsync();
-
-    // Makes each of the given Transactions that is still Uncategorized AI-placed in Other. During
-    // import, call it with the rows the LLM was asked about, after the AI-generated rules are added
-    // and the import is re-matched, so it takes the rows the LLM declined or whose proposal was dropped.
-    public static async Task PlaceInOtherAsync(AppDbContext db, IEnumerable<Transaction> transactions)
-    {
-        var otherId = await OtherCategoryIdAsync(db);
-        foreach (var transaction in transactions.Where(t => t.CategoryId is null))
-        {
-            transaction.CategoryId = otherId;
-            transaction.AiPlacedInOther = true;
-        }
-    }
-
-    // Found by name, which is safe because Other is a Built-in Category and can't be renamed.
-    private static Task<int> OtherCategoryIdAsync(AppDbContext db) =>
-        db.Categories.Where(c => c.Name == OtherCategoryName).Select(c => c.Id).SingleAsync();
 }

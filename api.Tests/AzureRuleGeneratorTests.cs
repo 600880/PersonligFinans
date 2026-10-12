@@ -17,12 +17,13 @@ namespace PersonligFinans.Api.Tests;
 public class AzureRuleGeneratorTests
 {
     private static readonly UnmatchedRow Bakery = new("Bakeriet Lille Bergen", AmountSign.Negative);
-    private static readonly UnmatchedRow Vipps = new("Vipps *Ola Nordmann", AmountSign.Negative);
+    private static readonly UnmatchedRow Kitchn = new("kitch n Netthandel", AmountSign.Negative);
     private static readonly UnmatchedRow Salary = new("Lønn Arbeidsgiver AS", AmountSign.Positive);
     private static readonly CategoryChoice[] Categories =
     [
         new("Groceries", "All groceries."),
         new("Income", "All income."),
+        new("Other", "Everything that fits no other category."),
         new("Restaurants", "Restaurant, takeaway, bakery etc."),
     ];
 
@@ -74,53 +75,44 @@ public class AzureRuleGeneratorTests
     }
 
     [Fact]
-    public async Task Generate_ValidResponse_ReturnsAProposalForEachRowNotDeclined()
+    public async Task Generate_ValidResponse_ReturnsAProposalForEachRow()
     {
         var handler = AnsweringWithContent("""
             {"rows": [
               {"index": 0, "keyword": "bakeriet", "category": "Restaurants"},
-              {"index": 1, "keyword": null, "category": null},
+              {"index": 1, "keyword": "kitch n", "category": "Other"},
               {"index": 2, "keyword": "arbeidsgiver", "category": "Income"}
             ]}
             """);
 
-        var result = await Generator(handler).GenerateAsync([Bakery, Vipps, Salary], Categories);
+        var result = await Generator(handler).GenerateAsync([Bakery, Kitchn, Salary], Categories);
 
         var generated = Assert.IsType<RuleGeneration.Generated>(result);
         Assert.Equal(
             new Dictionary<UnmatchedRow, RuleProposal>
             {
                 [Bakery] = new("bakeriet", "Restaurants"),
+                [Kitchn] = new("kitch n", "Other"),
                 [Salary] = new("arbeidsgiver", "Income"),
             },
             generated.Proposals);
     }
 
     [Fact]
-    public async Task Generate_AllRowsDeclined_ReturnsNoProposals()
-    {
-        var handler = AnsweringWithContent("""{"rows": [{"index": 0, "keyword": null, "category": null}]}""");
-
-        var result = await Generator(handler).GenerateAsync([Vipps], Categories);
-
-        Assert.Empty(Assert.IsType<RuleGeneration.Generated>(result).Proposals);
-    }
-
-    [Fact]
-    public async Task Generate_EntriesForUnknownRowsOrMissingAKeywordOrCategory_AreIgnored()
+    public async Task Generate_EntriesForUnknownRowsOrABlankKeyword_AreIgnored()
     {
         var handler = AnsweringWithContent("""
             {"rows": [
               {"index": 7, "keyword": "bakeriet", "category": "Restaurants"},
-              {"index": -1, "keyword": "vipps", "category": "Other"},
-              {"index": 0, "keyword": "bakeriet", "category": null},
-              {"index": 1, "keyword": " ", "category": "Restaurants"},
+              {"index": -1, "keyword": "kitch n", "category": "Other"},
+              {"index": 0, "keyword": " ", "category": "Restaurants"},
+              {"index": 1, "keyword": "", "category": "Other"},
               {"index": 2, "keyword": "arbeidsgiver", "category": "Income"},
               {"index": 2, "keyword": "lønn", "category": "Groceries"}
             ]}
             """);
 
-        var result = await Generator(handler).GenerateAsync([Bakery, Vipps, Salary], Categories);
+        var result = await Generator(handler).GenerateAsync([Bakery, Kitchn, Salary], Categories);
 
         var proposal = Assert.Single(Assert.IsType<RuleGeneration.Generated>(result).Proposals);
         Assert.Equal((Salary, new RuleProposal("arbeidsgiver", "Income")), (proposal.Key, proposal.Value));
@@ -132,6 +124,8 @@ public class AzureRuleGeneratorTests
     [InlineData("{}")]
     [InlineData("""{"rows": null}""")]
     [InlineData("""{"rows": [{"keyword": "bakeriet", "category": "Restaurants"}]}""")]
+    [InlineData("""{"rows": [{"index": 0, "keyword": null, "category": null}]}""")]
+    [InlineData("""{"rows": [{"index": 0, "keyword": "bakeriet", "category": null}]}""")]
     [InlineData("""{"rows": [{"index": "first", "keyword": "bakeriet", "category": "Restaurants"}]}""")]
     [InlineData("")]
     public async Task Generate_MalformedOrPartialResponse_IsUnavailable(string content)
@@ -204,6 +198,7 @@ public class AzureRuleGeneratorTests
               "categories": [
                 {"name": "Groceries", "description": "All groceries."},
                 {"name": "Income", "description": "All income."},
+                {"name": "Other", "description": "Everything that fits no other category."},
                 {"name": "Restaurants", "description": "Restaurant, takeaway, bakery etc."}
               ],
               "rows": [
@@ -218,7 +213,7 @@ public class AzureRuleGeneratorTests
     }
 
     [Fact]
-    public async Task Generate_TellsTheModelADeclinedRowIsPutInOtherWhichItCannotChoose()
+    public async Task Generate_RequiresAKeywordAndOneOfTheGivenCategoriesForEveryRow()
     {
         var handler = AnsweringWithContent("""{"rows": []}""");
 
@@ -226,10 +221,13 @@ public class AzureRuleGeneratorTests
 
         var request = JsonNode.Parse(Assert.Single(handler.RequestBodies))!;
         var systemMessage = request["messages"]!.AsArray().Single(m => (string?)m!["role"] == "system")!;
-        Assert.Contains("put in the \"Other\" category", (string)systemMessage["content"]!);
-        var categoryEnum = request["response_format"]!["json_schema"]!["schema"]!
-            ["properties"]!["rows"]!["items"]!["properties"]!["category"]!["enum"]!.AsArray();
-        Assert.Equal(["Groceries", "Income", "Restaurants", null], categoryEnum.Select(c => (string?)c));
+        Assert.DoesNotContain("decline", (string)systemMessage["content"]!, StringComparison.OrdinalIgnoreCase);
+        var row = request["response_format"]!["json_schema"]!["schema"]!["properties"]!["rows"]!["items"]!["properties"]!;
+        Assert.Equal("string", (string?)row["keyword"]!["type"]);
+        Assert.Equal("string", (string?)row["category"]!["type"]);
+        Assert.Equal(
+            ["Groceries", "Income", "Other", "Restaurants"],
+            row["category"]!["enum"]!.AsArray().Select(c => (string?)c));
     }
 
     [Fact]

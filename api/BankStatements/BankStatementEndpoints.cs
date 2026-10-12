@@ -77,7 +77,7 @@ public static class BankStatementEndpoints
 
         // Asked before the database transaction is opened, since the rule generator may be a slow
         // network call and must not hold the lock while it runs.
-        var (proposals, asked, aiCategorizationUnavailable) = await ProposeRules(parsed.Rows, db, ruleGenerator);
+        var (proposals, aiCategorizationUnavailable) = await ProposeRules(parsed.Rows, db, ruleGenerator);
         if (aiCategorizationUnavailable)
             loggerFactory.CreateLogger(typeof(BankStatementEndpoints)).LogWarning(
                 "AI categorization was unavailable for a Bank Statement of {RowCount} rows; its unmatched rows stay Uncategorized.",
@@ -108,12 +108,8 @@ public static class BankStatementEndpoints
                 CategorizationRule = rule,
             };
         }));
-        // New AI-generated rules may also match Uncategorized Transactions from earlier imports, and
-        // ones AI-placed in Other.
+        // New AI-generated rules may also match Uncategorized Transactions from earlier imports.
         await Categorizer.RematchAsync(db);
-        // The rows the LLM was asked about and that are still Uncategorized: it declined them, or
-        // their proposal was dropped.
-        await Categorizer.PlaceInOtherAsync(db, statement.Transactions.Where(t => asked.Contains(ToUnmatchedRow(t))));
 
         // One database transaction: the statement, all its rows and the rules they brought, or nothing.
         db.BankStatements.Add(statement);
@@ -141,14 +137,14 @@ public static class BankStatementEndpoints
     }
 
     // The rule generator's proposals for the rows no current rule matches, in row order, each with
-    // the description it was made for, and the rows it answered about, declined ones included.
-    // Each distinct description and sign is asked about once. Both are empty when there is no rule
-    // generator, every row is matched, or the generator is unavailable; only the last sets Unavailable.
-    private static async Task<(List<(string Description, RuleProposal Proposal)> Proposals, HashSet<UnmatchedRow> Asked, bool Unavailable)> ProposeRules(
+    // the description it was made for. Each distinct description and sign is asked about once. There
+    // are none when there is no rule generator, every row is matched, or the generator is
+    // unavailable; only the last sets Unavailable.
+    private static async Task<(List<(string Description, RuleProposal Proposal)> Proposals, bool Unavailable)> ProposeRules(
         IReadOnlyList<StatementRow> rows, AppDbContext db, IRuleGenerator? ruleGenerator)
     {
         if (ruleGenerator is null)
-            return ([], [], false);
+            return ([], false);
 
         // Not tracked, so the rules loaded again under the lock are the current ones.
         var rules = await db.CategorizationRules.AsNoTracking().ToListAsync();
@@ -158,11 +154,10 @@ public static class BankStatementEndpoints
             .Distinct()
             .ToList();
         if (unmatched.Count == 0)
-            return ([], [], false);
+            return ([], false);
 
         // Read at each import, so an edited description reaches the next prompt.
         var categories = await db.Categories
-            .Where(c => c.Name != Categorizer.OtherCategoryName)
             .OrderBy(c => c.Name)
             .Select(c => new CategoryChoice(c.Name, c.Description))
             .ToListAsync();
@@ -172,18 +167,15 @@ public static class BankStatementEndpoints
                 (unmatched
                     .Where(generated.Proposals.ContainsKey)
                     .Select(row => (row.Description, generated.Proposals[row]))
-                    .ToList(), unmatched.ToHashSet(), false),
+                    .ToList(), false),
             // Unavailable: the unmatched rows stay Uncategorized.
-            _ => ([], [], true),
+            _ => ([], true),
         };
     }
 
     // A row as the rule generator is asked about it.
     private static UnmatchedRow ToUnmatchedRow(string description, decimal amount) =>
         new(description, amount < 0 ? AmountSign.Negative : AmountSign.Positive);
-
-    private static UnmatchedRow ToUnmatchedRow(Transaction transaction) =>
-        ToUnmatchedRow(transaction.Description, transaction.Amount);
 
     private static IResult FileProblem(string message) =>
         Results.ValidationProblem(new Dictionary<string, string[]> { ["file"] = [message] });

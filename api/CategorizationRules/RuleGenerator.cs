@@ -16,8 +16,8 @@ public record RuleProposal(string Keyword, string CategoryName);
 // The outcome of one call to the rule generator.
 public abstract record RuleGeneration
 {
-    // A proposal for each row the generator didn't decline. Declined rows have no entry; the import
-    // AI-places them in Other.
+    // A proposal for each row the generator answered with a keyword. A row without one stays
+    // Uncategorized.
     public sealed record Generated(IReadOnlyDictionary<UnmatchedRow, RuleProposal> Proposals) : RuleGeneration;
 
     // The generator failed (timeout, rate limit, network, malformed response), so every row is
@@ -26,7 +26,7 @@ public abstract record RuleGeneration
 }
 
 // Proposes AI-generated rules: for each unmatched row, a keyword and the name of one of the given
-// Categories, or nothing when it declines. Never throws; any failure is reported as Unavailable.
+// Categories. Never throws; any failure is reported as Unavailable.
 public interface IRuleGenerator
 {
     Task<RuleGeneration> GenerateAsync(IReadOnlyList<UnmatchedRow> rows, IReadOnlyList<CategoryChoice> categories);

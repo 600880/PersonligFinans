@@ -1,3 +1,7 @@
+---
+status: superseded by ADR-0003
+---
+
 # The LLM places Transactions in Other without creating a rule
 
 During import the LLM used to decline any row it couldn't write a confident Categorization Rule for, leaving it Uncategorized. We now have it never decline: such a Transaction is AI-placed in Other, a Transaction-level state with no rule behind it, while AI-generated rules still never get the Other Category. A rule for Other would be a weak catch-all ("VIPPS → Other") that silently swallows every future match, since only a longer keyword beats it; placing the one Transaction keeps Uncategorized meaning "nobody has decided" without letting the AI hide future Transactions.
