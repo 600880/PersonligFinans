@@ -59,6 +59,10 @@ namespace PersonligFinans.Api.Data.Migrations
                         .HasColumnType("date")
                         .HasColumnName("period_start");
 
+                    b.Property<Guid>("UploadId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("upload_id");
+
                     b.HasKey("Id")
                         .HasName("pk_bank_statements");
 
@@ -95,6 +99,10 @@ namespace PersonligFinans.Api.Data.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)")
                         .HasColumnName("keyword");
+
+                    b.Property<Guid?>("UploadId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("upload_id");
 
                     b.HasKey("Id")
                         .HasName("pk_categorization_rules");

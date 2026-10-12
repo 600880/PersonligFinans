@@ -434,7 +434,7 @@ public class CategoryEndpointsTests : IAsyncLifetime
 
         await TransactionsChangedByDeleting(id, replacementId);
 
-        Assert.Equal(new CategorizationRuleResponse(ruleId, $"{_token} plantasjen", replacementId, AiGenerated: true), await Rule(ruleId));
+        Assert.Equal(new CategorizationRuleResponse(ruleId, $"{_token} plantasjen", replacementId, AiGenerated: true, IsNew: false), await Rule(ruleId));
     }
 
     [Fact]
@@ -448,8 +448,8 @@ public class CategoryEndpointsTests : IAsyncLifetime
         {
             await TransactionsChangedByDeleting(id, OtherId);
 
-            Assert.Equal(new CategorizationRuleResponse(aiRuleId, $"{_token} plantasjen", OtherId, AiGenerated: true), await Rule(aiRuleId));
-            Assert.Equal(new CategorizationRuleResponse(ordinaryRuleId, $"{_token} hageland", OtherId, AiGenerated: false), await Rule(ordinaryRuleId));
+            Assert.Equal(new CategorizationRuleResponse(aiRuleId, $"{_token} plantasjen", OtherId, AiGenerated: true, IsNew: false), await Rule(aiRuleId));
+            Assert.Equal(new CategorizationRuleResponse(ordinaryRuleId, $"{_token} hageland", OtherId, AiGenerated: false, IsNew: false), await Rule(ordinaryRuleId));
         }
         finally
         {

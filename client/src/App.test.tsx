@@ -54,7 +54,7 @@ type UploadHandler = (body: FormData) => Response | Promise<Response>
 
 let handlePost: PostHandler
 let handleUpload: UploadHandler
-let rules: { id: number; keyword: string; categoryId: number; aiGenerated: boolean }[] | Response
+let rules: { id: number; keyword: string; categoryId: number; aiGenerated: boolean; isNew: boolean }[] | Response
 let handleAddRule: PostHandler
 let handleAddCategory: PostHandler
 let handleEditRule: (id: number, body: unknown) => Response
@@ -142,13 +142,13 @@ beforeEach(() => {
   handlePost = () => Response.json({ id: 1 }, { status: 201 })
   handleUpload = () => Response.json(importedStatement, { status: 201 })
   rules = [
-    { id: 1, keyword: 'kiwi', categoryId: 1, aiGenerated: false },
-    { id: 2, keyword: 'overføring mellom egne kontoer', categoryId: 13, aiGenerated: false },
+    { id: 1, keyword: 'kiwi', categoryId: 1, aiGenerated: false, isNew: false },
+    { id: 2, keyword: 'overføring mellom egne kontoer', categoryId: 13, aiGenerated: false, isNew: false },
   ]
   handleAddRule = (body) =>
-    Response.json({ id: 3, ...(body as object), aiGenerated: false, transactionsChanged: 0 }, { status: 201 })
+    Response.json({ id: 3, ...(body as object), aiGenerated: false, isNew: false, transactionsChanged: 0 }, { status: 201 })
   handleEditRule = (id, body) =>
-    Response.json({ id, ...(body as object), aiGenerated: false, transactionsChanged: 0 })
+    Response.json({ id, ...(body as object), aiGenerated: false, isNew: false, transactionsChanged: 0 })
   handleDeleteRule = () => Response.json({ transactionsChanged: 0 })
   handleDeleteCategory = () => Response.json({ transactionsChanged: 0 })
   handleEditCategory = (id, body) => {
@@ -395,6 +395,26 @@ describe('App', () => {
 
     responders[2](Response.json(importedStatement, { status: 201 }))
     expect(await screen.findByRole('button', { name: /upload transactions/i })).toBeEnabled()
+  })
+
+  it('sends every PDF picked together with the same upload id, and a new one for the next pick', async () => {
+    const uploadIds: (FormDataEntryValue | null)[] = []
+    handleUpload = (body) => {
+      uploadIds.push(body.get('uploadId'))
+      return Response.json(importedStatement, { status: 201 })
+    }
+    const julyPdf = new File(['%PDF-1.7'], 'juli.pdf', { type: 'application/pdf' })
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.upload(screen.getByLabelText(/bank statement pdf/i), [julyPdf, statementPdf])
+    await screen.findByRole('button', { name: /upload transactions/i })
+    await user.upload(screen.getByLabelText(/bank statement pdf/i), [julyPdf])
+    await waitFor(() => expect(uploadIds).toHaveLength(3))
+
+    expect(uploadIds[0]).toEqual(expect.any(String))
+    expect(uploadIds[1]).toBe(uploadIds[0])
+    expect(uploadIds[2]).not.toBe(uploadIds[0])
   })
 
   it('reloads the Dashboard after each imported statement, while the rest are still uploading', async () => {
@@ -1285,7 +1305,7 @@ describe('Rules page', () => {
     handleAddRule = (body) => {
       posted = body
       return Response.json(
-        { id: 3, keyword: 'rema', categoryId: 1, aiGenerated: false, transactionsChanged: 3 },
+        { id: 3, keyword: 'rema', categoryId: 1, aiGenerated: false, isNew: false, transactionsChanged: 3 },
         { status: 201 },
       )
     }
@@ -1379,6 +1399,7 @@ describe('Rules page', () => {
         keyword: 'kiwi minipris',
         categoryId: 13,
         aiGenerated: false,
+        isNew: false,
         transactionsChanged: 1,
       })
     }
@@ -1492,8 +1513,8 @@ describe('Rules page', () => {
 
   it('shows an AI badge next to the keyword of AI-generated rules only, with no filter for them', async () => {
     rules = [
-      { id: 3, keyword: 'café løkka', categoryId: 13, aiGenerated: true },
-      { id: 1, keyword: 'kiwi', categoryId: 1, aiGenerated: false },
+      { id: 3, keyword: 'café løkka', categoryId: 13, aiGenerated: true, isNew: false },
+      { id: 1, keyword: 'kiwi', categoryId: 1, aiGenerated: false, isNew: false },
     ]
     await openRulesPage()
 
@@ -1502,11 +1523,36 @@ describe('Rules page', () => {
     expect(screen.queryByRole('checkbox', { name: 'AI only' })).not.toBeInTheDocument()
   })
 
+  it('shows a New badge on rules added by the last upload, and can show only those', async () => {
+    rules = [
+      { id: 3, keyword: 'café løkka', categoryId: 13, aiGenerated: true, isNew: true },
+      { id: 1, keyword: 'kiwi', categoryId: 1, aiGenerated: false, isNew: false },
+      { id: 4, keyword: 'nille', categoryId: 13, aiGenerated: false, isNew: true },
+    ]
+    const user = await openRulesPage()
+
+    expect(keywords()).toEqual(['café løkka AI New', 'kiwi', 'nille New'])
+
+    await user.click(screen.getByRole('checkbox', { name: 'Show only new' }))
+
+    expect(keywords()).toEqual(['café løkka AI New', 'nille New'])
+  })
+
+  it('disables Show only new when the last upload added no rules', async () => {
+    await openRulesPage()
+
+    expect(screen.getByRole('checkbox', { name: 'Show only new' })).toBeDisabled()
+    expect(screen.getByText('Show only new').closest('label')).toHaveAttribute(
+      'title',
+      'The last upload added no rules',
+    )
+  })
+
   it('drops the AI badge once an AI-generated rule is saved, even unchanged', async () => {
     rules = [
-      { id: 3, keyword: 'bakeriet', categoryId: 13, aiGenerated: true },
-      { id: 1, keyword: 'kiwi', categoryId: 1, aiGenerated: false },
-      { id: 4, keyword: 'nille', categoryId: 13, aiGenerated: true },
+      { id: 3, keyword: 'bakeriet', categoryId: 13, aiGenerated: true, isNew: false },
+      { id: 1, keyword: 'kiwi', categoryId: 1, aiGenerated: false, isNew: false },
+      { id: 4, keyword: 'nille', categoryId: 13, aiGenerated: true, isNew: false },
     ]
     const user = await openRulesPage()
 

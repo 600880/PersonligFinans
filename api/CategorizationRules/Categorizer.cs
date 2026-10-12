@@ -72,8 +72,8 @@ public static class Categorizer
         return transaction;
     }
 
-    // Adds an AI-generated rule for each proposal, one at a time in order, and returns all rules,
-    // including the added ones. Each proposal is checked against the rules as they stand at its
+    // Adds an AI-generated rule for each proposal, one at a time in order, as added by the given
+    // Upload, and returns all rules, including the added ones. Each proposal is checked against the rules as they stand at its
     // turn, including the ones added before it, and dropped unless:
     // - no rule matches its row's description;
     // - its Category exists;
@@ -86,6 +86,7 @@ public static class Categorizer
     // of a rule change, so the checks see every rule and the rules are undone with the change.
     public static async Task<List<CategorizationRule>> AddAiGeneratedRulesAsync(
         AppDbContext db,
+        Guid uploadId,
         IEnumerable<(string Description, RuleProposal Proposal)> proposals,
         IEnumerable<string> importedDescriptions)
     {
@@ -112,6 +113,7 @@ public static class Categorizer
                 CategoryId = categoryId,
                 CreatedAt = now,
                 AiGenerated = true,
+                UploadId = uploadId,
             };
             if (WouldChangeACategory(rule, descriptions, rules) ||
                 await db.CategorizationRules.AnyAsync(r => r.Keyword.ToLower() == keyword.ToLower()))

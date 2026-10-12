@@ -292,9 +292,11 @@ export type UploadBankStatementResult =
   | { ok: true; statement: ImportedBankStatement }
   | { ok: false; message: string }
 
-export async function uploadBankStatement(file: File): Promise<UploadBankStatementResult> {
+// uploadId: shared by every Bank Statement picked together in one Upload.
+export async function uploadBankStatement(file: File, uploadId: string): Promise<UploadBankStatementResult> {
   const body = new FormData()
   body.append('file', file)
+  body.append('uploadId', uploadId)
 
   let response: Response
   try {
@@ -320,11 +322,13 @@ export async function uploadBankStatement(file: File): Promise<UploadBankStateme
 
 // aiGenerated: created by an LLM during import rather than by hand. Only records where the rule
 // came from; the rule otherwise behaves like any other.
+// isNew: added by the most recent Upload that imported a Bank Statement; editing keeps it.
 export interface CategorizationRule {
   id: number
   keyword: string
   categoryId: number
   aiGenerated: boolean
+  isNew: boolean
 }
 
 export interface CategorizationRuleRequest {

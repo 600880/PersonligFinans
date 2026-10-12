@@ -30,19 +30,28 @@ public static class BankStatementEndpoints
     // The form is read by hand rather than bound to an IFormFile, so that a missing or oversized
     // file gets the same validation problem as every other rejected upload.
     // The rule generator is optional: without one, unmatched rows simply stay Uncategorized.
+    // The form's optional "uploadId" names the Upload the file belongs to; without one, the file is
+    // an Upload of its own.
     private static async Task<IResult> ImportBankStatement(
         HttpRequest request, AppDbContext db, [FromServices] IRuleGenerator? ruleGenerator, ILoggerFactory loggerFactory)
     {
         IFormFile? file;
+        string? uploadIdField;
         try
         {
-            file = request.HasFormContentType ? (await request.ReadFormAsync()).Files.GetFile("file") : null;
+            var form = request.HasFormContentType ? await request.ReadFormAsync() : null;
+            file = form?.Files.GetFile("file");
+            uploadIdField = form?["uploadId"].FirstOrDefault();
         }
         catch (BadHttpRequestException e) when (e.StatusCode == StatusCodes.Status413PayloadTooLarge)
         {
             // Kestrel's own request size limit (30 MB) was hit while reading the form.
             return FileProblem("The file is larger than 10 MB.");
         }
+
+        var uploadId = Guid.NewGuid();
+        if (!string.IsNullOrEmpty(uploadIdField) && !Guid.TryParse(uploadIdField, out uploadId))
+            return Results.ValidationProblem(new Dictionary<string, string[]> { ["uploadId"] = ["Upload id is not valid."] });
 
         if (file is null || file.Length == 0)
             return FileProblem("Choose a PDF file to upload.");
@@ -91,11 +100,12 @@ public static class BankStatementEndpoints
             OpeningBalance = parsed.OpeningBalance,
             ClosingBalance = parsed.ClosingBalance,
             ImportedAt = DateTimeOffset.UtcNow,
+            UploadId = uploadId,
         };
         // The import may add rules, so it takes the rule-change lock: imports and rule changes run one
         // after another, and a rule change can't miss these rows while they are being categorized.
         await using var transaction = await Categorizer.BeginRuleChangeAsync(db);
-        var rules = await Categorizer.AddAiGeneratedRulesAsync(db, proposals, parsed.Rows.Select(row => row.Description));
+        var rules = await Categorizer.AddAiGeneratedRulesAsync(db, uploadId, proposals, parsed.Rows.Select(row => row.Description));
         statement.Transactions.AddRange(parsed.Rows.Select(row =>
         {
             var rule = Categorizer.ChooseRule(row.Description, rules);

@@ -16,4 +16,9 @@ public class CategorizationRule
     // Created by an LLM during import and not yet edited by the user, so the user can find it to
     // review. Set at creation and cleared by the first edit; changes nothing about matching.
     public bool AiGenerated { get; set; }
+
+    // The Upload whose import added the rule; null for a rule added by hand or seeded. A rule added
+    // by the most recent Upload that imported a Bank Statement is New. Unlike AiGenerated, editing
+    // the rule keeps it.
+    public Guid? UploadId { get; set; }
 }

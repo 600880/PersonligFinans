@@ -42,6 +42,7 @@ export function RulesPage() {
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [edit, setEdit] = useState<RuleEdit | null>(null)
+  const [newOnly, setNewOnly] = useState(false)
 
   useEffect(() => {
     let ignore = false
@@ -60,6 +61,8 @@ export function RulesPage() {
   }, [])
 
   const categoryName = (id: number) => categories.find((c) => c.id === id)?.name ?? ''
+  const hasNewRules = rules.some((r) => r.isNew)
+  const shownRules = newOnly && hasNewRules ? rules.filter((r) => r.isNew) : rules
 
   async function handleAdd(event: FormEvent) {
     event.preventDefault()
@@ -194,6 +197,19 @@ export function RulesPage() {
         <StatusMessage message={statusMessage} className="mt-3" />
       )}
 
+      <label
+        title={hasNewRules ? undefined : 'The last upload added no rules'}
+        className={`mt-2 inline-flex items-center gap-2 text-sm ${hasNewRules ? 'text-slate-700' : 'text-slate-400'}`}
+      >
+        <input
+          type="checkbox"
+          checked={newOnly && hasNewRules}
+          disabled={!hasNewRules}
+          onChange={(event) => setNewOnly(event.target.checked)}
+        />
+        Show only new
+      </label>
+
       <table className="mt-2 w-full text-left text-sm">
         <thead className="text-slate-500">
           <tr>
@@ -205,7 +221,7 @@ export function RulesPage() {
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-200 text-slate-900">
-          {rules.map((rule) =>
+          {shownRules.map((rule) =>
             edit?.id === rule.id ? (
               <tr key={rule.id} className="align-top">
                 <td className="py-2 pr-3">
@@ -268,6 +284,17 @@ export function RulesPage() {
                         className="ml-1 rounded bg-violet-100 px-1.5 py-0.5 text-xs font-medium text-violet-700"
                       >
                         AI
+                      </span>
+                    </>
+                  )}
+                  {rule.isNew && (
+                    <>
+                      {' '}
+                      <span
+                        title="Added by the last upload"
+                        className="ml-1 rounded bg-emerald-100 px-1.5 py-0.5 text-xs font-medium text-emerald-700"
+                      >
+                        New
                       </span>
                     </>
                   )}

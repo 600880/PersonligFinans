@@ -42,20 +42,23 @@ public class BankStatementEndpointsTests
     // Uploads to the API as configured by default, with no rule generator.
     private Task<HttpResponseMessage> Upload(byte[] pdf) => Upload(pdf, _client);
 
-    // Uploads to an API that has the given rule generator.
-    private async Task<HttpResponseMessage> Upload(byte[] pdf, IRuleGenerator ruleGenerator)
+    // Uploads to an API that has the given rule generator, as part of the given Upload, or as an
+    // Upload of its own.
+    private async Task<HttpResponseMessage> Upload(byte[] pdf, IRuleGenerator ruleGenerator, string? uploadId = null)
     {
         await using var api = _factory.WithWebHostBuilder(builder =>
             builder.ConfigureTestServices(services => services.AddSingleton(ruleGenerator)));
         using var client = api.CreateClient();
-        return await Upload(pdf, client);
+        return await Upload(pdf, client, uploadId);
     }
 
-    private static async Task<HttpResponseMessage> Upload(byte[] pdf, HttpClient client)
+    private static async Task<HttpResponseMessage> Upload(byte[] pdf, HttpClient client, string? uploadId = null)
     {
         var file = new ByteArrayContent(pdf);
         file.Headers.ContentType = new MediaTypeHeaderValue("application/pdf");
         using var form = new MultipartFormDataContent { { file, "file", "kontoutskrift.pdf" } };
+        if (uploadId is not null)
+            form.Add(new StringContent(uploadId), "uploadId");
         return await client.PostAsync("/api/bank-statements", form);
     }
 
@@ -536,6 +539,79 @@ public class BankStatementEndpointsTests
         await Created(await Upload(StatementWithPurchasesFrom($"{_token} Kafé Sør"), generator));
 
         Assert.Equal(RestaurantsId, Assert.Single(await StoredTransactions(earlier.Id)).CategoryId);
+    }
+
+    private static string NewUploadId() => Guid.NewGuid().ToString();
+
+    // Uploads one statement of a purchase from the merchant, for which the generator proposes the
+    // merchant itself as an AI-generated rule.
+    private Task<HttpResponseMessage> UploadAddingRuleFor(string merchant, string uploadId) =>
+        Upload(StatementWithPurchasesFrom(merchant), new FakeRuleGenerator().Proposing(merchant, merchant, "Other"), uploadId);
+
+    private async Task<Dictionary<string, bool>> IsNewByKeyword() =>
+        (await RulesWithToken()).ToDictionary(r => r.Keyword, r => r.IsNew);
+
+    [Fact]
+    public async Task Post_RulesAddedByEveryBankStatementOfTheLatestUpload_AreNewUntilTheNextUploadImports()
+    {
+        var uploadId = NewUploadId();
+        await Created(await UploadAddingRuleFor($"{_token} kafé", uploadId));
+        await Created(await UploadAddingRuleFor($"{_token} frisør", uploadId));
+
+        Assert.Equal(
+            new Dictionary<string, bool> { [$"{_token} kafé"] = true, [$"{_token} frisør"] = true },
+            await IsNewByKeyword());
+
+        // The next Upload adds no rules, yet replaces the marks.
+        await Created(await Upload(StatementWithPurchasesFrom("Rema 1000"), _client, NewUploadId()));
+
+        Assert.Equal(
+            new Dictionary<string, bool> { [$"{_token} kafé"] = false, [$"{_token} frisør"] = false },
+            await IsNewByKeyword());
+    }
+
+    [Fact]
+    public async Task Post_UploadWhoseBankStatementsAreAllRejected_KeepsTheNewMarks()
+    {
+        var pdf = StatementWithPurchasesFrom($"{_token} kafé");
+        await Created(await Upload(pdf, new FakeRuleGenerator().Proposing($"{_token} kafé", $"{_token} kafé", "Other"), NewUploadId()));
+
+        Assert.Equal(HttpStatusCode.Conflict, (await Upload(pdf, _client, NewUploadId())).StatusCode);
+
+        Assert.True(Assert.Single(await RulesWithToken()).IsNew);
+    }
+
+    [Fact]
+    public async Task Post_WithoutAnUploadId_IsAnUploadOfItsOwn()
+    {
+        await Created(await UploadAddingRuleFor($"{_token} kafé", NewUploadId()));
+        await Created(await Upload(StatementWithPurchasesFrom("Rema 1000")));
+
+        Assert.False(Assert.Single(await RulesWithToken()).IsNew);
+    }
+
+    [Fact]
+    public async Task Post_WithAnInvalidUploadId_IsRejected()
+    {
+        var response = await Upload(ReconcilingStatement(UniqueAccountNumber()), _client, "not-a-guid");
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var problem = await response.Content.ReadFromJsonAsync<ValidationProblemDetails>();
+        Assert.Equal(["Upload id is not valid."], problem!.Errors["uploadId"]);
+    }
+
+    [Fact]
+    public async Task Put_EditingANewRule_KeepsItNewButNoLongerAiGenerated()
+    {
+        await Created(await UploadAddingRuleFor($"{_token} kafé", NewUploadId()));
+        var rule = Assert.Single(await RulesWithToken());
+
+        var response = await _client.PutAsJsonAsync(
+            $"/api/categorization-rules/{rule.Id}", new { keyword = rule.Keyword, categoryId = RestaurantsId });
+
+        var edited = await response.Content.ReadFromJsonAsync<SavedCategorizationRuleResponse>();
+        Assert.Equal((false, true), (edited!.AiGenerated, edited.IsNew));
+        Assert.True(Assert.Single(await RulesWithToken()).IsNew);
     }
 
     [Fact]

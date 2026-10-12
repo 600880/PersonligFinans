@@ -10,5 +10,9 @@ public class BankStatement
     public decimal ClosingBalance { get; set; }
     public DateTimeOffset ImportedAt { get; set; }
 
+    // The Upload it was imported in. The Bank Statements imported before Uploads were recorded
+    // share the empty id, which no rule has.
+    public Guid UploadId { get; set; }
+
     public List<Transaction> Transactions { get; } = [];
 }

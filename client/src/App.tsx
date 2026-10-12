@@ -55,17 +55,19 @@ function App() {
 
   // Imports the picked Bank Statements one after another, in pick order, so AI-generated rules
   // created for one already categorize matching rows in the next. Each Bank Statement is imported
-  // or rejected on its own, so a rejection doesn't stop the rest.
+  // or rejected on its own, so a rejection doesn't stop the rest. Together they are one Upload, whose
+  // rules the Rules page marks New.
   async function handleFilesChosen(files: File[]) {
     if (files.length === 0) return
     setUploadProgress({ finished: 0, picked: files.length })
     clearHomeMessages()
 
+    const uploadId = crypto.randomUUID()
     const imported: ImportedBankStatement[] = []
     const rejected: Rejection[] = []
     try {
       for (const [index, file] of files.entries()) {
-        const result = await uploadBankStatement(file)
+        const result = await uploadBankStatement(file, uploadId)
         if (result.ok) {
           imported.push(result.statement)
           setDashboardVersion((version) => version + 1)

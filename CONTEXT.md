@@ -12,6 +12,10 @@ _Avoid_: Entry, record, purchase
 A bank's periodic account statement (Norwegian: kontoutskrift) for one account and one period, uploaded to import its Transactions. Identified by its account number and period; each imported Transaction remembers which Bank Statement it came from. Every row on it is imported, including transfers between the user's own accounts, and each row's Amount is the booked NOK value even for foreign-currency purchases. A Bank Statement is imported at most once, and only if its rows reconcile with its opening and closing balances; otherwise nothing from it is imported.
 _Avoid_: Kontoutskrift, file, CSV, export
 
+**Upload**:
+One pick of one or more Bank Statements to import together. Each Bank Statement in it is imported or rejected on its own.
+_Avoid_: Batch, import, file upload
+
 **Amount**:
 The signed value of a Transaction in NOK: negative when money is spent, positive when money is received. All Transactions share one currency.
 _Avoid_: Balance change, sum, value
@@ -39,6 +43,10 @@ _Avoid_: Mapping, pattern
 **AI-generated rule**:
 A Categorization Rule created by an LLM during import, for an imported Transaction that no existing rule matched. It behaves exactly like any other rule; the mark only lets the user spot and review it among the rules, and is removed once the user edits the rule (even saving it unchanged), after which it is an ordinary rule. It may have any Category, Other included, and is only created when it categorizes nothing that already has a Category; its keyword is never a Payment Channel. The LLM sees only the cleaned description and whether the Amount is negative or positive, along with each Category's name and description. It never declines: every Transaction it is asked about gets a keyword and a Category, and one whose rule cannot be added stays Uncategorized.
 _Avoid_: Suggested rule, suggestion, unconfirmed rule
+
+**New rule**:
+A Categorization Rule added by the most recent Upload that imported a Bank Statement, marked so the user can review what that Upload brought. Such an Upload replaces the previous one's marks even if it adds no rules; editing the rule does not remove the mark. Since only imports add rules automatically, a New rule always began as an AI-generated rule, though it may no longer be one.
+_Avoid_: Recent rule, latest rule, fresh rule
 
 **Payment Channel**:
 A service that carries payments for many unrelated merchants or people, such as Vipps, Klarna or PayPal, so its name says nothing about what was bought. It is removed from an imported Transaction's description, leaving the merchant or payee behind it.

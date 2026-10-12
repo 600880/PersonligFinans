@@ -6,10 +6,11 @@ namespace PersonligFinans.Api.CategorizationRules;
 
 public record CategorizationRuleRequest(string? Keyword, int? CategoryId);
 
-public record CategorizationRuleResponse(int Id, string Keyword, int CategoryId, bool AiGenerated);
+// IsNew: added by the most recent Upload that imported a Bank Statement.
+public record CategorizationRuleResponse(int Id, string Keyword, int CategoryId, bool AiGenerated, bool IsNew);
 
 public record SavedCategorizationRuleResponse(
-    int Id, string Keyword, int CategoryId, bool AiGenerated, int TransactionsChanged);
+    int Id, string Keyword, int CategoryId, bool AiGenerated, bool IsNew, int TransactionsChanged);
 
 public record DeletedCategorizationRuleResponse(int TransactionsChanged);
 
@@ -20,10 +21,14 @@ public static class CategorizationRuleEndpoints
         var api = app.MapGroup("/api/categorization-rules");
 
         api.MapGet("/", async (AppDbContext db) =>
-            await db.CategorizationRules
+        {
+            var latestUploadId = await LatestUploadId(db);
+            return await db.CategorizationRules
                 .OrderBy(r => r.Keyword)
-                .Select(r => new CategorizationRuleResponse(r.Id, r.Keyword, r.CategoryId, r.AiGenerated))
-                .ToListAsync());
+                .Select(r => new CategorizationRuleResponse(
+                    r.Id, r.Keyword, r.CategoryId, r.AiGenerated, r.UploadId != null && r.UploadId == latestUploadId))
+                .ToListAsync();
+        });
 
         api.MapPost("/", AddRule);
         api.MapPut("/{id:int}", EditRule);
@@ -47,7 +52,7 @@ public static class CategorizationRuleEndpoints
         if (await SaveRuleChange(db) is not { } transactionsChanged)
             return await KeywordAlreadyExists(db, keyword);
 
-        return Results.Created($"/api/categorization-rules/{rule.Id}", Saved(rule, transactionsChanged));
+        return Results.Created($"/api/categorization-rules/{rule.Id}", Saved(rule, latestUploadId: null, transactionsChanged));
     }
 
     private static async Task<IResult> EditRule(int id, CategorizationRuleRequest request, AppDbContext db)
@@ -68,7 +73,7 @@ public static class CategorizationRuleEndpoints
         if (await SaveRuleChange(db) is not { } transactionsChanged)
             return await KeywordAlreadyExists(db, keyword);
 
-        return Results.Ok(Saved(rule, transactionsChanged));
+        return Results.Ok(Saved(rule, await LatestUploadId(db), transactionsChanged));
     }
 
     private static async Task<IResult> DeleteRule(int id, AppDbContext db)
@@ -83,8 +88,18 @@ public static class CategorizationRuleEndpoints
         return Results.Ok(new DeletedCategorizationRuleResponse(transactionsChanged));
     }
 
-    private static SavedCategorizationRuleResponse Saved(CategorizationRule rule, int transactionsChanged) =>
-        new(rule.Id, rule.Keyword, rule.CategoryId, rule.AiGenerated, transactionsChanged);
+    private static SavedCategorizationRuleResponse Saved(
+        CategorizationRule rule, Guid? latestUploadId, int transactionsChanged) =>
+        new(rule.Id, rule.Keyword, rule.CategoryId, rule.AiGenerated,
+            rule.UploadId is not null && rule.UploadId == latestUploadId, transactionsChanged);
+
+    // The most recent Upload that imported a Bank Statement, or null before any import.
+    private static Task<Guid?> LatestUploadId(AppDbContext db) =>
+        db.BankStatements
+            .OrderByDescending(s => s.ImportedAt)
+            .ThenByDescending(s => s.Id)
+            .Select(s => (Guid?)s.UploadId)
+            .FirstOrDefaultAsync();
 
     // The trimmed keyword, and the validation errors keyed on the request's fields. When editing,
     // the edited rule's own keyword doesn't count as a duplicate.

@@ -49,7 +49,7 @@ public class CategorizationRuleEndpointsTests
         Assert.Equal(0, created.TransactionsChanged);
 
         var rules = await _client.GetFromJsonAsync<List<CategorizationRuleResponse>>("/api/categorization-rules");
-        Assert.Contains(new CategorizationRuleResponse(created.Id, $"{_token} butikk", GroceriesId, AiGenerated: false), rules!);
+        Assert.Contains(new CategorizationRuleResponse(created.Id, $"{_token} butikk", GroceriesId, AiGenerated: false, IsNew: false), rules!);
     }
 
     [Fact]
@@ -287,10 +287,10 @@ public class CategorizationRuleEndpointsTests
 
         var edited = await EditedRule(ruleId, $"{_token} butikk", RestaurantsId);
 
-        Assert.Equal(new SavedCategorizationRuleResponse(ruleId, $"{_token} butikk", RestaurantsId, AiGenerated: false, 2), edited);
+        Assert.Equal(new SavedCategorizationRuleResponse(ruleId, $"{_token} butikk", RestaurantsId, AiGenerated: false, IsNew: false, 2), edited);
         Assert.Equal([RestaurantsId, RestaurantsId, null], await CategoriesOf(ids));
         var rules = await _client.GetFromJsonAsync<List<CategorizationRuleResponse>>("/api/categorization-rules");
-        Assert.Contains(new CategorizationRuleResponse(ruleId, $"{_token} butikk", RestaurantsId, AiGenerated: false), rules!);
+        Assert.Contains(new CategorizationRuleResponse(ruleId, $"{_token} butikk", RestaurantsId, AiGenerated: false, IsNew: false), rules!);
     }
 
     [Fact]
@@ -315,7 +315,7 @@ public class CategorizationRuleEndpointsTests
         var edited = await EditedRule(ruleId, $" {_token.ToUpperInvariant()} BUTIKK ", GroceriesId);
 
         Assert.Equal(
-            new SavedCategorizationRuleResponse(ruleId, $"{_token.ToUpperInvariant()} BUTIKK", GroceriesId, AiGenerated: false, 0),
+            new SavedCategorizationRuleResponse(ruleId, $"{_token.ToUpperInvariant()} BUTIKK", GroceriesId, AiGenerated: false, IsNew: false, 0),
             edited);
         Assert.Equal([GroceriesId], await CategoriesOf(ids));
     }
@@ -373,8 +373,8 @@ public class CategorizationRuleEndpointsTests
 
         var rules = await _client.GetFromJsonAsync<List<CategorizationRuleResponse>>("/api/categorization-rules");
 
-        Assert.Contains(new CategorizationRuleResponse(aiRuleId, $"{_token} kafé", RestaurantsId, AiGenerated: true), rules!);
-        Assert.Contains(new CategorizationRuleResponse(handAddedRuleId, $"{_token} butikk", GroceriesId, AiGenerated: false), rules!);
+        Assert.Contains(new CategorizationRuleResponse(aiRuleId, $"{_token} kafé", RestaurantsId, AiGenerated: true, IsNew: false), rules!);
+        Assert.Contains(new CategorizationRuleResponse(handAddedRuleId, $"{_token} butikk", GroceriesId, AiGenerated: false, IsNew: false), rules!);
     }
 
     [Fact]
@@ -409,7 +409,7 @@ public class CategorizationRuleEndpointsTests
 
         Assert.False(edited.AiGenerated);
         var rules = await _client.GetFromJsonAsync<List<CategorizationRuleResponse>>("/api/categorization-rules");
-        Assert.Contains(new CategorizationRuleResponse(ruleId, $"{_token} bakeri", GroceriesId, AiGenerated: false), rules!);
+        Assert.Contains(new CategorizationRuleResponse(ruleId, $"{_token} bakeri", GroceriesId, AiGenerated: false, IsNew: false), rules!);
     }
 
     [Fact]
@@ -420,9 +420,9 @@ public class CategorizationRuleEndpointsTests
 
         var edited = await EditedRule(ruleId, $"{_token} kafé", RestaurantsId);
 
-        Assert.Equal(new SavedCategorizationRuleResponse(ruleId, $"{_token} kafé", RestaurantsId, AiGenerated: false, 0), edited);
+        Assert.Equal(new SavedCategorizationRuleResponse(ruleId, $"{_token} kafé", RestaurantsId, AiGenerated: false, IsNew: false, 0), edited);
         var rules = await _client.GetFromJsonAsync<List<CategorizationRuleResponse>>("/api/categorization-rules");
-        Assert.Contains(new CategorizationRuleResponse(ruleId, $"{_token} kafé", RestaurantsId, AiGenerated: false), rules!);
+        Assert.Contains(new CategorizationRuleResponse(ruleId, $"{_token} kafé", RestaurantsId, AiGenerated: false, IsNew: false), rules!);
     }
 
     [Fact]
