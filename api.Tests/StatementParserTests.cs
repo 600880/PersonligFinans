@@ -45,6 +45,43 @@ public class StatementParserTests
     }
 
     [Fact]
+    public void Parse_YearEndStatement_IgnoresYearToDateInterestSummary()
+    {
+        var result = StatementParser.Parse(
+        [
+            new("Kontoutskrift nr. 12 for konto 1234.56.78901 i perioden 01.12.2026 - 31.12.2026 Testbank Brukskonto."),
+            In("Saldo fra kontoutskrift 30.11.2026", "1.000,00"),
+            Out("Varer 02.12 Matbutikk Sentrum", "100,00", "0412"),
+            In("Saldo i Deres favør", "900,00"),
+            new("Renter og provisjon bokført i år", Out: "0,00", In: "1.901,00"),
+            new("Betalte omkostninger i år", Out: "300,00", In: "0,00"),
+        ]);
+
+        Assert.Null(result.Error);
+        Assert.Equal(
+            [new StatementRow(new DateOnly(2026, 12, 4), "Matbutikk Sentrum", -100.00m)],
+            result.Statement!.Rows);
+    }
+
+    [Fact]
+    public void Parse_ZeroAmountRow_IsLeftOut()
+    {
+        var result = StatementParser.Parse(
+        [
+            new(Header),
+            In("Saldo fra kontoutskrift 31.07.2026", "1.000,00"),
+            In("Fra: Ola Nordmann Betalt: 25.08.26", "0,00", "2508"),
+            Out("Varer 02.08 Matbutikk Sentrum", "100,00", "0408"),
+            In("Saldo i Deres favør", "900,00"),
+        ]);
+
+        Assert.Null(result.Error);
+        Assert.Equal(
+            [new StatementRow(new DateOnly(2026, 8, 4), "Matbutikk Sentrum", -100.00m)],
+            result.Statement!.Rows);
+    }
+
+    [Fact]
     public void Parse_TwoPageStatement_ReadsRowsFromBothPagesAndIgnoresPageFurniture()
     {
         var result = StatementParser.Parse(

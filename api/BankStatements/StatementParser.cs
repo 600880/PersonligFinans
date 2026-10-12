@@ -53,10 +53,14 @@ public static partial class StatementParser
                 opening = SignedAmount(line);
             else if (line.Text.StartsWith("Saldo i Deres favør"))
                 closing = SignedAmount(line);
-            else if (line.Text.StartsWith("Betalte omkostninger") || IsPageCarry(line.Text))
+            else if (IsYearToDateSummary(line.Text) || IsPageCarry(line.Text))
                 continue;
             else if (line.Text.Length > 0 && ResolveBookedDate(line.BookedDate, periodEnd) is { } bookedDate)
-                rows.Add(new StatementRow(bookedDate, DescriptionCleaner.Clean(line.Text),SignedAmount(line)));
+            {
+                // A 0,00 row (e.g. a test payment) moves no money, and a Transaction is never zero.
+                if (SignedAmount(line) is not 0 and var amount)
+                    rows.Add(new StatementRow(bookedDate, DescriptionCleaner.Clean(line.Text), amount));
+            }
             else
                 return StatementParseResult.Fail($"Could not read the statement line \"{line.Text}\".");
         }
@@ -100,6 +104,11 @@ public static partial class StatementParser
         }
         return joined;
     }
+
+    // Totals for the year so far, printed under the closing balance. The amounts were already
+    // booked as rows, so they are not transactions themselves.
+    private static bool IsYearToDateSummary(string text) =>
+        text.StartsWith("Betalte omkostninger") || text.StartsWith("Renter og provisjon bokført");
 
     // The running balance carried from the bottom of one page to the top of the next.
     private static bool IsPageCarry(string text) =>
