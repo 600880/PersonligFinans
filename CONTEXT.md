@@ -57,7 +57,7 @@ The state of a Transaction whose Category the Categorization Rules will never ch
 _Avoid_: Pinned, frozen, edited, manual
 
 **Spending**:
-The money that left during a Period: the sum of the negative Amounts, shown as a positive figure and grouped by Category (Uncategorized Transactions count as their own group). Positive Amounts, such as refunds, never reduce it. Transactions in the Transfers Category are left out unless the user chooses to include them, since moving money between the user's own accounts is not spending.
+What each Category cost during a Period, shown as a positive figure (Uncategorized Transactions count as their own group). Amounts are netted within each month, so a refund reduces the Spending of the Category it lands in only in the month it is posted; a Category whose Amounts in a month net to zero or more has no Spending that month. A longer Period's Spending is the sum of its months', and its total is the sum of its Categories'. The Income Category is never Spending, and the Transfers Category is left out unless the user chooses to include it, since moving money between the user's own accounts is not spending.
 _Avoid_: Outgoing, expenses, costs
 
 **Period**:

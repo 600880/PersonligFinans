@@ -17,15 +17,18 @@ public static class SpendingEndpoints
     // Moving money between the user's own accounts is not Spending, unless the user asks to include it.
     private const string TransfersCategoryName = "Transfers";
 
+    // Money received is never Spending, even when the Income Category has negative Amounts.
+    private const string IncomeCategoryName = "Income";
+
     public static void MapSpendingEndpoints(this IEndpointRouteBuilder app)
     {
         app.MapGet("/api/spending", SpendingOfPeriod);
         app.MapGet("/api/spending/monthly", MonthlySpendingOfSpan);
     }
 
-    // A Period's Spending: one slice per Category with negative Amounts, and one for Uncategorized
-    // when it has any, largest first. The Period is a year with a quarter, a year with a month, or a
-    // year alone for the whole year. The Transfers Category is left out unless includeTransfers is set.
+    // A Period's Spending: one slice per group with Spending in any of its months, the sum of its
+    // months' Spending, largest first. The Period is a year with a quarter, a year with a month, or a
+    // year alone for the whole year.
     private static async Task<IResult> SpendingOfPeriod(
         int? year, int? quarter, int? month, AppDbContext db, bool includeTransfers = false)
     {
@@ -34,9 +37,9 @@ public static class SpendingEndpoints
             return Results.ValidationProblem(errors);
 
         var (first, next) = Bounds(year!.Value, quarter, month);
-        var slices = await SpendingTransactions(db, first, next, includeTransfers)
-            .GroupBy(t => t.CategoryId)
-            .Select(g => new { CategoryId = g.Key, Amount = -g.Sum(t => t.Amount) })
+        var slices = await MonthlySlices(db, first, next, includeTransfers)
+            .GroupBy(s => s.CategoryId)
+            .Select(g => new { CategoryId = g.Key, Amount = g.Sum(s => s.Amount) })
             .OrderByDescending(s => s.Amount)
             .Select(s => new SpendingSliceResponse(s.CategoryId, s.Amount))
             .ToListAsync();
@@ -45,8 +48,8 @@ public static class SpendingEndpoints
     }
 
     // A Span's Spending month by month: one entry per month from From to To, both included and in
-    // order, with no slices for a month without Spending. Each month's slices follow the same rules
-    // as a Period's. The client groups the months into the points of its trend.
+    // order, with no slices for a month without Spending. The client groups the months into the points
+    // of its trend, which therefore match the Spending of their Periods.
     private static async Task<IResult> MonthlySpendingOfSpan(
         int? fromYear, int? fromMonth, int? toYear, int? toMonth, AppDbContext db, bool includeTransfers = false)
     {
@@ -56,10 +59,7 @@ public static class SpendingEndpoints
 
         var from = new DateOnly(fromYear!.Value, fromMonth!.Value, 1);
         var to = new DateOnly(toYear!.Value, toMonth!.Value, 1);
-        var slices = await SpendingTransactions(db, from, to.AddMonths(1), includeTransfers)
-            .GroupBy(t => new { t.PostedDate.Year, t.PostedDate.Month, t.CategoryId })
-            .Select(g => new { g.Key.Year, g.Key.Month, g.Key.CategoryId, Amount = -g.Sum(t => t.Amount) })
-            .ToListAsync();
+        var slices = await MonthlySlices(db, from, to.AddMonths(1), includeTransfers).ToListAsync();
 
         var months = new List<MonthlySpendingResponse>();
         for (var month = from; month <= to; month = month.AddMonths(1))
@@ -76,13 +76,33 @@ public static class SpendingEndpoints
         return Results.Ok(months);
     }
 
-    // The Transactions that count as Spending from the first day up to, but not including, the next:
-    // those with negative Amounts, leaving out the Transfers Category unless includeTransfers is set.
-    private static IQueryable<Transaction> SpendingTransactions(
+    // The Spending of each group in each month from the first day up to, but not including, the next:
+    // the group's Amounts that month netted together as a positive figure, with no slice when they net
+    // to zero or more. Income is never Spending, and Transfers only when includeTransfers is set.
+    private static IQueryable<MonthSlice> MonthlySlices(
         AppDbContext db, DateOnly first, DateOnly next, bool includeTransfers) =>
         db.Transactions
-            .Where(t => t.PostedDate >= first && t.PostedDate < next && t.Amount < 0)
-            .Where(t => includeTransfers || t.Category == null || t.Category.Name != TransfersCategoryName);
+            .Where(t => t.PostedDate >= first && t.PostedDate < next)
+            .Where(t => t.Category == null || t.Category.Name != IncomeCategoryName)
+            .Where(t => includeTransfers || t.Category == null || t.Category.Name != TransfersCategoryName)
+            .GroupBy(t => new { t.PostedDate.Year, t.PostedDate.Month, t.CategoryId })
+            .Select(g => new MonthSlice
+            {
+                Year = g.Key.Year,
+                Month = g.Key.Month,
+                CategoryId = g.Key.CategoryId,
+                Amount = -g.Sum(t => t.Amount),
+            })
+            .Where(s => s.Amount > 0);
+
+    // Built with an initializer rather than a constructor so that EF can filter and group on it.
+    private class MonthSlice
+    {
+        public int Year { get; init; }
+        public int Month { get; init; }
+        public int? CategoryId { get; init; }
+        public decimal Amount { get; init; }
+    }
 
     // The errors per field of a Span; empty when it is valid. To must be at least one month after From.
     private static Dictionary<string, string[]> ValidateSpan(int? fromYear, int? fromMonth, int? toYear, int? toMonth)

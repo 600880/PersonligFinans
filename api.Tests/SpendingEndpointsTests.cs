@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -34,17 +35,31 @@ public class SpendingEndpointsTests
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
     }
 
-    // Imports a Bank Statement with one Transaction of -10,00 per booked date (DDMM). No rule matches
-    // the descriptions, so the imported Transactions are Uncategorized.
-    private async Task ImportStatement(string period, params string[] bookedDates)
+    // Imports a Bank Statement with one Transaction of -10,00 per booked date (DDMM).
+    private Task ImportStatement(string period, params string[] bookedDates) =>
+        ImportStatement(period, bookedDates.Select(d => (d, -10m)).ToArray());
+
+    // Imports a Bank Statement with one Transaction of the given Amount per booked date (DDMM). No rule
+    // matches the descriptions, so the imported Transactions are Uncategorized.
+    private async Task ImportStatement(string period, params (string BookedDate, decimal Amount)[] rows)
     {
+        // The bank writes "1.234,50"; nb-NO would group thousands with a space, de-DE uses the dot.
+        var bankNumbers = CultureInfo.GetCultureInfo("de-DE");
+        string Format(decimal amount) => amount.ToString("#,0.00", bankNumbers);
         var digits = Random.Shared.NextInt64(0, 100_000_000_000).ToString("D11");
         var pdf = StatementPdf.Create(
             accountNumber: $"{digits[..4]}.{digits[4..6]}.{digits[6..]}",
             period,
-            openingBalance: "1.000,00",
-            rows: bookedDates.Select(d => new StatementPdfRow($"{_token} imported", d, "10,00", null, d, "21", "12345678")),
-            closingBalance: $"{1000 - 10 * bookedDates.Length},00");
+            openingBalance: Format(1000m),
+            rows: rows.Select(r => new StatementPdfRow(
+                $"{_token} imported",
+                r.BookedDate,
+                r.Amount < 0 ? Format(-r.Amount) : null,
+                r.Amount < 0 ? null : Format(r.Amount),
+                r.BookedDate,
+                "21",
+                "12345678")),
+            closingBalance: Format(1000m + rows.Sum(r => r.Amount)));
         var file = new ByteArrayContent(pdf);
         file.Headers.ContentType = new MediaTypeHeaderValue("application/pdf");
         using var form = new MultipartFormDataContent { { file, "file", "kontoutskrift.pdf" } };
@@ -69,7 +84,7 @@ public class SpendingEndpointsTests
             + (includeTransfers is { } include ? $"&includeTransfers={include}" : "")))!;
 
     [Fact]
-    public async Task Get_Spending_SumsTheNegativeAmountsOfEachCategoryAsPositiveFiguresLargestFirst()
+    public async Task Get_Spending_SumsTheAmountsOfEachCategoryAsPositiveFiguresLargestFirst()
     {
         await AddManualTransaction("2051-03-02", -100m, GroceriesCategoryId);
         await AddManualTransaction("2051-03-15", -50.50m, GroceriesCategoryId);
@@ -101,7 +116,7 @@ public class SpendingEndpointsTests
     }
 
     [Fact]
-    public async Task Get_SpendingIncludingTransfers_CountsNegativeAmountsInTheTransfersCategoryAsTheirOwnSlice()
+    public async Task Get_SpendingIncludingTransfers_NetsTheTransfersCategoryAsItsOwnSlice()
     {
         await AddManualTransaction("2061-05-03", -5000m, TransfersCategoryId);
         await AddManualTransaction("2061-05-04", 2000m, TransfersCategoryId);
@@ -110,9 +125,9 @@ public class SpendingEndpointsTests
         var spending = await SpendingOf(2061, 5, includeTransfers: true);
 
         Assert.Equal(
-            [new SpendingSliceResponse(TransfersCategoryId, 5000m), new SpendingSliceResponse(GroceriesCategoryId, 10m)],
+            [new SpendingSliceResponse(TransfersCategoryId, 3000m), new SpendingSliceResponse(GroceriesCategoryId, 10m)],
             spending.Slices);
-        Assert.Equal(5010m, spending.Total);
+        Assert.Equal(3010m, spending.Total);
     }
 
     [Fact]
@@ -128,26 +143,47 @@ public class SpendingEndpointsTests
     }
 
     [Fact]
-    public async Task Get_Spending_IsNotReducedByPositiveAmounts()
+    public async Task Get_Spending_IsReducedByARefundInTheSameCategory()
     {
         await AddManualTransaction("2053-04-02", -100m, GroceriesCategoryId);
         await AddManualTransaction("2053-04-09", 40m, GroceriesCategoryId);
-        await AddManualTransaction("2053-04-25", 30000m, IncomeCategoryId);
+        await AddManualTransaction("2053-04-10", -300m, RestaurantsCategoryId);
 
         var spending = await SpendingOf(2053, 4);
 
-        Assert.Equal([new SpendingSliceResponse(GroceriesCategoryId, 100m)], spending.Slices);
-        Assert.Equal(100m, spending.Total);
+        Assert.Equal(
+            [new SpendingSliceResponse(RestaurantsCategoryId, 300m), new SpendingSliceResponse(GroceriesCategoryId, 60m)],
+            spending.Slices);
+        Assert.Equal(360m, spending.Total);
     }
 
     [Fact]
-    public async Task Get_Spending_CountsNegativeAmountsInIncome()
+    public async Task Get_Spending_LeavesOutACategoryWhoseAmountsNetToZeroOrMore_WithoutReducingTheTotal()
+    {
+        await AddManualTransaction("2058-09-02", -100m, ShoppingCategoryId);
+        await AddManualTransaction("2058-09-20", 150m, ShoppingCategoryId);
+        await AddManualTransaction("2058-09-03", -40m, RestaurantsCategoryId);
+        await AddManualTransaction("2058-09-21", 40m, RestaurantsCategoryId);
+        await AddManualTransaction("2058-09-04", -10m, GroceriesCategoryId);
+
+        var spending = await SpendingOf(2058, 9);
+
+        Assert.Equal([new SpendingSliceResponse(GroceriesCategoryId, 10m)], spending.Slices);
+        Assert.Equal(10m, spending.Total);
+    }
+
+    [Fact]
+    public async Task Get_Spending_NeverCountsIncome()
     {
         await AddManualTransaction("2054-08-12", -25m, IncomeCategoryId);
 
-        var spending = await SpendingOf(2054, 8);
+        foreach (var includeTransfers in new bool?[] { null, true })
+        {
+            var spending = await SpendingOf(2054, 8, includeTransfers);
 
-        Assert.Equal([new SpendingSliceResponse(IncomeCategoryId, 25m)], spending.Slices);
+            Assert.Empty(spending.Slices);
+            Assert.Equal(0m, spending.Total);
+        }
     }
 
     [Fact]
@@ -162,6 +198,16 @@ public class SpendingEndpointsTests
             [new SpendingSliceResponse(null, 20m), new SpendingSliceResponse(GroceriesCategoryId, 5m)],
             spending.Slices);
         Assert.Equal(25m, spending.Total);
+    }
+
+    [Fact]
+    public async Task Get_Spending_NetsUncategorizedLikeAnyCategory()
+    {
+        await ImportStatement("01.10.2059 - 31.10.2059", ("0310", -10m), ("0510", 4m), ("0710", -20m));
+
+        var spending = await SpendingOf(2059, 10);
+
+        Assert.Equal([new SpendingSliceResponse(null, 26m)], spending.Slices);
     }
 
     [Fact]
@@ -204,6 +250,27 @@ public class SpendingEndpointsTests
         Assert.Equal([new SpendingSliceResponse(GroceriesCategoryId, 1m)], q1.Slices);
         Assert.Equal([new SpendingSliceResponse(GroceriesCategoryId, 1110m)], q2.Slices);
         Assert.Equal(1110m, q2.Total);
+    }
+
+    [Fact]
+    public async Task Get_SpendingOfQuarter_IsTheSumOfItsMonthlySpending_SoARefundOnlyReducesTheMonthItIsPostedIn()
+    {
+        await AddManualTransaction("2075-07-10", -1200m, ShoppingCategoryId);
+        await AddManualTransaction("2075-08-03", 1200m, ShoppingCategoryId);
+        await AddManualTransaction("2075-08-05", -300m, GroceriesCategoryId);
+        await AddManualTransaction("2075-09-05", -100m, GroceriesCategoryId);
+        await AddManualTransaction("2075-09-06", 50m, GroceriesCategoryId);
+
+        var spending = await SpendingOf("year=2075&quarter=3");
+        var monthly = await MonthlySpendingOf(2075, 7, 2075, 9);
+
+        Assert.Equal(
+            [new SpendingSliceResponse(ShoppingCategoryId, 1200m), new SpendingSliceResponse(GroceriesCategoryId, 350m)],
+            spending.Slices);
+        Assert.Equal(1550m, spending.Total);
+        Assert.Equal([new SpendingSliceResponse(ShoppingCategoryId, 1200m)], monthly[0].Slices);
+        Assert.Equal([new SpendingSliceResponse(GroceriesCategoryId, 300m)], monthly[1].Slices);
+        Assert.Equal([new SpendingSliceResponse(GroceriesCategoryId, 50m)], monthly[2].Slices);
     }
 
     [Fact]
@@ -291,7 +358,7 @@ public class SpendingEndpointsTests
     }
 
     [Fact]
-    public async Task Get_MonthlySpending_SumsTheNegativeAmountsOfEachCategoryAsPositiveFigures_NotReducedByRefunds()
+    public async Task Get_MonthlySpending_NetsEachCategoryWithinTheMonth_LeavingOutIncomeAndCategoriesThatNetToZeroOrMore()
     {
         await AddManualTransaction("2084-06-02", -100m, GroceriesCategoryId);
         await AddManualTransaction("2084-06-15", -50.50m, GroceriesCategoryId);
@@ -305,7 +372,7 @@ public class SpendingEndpointsTests
         Assert.Equal(
             [
                 new SpendingSliceResponse(RestaurantsCategoryId, 300m),
-                new SpendingSliceResponse(GroceriesCategoryId, 150.50m),
+                new SpendingSliceResponse(GroceriesCategoryId, 110.50m),
             ],
             monthly[0].Slices);
         Assert.Empty(monthly[1].Slices);
@@ -343,7 +410,7 @@ public class SpendingEndpointsTests
     }
 
     [Fact]
-    public async Task Get_MonthlySpendingIncludingTransfers_CountsNegativeAmountsInTheTransfersCategoryAsTheirOwnSlice()
+    public async Task Get_MonthlySpendingIncludingTransfers_NetsTheTransfersCategoryAsItsOwnSlice()
     {
         await AddManualTransaction("2087-05-03", -5000m, TransfersCategoryId);
         await AddManualTransaction("2087-05-04", 2000m, TransfersCategoryId);
@@ -353,7 +420,7 @@ public class SpendingEndpointsTests
         var monthly = await MonthlySpendingOf(2087, 5, 2087, 6, includeTransfers: true);
 
         Assert.Equal(
-            [new SpendingSliceResponse(TransfersCategoryId, 5000m), new SpendingSliceResponse(GroceriesCategoryId, 10m)],
+            [new SpendingSliceResponse(TransfersCategoryId, 3000m), new SpendingSliceResponse(GroceriesCategoryId, 10m)],
             monthly[0].Slices);
         Assert.Equal([new SpendingSliceResponse(TransfersCategoryId, 700m)], monthly[1].Slices);
     }
