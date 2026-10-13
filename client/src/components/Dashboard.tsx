@@ -67,7 +67,7 @@ function toSliceViews(spending: Spending, categories: Category[]): SliceView[] {
 // latest month with Transactions and the Transfers Category left out. A new version, after
 // Transactions are saved or on coming back to home, reloads it in place, keeping the chosen Period
 // and Include transfers. Its choices last until the browser reloads, never longer. Clicking a slice
-// or its legend row opens that Category's Transactions for a month or year Period.
+// or its legend row opens that Category's Transactions in the Period.
 export function Dashboard({
   version,
   onOpenTransactions,
@@ -148,10 +148,9 @@ export function Dashboard({
       : null
   const slices = spending && categories ? toSliceViews(spending, categories) : []
   const periodOptions = selected ? periodsOfMonths(months, selected.granularity) : []
-  // The Period the slices lead to. The Transactions page lists a month or a year; leading a quarter
-  // to its first month where the Category has Transactions is not built yet, so its slices do
-  // nothing.
-  const targetPeriod = spending && selected && selected.granularity !== 'quarter' ? selected : null
+  // The Period the slices lead to, once its Spending shows. The Transactions page finds a quarter's
+  // first month where the Category has Transactions.
+  const targetPeriod = spending && selected
 
   function openSlice(slice: SliceView) {
     if (targetPeriod) onOpenTransactions({ period: targetPeriod, categoryId: slice.categoryId })

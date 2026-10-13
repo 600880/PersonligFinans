@@ -10,10 +10,12 @@ import {
   type TransactionMonth,
   type YearOrMonth,
 } from '../lib/api'
+import { categoryFilterOf, matchesCategory, UNCATEGORIZED } from '../lib/categoryFilter'
+import { monthsOfQuarter, quarterMonth } from '../lib/drillDown'
 import { formatAmount } from '../lib/amount'
 import { formatNorwegianDate } from '../lib/date'
 import { currentMonth, MONTH_NAMES } from '../lib/month'
-import { periodLabel, periodValue } from '../lib/period'
+import { periodLabel, periodValue, type Period } from '../lib/period'
 import { ErrorMessage, StatusMessage } from './Messages'
 
 const LOAD_ERROR = 'Could not load the transactions.'
@@ -30,20 +32,21 @@ interface LoadedPeriod {
   transactions: Transaction[]
 }
 
-// The Category filter's value: '' for all Categories, UNCATEGORIZED, or a Category's id.
-const UNCATEGORIZED = 'uncategorized'
-
-// Where the page opens when reached from the Dashboard: a month or a whole year, filtered to a
-// Category, or to Uncategorized when categoryId is null.
+// Where the page opens when reached from the Dashboard, filtered to a Category, or to Uncategorized
+// when categoryId is null: a month, a whole year, or a quarter's first month with Transactions in
+// that Category.
 export interface TransactionsTarget {
-  period: YearOrMonth
+  period: Period
   categoryId: number | null
 }
 
-function matchesCategory(transaction: Transaction, categoryFilter: string) {
-  if (categoryFilter === '') return true
-  if (categoryFilter === UNCATEGORIZED) return transaction.categoryId === null
-  return transaction.categoryId === Number(categoryFilter)
+// The month a quarter target opens on, found in its year's Transactions; null for any other target.
+async function quarterTargetMonth(target?: TransactionsTarget): Promise<YearOrMonth | null> {
+  if (target?.period.granularity !== 'quarter') return null
+  const quarter = target.period
+  const transactions = await fetchTransactions({ granularity: 'year', year: quarter.year })
+  const filter = categoryFilterOf(target.categoryId)
+  return { granularity: 'month', ...quarterMonth(quarter, monthsOfQuarter(quarter), filter, transactions) }
 }
 
 // Whether the description contains the search text, ignoring case and the text's surrounding spaces.
@@ -53,13 +56,15 @@ function matchesSearch(transaction: Transaction, search: string) {
 }
 
 // Opens on the target when given, with the search empty, and otherwise on the latest month with
-// Transactions and all Categories.
+// Transactions and all Categories. The target is read on mount only.
 export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
   const [categories, setCategories] = useState<Category[]>([])
   const [monthsWithTransactions, setMonthsWithTransactions] = useState<TransactionMonth[]>([])
-  // The chosen month or whole year. Without a target, null until the months are loaded, which
-  // decide the month the page opens on.
-  const [selected, setSelected] = useState<YearOrMonth | null>(target?.period ?? null)
+  // The chosen month or whole year. Null until loaded when there's no target, or when it is a
+  // quarter, whose month is found once loaded.
+  const [selected, setSelected] = useState<YearOrMonth | null>(
+    target && target.period.granularity !== 'quarter' ? target.period : null,
+  )
   const [loaded, setLoaded] = useState<LoadedPeriod | null>(null)
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
@@ -70,18 +75,22 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<number | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
   const [categoryFilter, setCategoryFilter] = useState(
-    !target ? '' : target.categoryId === null ? UNCATEGORIZED : String(target.categoryId),
+    target ? categoryFilterOf(target.categoryId) : '',
   )
   const [search, setSearch] = useState('')
+  // Kept from mount, so a quarter target's month is looked for once.
+  const [openingTarget] = useState(target)
 
   useEffect(() => {
     let ignore = false
-    Promise.all([fetchCategories(), fetchTransactionMonths()])
-      .then(([loadedCategories, loadedMonths]) => {
+    Promise.all([fetchCategories(), fetchTransactionMonths(), quarterTargetMonth(openingTarget)])
+      .then(([loadedCategories, loadedMonths, targetMonth]) => {
         if (ignore) return
         setCategories(loadedCategories)
         setMonthsWithTransactions(loadedMonths)
-        setSelected((chosen) => chosen ?? { granularity: 'month', ...(loadedMonths[0] ?? currentMonth()) })
+        setSelected(
+          (chosen) => chosen ?? targetMonth ?? { granularity: 'month', ...(loadedMonths[0] ?? currentMonth()) },
+        )
       })
       .catch(() => {
         if (!ignore) setErrorMessage(LOAD_ERROR)
@@ -89,7 +98,7 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
     return () => {
       ignore = true
     }
-  }, [])
+  }, [openingTarget])
 
   useEffect(() => {
     if (!selected) return

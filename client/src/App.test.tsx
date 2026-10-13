@@ -64,7 +64,7 @@ let handleDeleteCategory: (id: number, query: URLSearchParams) => Response
 let handleEditCategory: (id: number, body: unknown) => Response | Promise<Response>
 let months: { year: number; month: number }[] | Response
 // month is undefined for a whole year.
-let handleListPeriod: (year: number, month: number | undefined) => Response
+let handleListPeriod: (year: number, month: number | undefined) => Response | Promise<Response>
 let handleChangeCategory: (id: number, body: unknown) => Response | Promise<Response>
 let handleDeleteTransaction: (id: number) => Response | Promise<Response>
 // What the categories endpoint returns: `categories` unless a test adds to it or makes it fail.
@@ -2864,6 +2864,111 @@ describe('Dashboard', () => {
       expect(await screen.findByRole('cell', { name: 'Rema 1000' })).toBeInTheDocument()
       expect(listedDescriptions()).toEqual(['Rema 1000'])
       expect(chosenFilters()).toEqual(['2025', 'December', 'Groceries'])
+    })
+
+    describe('a quarter', () => {
+      // Q4 2025's Transactions: Other in October, Groceries in November, Uncategorized in December.
+      const q4Transactions = [
+        { id: 11, date: '2025-10-08', description: 'Elkjøp', categoryId: 13 },
+        { id: 12, date: '2025-11-14', description: 'Kiwi', categoryId: 1 },
+        { id: 13, date: '2025-12-02', description: 'Ukjent kiosk', categoryId: null },
+      ].map((t) => ({ ...t, amount: -100, reference: null, locked: false, imported: true }))
+
+      // Serves the Transactions of the requested year or month out of `transactions`.
+      function serveTransactions(transactions: typeof q4Transactions) {
+        handleListPeriod = (year, month) =>
+          Response.json(
+            transactions.filter(
+              (t) => t.date.startsWith(`${year}-`) && (month === undefined || Number(t.date.slice(5, 7)) === month),
+            ),
+          )
+      }
+
+      async function openQuarter() {
+        const user = await openDashboard()
+        serveTransactions(q4Transactions)
+        await user.selectOptions(within(dashboard()).getByLabelText('Granularity'), 'Quarter')
+        await user.selectOptions(screen.getByLabelText('Period'), 'Q4 2025')
+        return user
+      }
+
+      it("opens the quarter's first month when the Category has Transactions in it", async () => {
+        const user = await openQuarter()
+
+        await user.click(await legendButton('Other'))
+
+        expect(await screen.findByRole('cell', { name: 'Elkjøp' })).toBeInTheDocument()
+        expect(listedDescriptions()).toEqual(['Elkjøp'])
+        expect(chosenFilters()).toEqual(['2025', 'October', 'Other'])
+        expect(requestedPeriods()).toEqual(['/api/transactions?year=2025', '/api/transactions?year=2025&month=10'])
+      })
+
+      it('opens the first month where the Category has Transactions, past empty ones', async () => {
+        const user = await openQuarter()
+
+        await user.click(await legendButton('Groceries'))
+
+        expect(await screen.findByRole('cell', { name: 'Kiwi' })).toBeInTheDocument()
+        expect(chosenFilters()).toEqual(['2025', 'November', 'Groceries'])
+      })
+
+      it('opens the first month with Uncategorized Transactions for the Uncategorized row', async () => {
+        const user = await openQuarter()
+
+        await user.click(await legendButton('Uncategorized'))
+
+        expect(await screen.findByRole('cell', { name: 'Ukjent kiosk' })).toBeInTheDocument()
+        expect(chosenFilters()).toEqual(['2025', 'December', 'Uncategorized'])
+      })
+
+      it("opens the quarter's first month when the Category's Transactions are gone", async () => {
+        const user = await openQuarter()
+        serveTransactions(q4Transactions.filter((t) => t.categoryId !== 1))
+
+        await user.click(await legendButton('Groceries'))
+
+        expect(await screen.findByText('No transactions match')).toBeInTheDocument()
+        expect(chosenFilters()).toEqual(['2025', 'October', 'Groceries'])
+      })
+
+      it('says the Transactions could not load when finding the month fails', async () => {
+        const user = await openQuarter()
+        handleListPeriod = () => new Response(null, { status: 500 })
+
+        await user.click(await legendButton('Groceries'))
+
+        expect(await screen.findByRole('alert')).toHaveTextContent('Could not load the transactions.')
+        expect(requestedPeriods()).toEqual(['/api/transactions?year=2025'])
+      })
+
+      it('stays on the page chosen while the month was being found', async () => {
+        const user = await openQuarter()
+        let finishLoading = () => {}
+        handleListPeriod = () =>
+          new Promise<Response>((resolve) => {
+            finishLoading = () => resolve(Response.json(q4Transactions))
+          })
+        await user.click(await legendButton('Groceries'))
+        await waitFor(() => expect(requestedPeriods()).toEqual(['/api/transactions?year=2025']))
+
+        await user.click(screen.getByRole('button', { name: 'Categories' }))
+        await act(async () => finishLoading())
+
+        expect(screen.getByRole('button', { name: 'Categories' })).toHaveAttribute('aria-current', 'page')
+        expect(screen.queryByLabelText('Month')).not.toBeInTheDocument()
+        expect(requestedPeriods()).toEqual(['/api/transactions?year=2025'])
+      })
+
+      it('opens the same month from a donut slice, which shows a pointer', async () => {
+        const user = await openQuarter()
+        await legendButton('Groceries')
+        expect(slice('#2a78d6')).toHaveStyle({ cursor: 'pointer' })
+
+        await user.click(slice('#2a78d6'))
+
+        expect(await screen.findByRole('cell', { name: 'Kiwi' })).toBeInTheDocument()
+        expect(chosenFilters()).toEqual(['2025', 'November', 'Groceries'])
+      })
     })
 
     it('still opens on the latest month, all Categories and no search from the header', async () => {
