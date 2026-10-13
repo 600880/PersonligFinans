@@ -623,7 +623,7 @@ describe('App', () => {
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 
-  describe('leaving Home', () => {
+  describe('leaving home', () => {
     it('clears the import summary', async () => {
       const user = userEvent.setup()
       render(<App />)
@@ -682,7 +682,7 @@ describe('App', () => {
       expect(screen.getByRole('status')).toHaveTextContent('Imported 38 transactions')
     })
 
-    it('is not clicking the title while on Home, which keeps the messages', async () => {
+    it('is not clicking the title while on home, which keeps the messages', async () => {
       const user = userEvent.setup()
       render(<App />)
       await user.upload(screen.getByLabelText(/bank statement pdf/i), statementPdf)
@@ -2514,6 +2514,21 @@ describe('Dashboard', () => {
       ])
     })
 
+    it('drops a load error once the Spending loads on return', async () => {
+      months = [{ year: 2026, month: 9 }]
+      handleSpending = () => new Response(null, { status: 500 })
+      const user = userEvent.setup()
+      render(<App />)
+      expect(await within(dashboard()).findByRole('alert')).toHaveTextContent('Could not load the Spending.')
+      await user.click(screen.getByRole('button', { name: 'Transactions' }))
+      handleSpending = () => Response.json(septemberSpending)
+
+      await user.click(screen.getByRole('button', { name: 'PersonligFinans' }))
+
+      await waitFor(() => expect(centreTotal()).toBe('Total 1 570,50 kr'))
+      expect(within(dashboard()).queryByRole('alert')).toBeNull()
+    })
+
     it('shows a Transaction recategorized on the Transactions page', async () => {
       months = [{ year: 2026, month: 9 }]
       let uncategorizedAmount = 450.5
@@ -2764,6 +2779,13 @@ describe('Dashboard', () => {
       return within(dashboard()).findByRole('button', { name })
     }
 
+    // The Transactions page's Year, Month and Category as shown.
+    function chosenFilters() {
+      return ['Year', 'Month', 'Category'].map(
+        (label) => (screen.getByLabelText(label) as HTMLSelectElement).selectedOptions[0].textContent,
+      )
+    }
+
     async function openDashboard() {
       months = [
         { year: 2026, month: 9 },
@@ -2785,9 +2807,7 @@ describe('Dashboard', () => {
 
       expect(await screen.findByRole('cell', { name: 'Rema 1000' })).toBeInTheDocument()
       expect(listedDescriptions()).toEqual(['Rema 1000'])
-      expect(screen.getByLabelText('Year')).toHaveValue('2025')
-      expect(screen.getByLabelText('Month')).toHaveValue('12')
-      expect(screen.getByLabelText('Category')).toHaveDisplayValue('Groceries')
+      expect(chosenFilters()).toEqual(['2025', 'December', 'Groceries'])
       expect(requestedPeriods()).toEqual(['/api/transactions?year=2025&month=12'])
     })
 
@@ -2799,9 +2819,7 @@ describe('Dashboard', () => {
       await user.click(await legendButton('Groceries'))
 
       expect(await screen.findByRole('cell', { name: 'Rema 1000' })).toBeInTheDocument()
-      expect(screen.getByLabelText('Year')).toHaveValue('2025')
-      expect(screen.getByLabelText('Month')).toHaveDisplayValue('All months')
-      expect(screen.getByLabelText('Category')).toHaveDisplayValue('Groceries')
+      expect(chosenFilters()).toEqual(['2025', 'All months', 'Groceries'])
       expect(requestedPeriods()).toEqual(['/api/transactions?year=2025'])
     })
 
@@ -2845,9 +2863,7 @@ describe('Dashboard', () => {
 
       expect(await screen.findByRole('cell', { name: 'Rema 1000' })).toBeInTheDocument()
       expect(listedDescriptions()).toEqual(['Rema 1000'])
-      expect(screen.getByLabelText('Year')).toHaveValue('2025')
-      expect(screen.getByLabelText('Month')).toHaveValue('12')
-      expect(screen.getByLabelText('Category')).toHaveDisplayValue('Groceries')
+      expect(chosenFilters()).toEqual(['2025', 'December', 'Groceries'])
     })
 
     it('still opens on the latest month, all Categories and no search from the header', async () => {
@@ -2861,9 +2877,7 @@ describe('Dashboard', () => {
 
       expect(await screen.findByRole('cell', { name: 'Ukjent butikk' })).toBeInTheDocument()
       expect(listedDescriptions()).toEqual(['Rema 1000', 'Ukjent butikk'])
-      expect(screen.getByLabelText('Year')).toHaveValue('2026')
-      expect(screen.getByLabelText('Month')).toHaveValue('9')
-      expect(screen.getByLabelText('Category')).toHaveDisplayValue('All categories')
+      expect(chosenFilters()).toEqual(['2026', 'September', 'All categories'])
       expect(screen.getByLabelText('Search')).toHaveValue('')
       expect(requestedPeriods().at(-1)).toBe('/api/transactions?year=2026&month=9')
     })

@@ -29,7 +29,7 @@ function App() {
   const isUploading = uploadProgress !== null
   const [importMessage, setImportMessage] = useState<string | null>(null)
   const [rejections, setRejections] = useState<Rejection[]>([])
-  // Bumped after new Transactions are saved, and on coming back to Home, so the Dashboard reloads in
+  // Bumped after new Transactions are saved, and on coming back to home, so the Dashboard reloads in
   // place.
   const [dashboardVersion, setDashboardVersion] = useState(0)
   // Where the Transactions page opens when reached from the Dashboard; undefined from the header.
@@ -42,9 +42,9 @@ function App() {
     setRejections([])
   }
 
-  // Leaving Home clears its messages. An upload that finishes while away sets them again, so they
-  // are seen on return. Home stays mounted while away, so the Dashboard is kept as it was left, and
-  // coming back reloads it, so changes made on the other pages show up.
+  // Leaving home clears its messages. An upload that finishes while away sets them again, so they
+  // are seen on return. The home view stays mounted while away, so the Dashboard is kept as it was
+  // left, and coming back reloads it, so changes made on the other pages show up.
   function chooseView(next: View) {
     if (view === 'home' && next !== 'home') clearHomeMessages()
     if (view !== 'home' && next === 'home') setDashboardVersion((version) => version + 1)
