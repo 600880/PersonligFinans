@@ -73,5 +73,5 @@ A run of consecutive whole months, from a start month to an end month, both incl
 _Avoid_: Interval, range, Period
 
 **Dashboard**:
-The view summarizing Spending by Category over a chosen Period, and how Spending changed over a chosen Span.
+The view summarizing Spending by Category over a chosen Period, and how Spending changed over a chosen Span. Each Category's Spending in a Period leads to that Category's Transactions in the Period; since Transactions are listed by month or year, a quarter leads to its first month where the Category has Transactions.
 _Avoid_: Report, overview
