@@ -2486,22 +2486,103 @@ describe('Dashboard', () => {
     await waitFor(() => expect(centreTotal()).toBe('Total 1 570,50 kr'))
   })
 
-  it('loads afresh, on the latest month, when coming back to the home view', async () => {
-    months = [
-      { year: 2026, month: 9 },
-      { year: 2026, month: 8 },
-    ]
-    const user = userEvent.setup()
-    render(<App />)
-    await waitFor(() => expect(centreTotal()).toBe('Total 0,00 kr'))
-    await user.selectOptions(screen.getByLabelText('Period'), 'August 2026')
-    await user.click(screen.getByRole('button', { name: 'Transactions' }))
-    handleSpending = () => Response.json(septemberSpending)
+  describe('coming back to the home view', () => {
+    it('keeps the Granularity, Period and Include transfers, and fetches the Spending again', async () => {
+      months = [
+        { year: 2026, month: 9 },
+        { year: 2026, month: 8 },
+        { year: 2026, month: 3 },
+      ]
+      const user = userEvent.setup()
+      render(<App />)
+      await waitFor(() => expect(centreTotal()).toBe('Total 0,00 kr'))
+      await user.selectOptions(within(dashboard()).getByLabelText('Granularity'), 'Quarter')
+      await user.selectOptions(screen.getByLabelText('Period'), 'Q1 2026')
+      await user.click(within(dashboard()).getByRole('checkbox', { name: 'Include transfers' }))
+      await user.click(screen.getByRole('button', { name: 'Transactions' }))
+      const requestsBefore = requestedSpending().length
+      handleSpending = () => Response.json(septemberSpending)
 
-    await user.click(screen.getByRole('button', { name: 'PersonligFinans' }))
+      await user.click(screen.getByRole('button', { name: 'PersonligFinans' }))
 
-    await waitFor(() => expect(centreTotal()).toBe('Total 1 570,50 kr'))
-    expect(screen.getByLabelText('Period')).toHaveValue('2026-9')
+      await waitFor(() => expect(centreTotal()).toBe('Total 1 570,50 kr'))
+      expect(within(dashboard()).getByLabelText('Granularity')).toHaveDisplayValue('Quarter')
+      expect(screen.getByLabelText('Period')).toHaveValue('2026-Q1')
+      expect(within(dashboard()).getByRole('checkbox', { name: 'Include transfers' })).toBeChecked()
+      expect(requestedSpending().slice(requestsBefore)).toEqual([
+        '/api/spending?year=2026&quarter=1&includeTransfers=true',
+      ])
+    })
+
+    it('shows a Transaction recategorized on the Transactions page', async () => {
+      months = [{ year: 2026, month: 9 }]
+      let uncategorizedAmount = 450.5
+      handleSpending = () =>
+        Response.json(
+          uncategorizedAmount > 0
+            ? septemberSpending
+            : { total: 1570.5, slices: [{ categoryId: 13, amount: 1000 }, { categoryId: 1, amount: 570.5 }] },
+        )
+      const transaction = {
+        id: 4,
+        date: '2026-09-03',
+        description: 'Rema 1000',
+        amount: -450.5,
+        reference: null,
+        categoryId: null,
+        locked: false,
+        imported: true,
+      }
+      handleListPeriod = () => Response.json([transaction])
+      handleChangeCategory = () => {
+        uncategorizedAmount = 0
+        return Response.json({ ...transaction, categoryId: 1, locked: true })
+      }
+      const user = userEvent.setup()
+      render(<App />)
+      await waitFor(() => expect(legendRows()).toHaveLength(3))
+      await user.click(screen.getByRole('button', { name: 'Transactions' }))
+      await user.selectOptions(await screen.findByRole('combobox', { name: 'Category for Rema 1000' }), 'Groceries')
+      expect(await screen.findByRole('status')).toHaveTextContent('Category changed')
+
+      await user.click(screen.getByRole('button', { name: 'PersonligFinans' }))
+
+      await waitFor(() =>
+        expect(legendRows()).toEqual([
+          ['Other', '1 000,00 kr', '63,7 %'],
+          ['Groceries', '570,50 kr', '36,3 %'],
+        ]),
+      )
+    })
+
+    it('falls back to the latest month when the kept Period no longer has Transactions', async () => {
+      months = [
+        { year: 2026, month: 9 },
+        { year: 2026, month: 8 },
+        { year: 2025, month: 3 },
+      ]
+      const user = userEvent.setup()
+      render(<App />)
+      await waitFor(() => expect(centreTotal()).toBe('Total 0,00 kr'))
+      await user.selectOptions(within(dashboard()).getByLabelText('Granularity'), 'Year')
+      await user.selectOptions(screen.getByLabelText('Period'), '2025')
+      await user.click(within(dashboard()).getByRole('checkbox', { name: 'Include transfers' }))
+      await user.click(screen.getByRole('button', { name: 'Transactions' }))
+      months = [
+        { year: 2026, month: 9 },
+        { year: 2026, month: 8 },
+      ]
+
+      await user.click(screen.getByRole('button', { name: 'PersonligFinans' }))
+
+      await waitFor(() => expect(screen.getByLabelText('Period')).toHaveValue('2026-9'))
+      expect(within(dashboard()).getByLabelText('Granularity')).toHaveDisplayValue('Month')
+      expect(monthOptions()).toEqual(['September 2026', 'August 2026'])
+      expect(within(dashboard()).getByRole('checkbox', { name: 'Include transfers' })).toBeChecked()
+      await waitFor(() =>
+        expect(requestedSpending().at(-1)).toBe('/api/spending?year=2026&month=9&includeTransfers=true'),
+      )
+    })
   })
 
   describe('Periods', () => {
@@ -3183,23 +3264,6 @@ describe('Dashboard', () => {
         expect(requestedMonthlySpending()).toHaveLength(requestsBefore)
       })
 
-      it('opens on Month again after leaving the home view and coming back', async () => {
-        months = [
-          { year: 2026, month: 9 },
-          { year: 2025, month: 1 },
-        ]
-        const user = userEvent.setup()
-        render(<App />)
-        await waitFor(() => expect(trendTable()).toHaveLength(2))
-        await user.selectOptions(within(trend()).getByLabelText('Granularity'), 'Quarter')
-
-        await user.click(screen.getByRole('button', { name: 'Transactions' }))
-        await user.click(screen.getByRole('button', { name: 'PersonligFinans' }))
-
-        await waitFor(() => expect(trendTable()[0]).toEqual(['', 'October 2025', 'September 2026', 'Change']))
-        expect(selectedGranularity()).toBe('Month')
-      })
-
       it.each([
         ['Year', [{ year: 2026, month: 9 }, { year: 2026, month: 1 }], 'Trends by Year need Transactions in at least two years'],
         ['Quarter', [{ year: 2026, month: 9 }, { year: 2026, month: 7 }], 'Trends by Quarter need Transactions in at least two quarters'],
@@ -3412,21 +3476,60 @@ describe('Dashboard', () => {
         )
       })
 
-      it('opens afresh, on the default Span, when coming back to the home view', async () => {
+      it('keeps the Granularity, Span, Include transfers and switched-on lines when coming back to the home view, and fetches the Spending again', async () => {
+        const user = userEvent.setup()
+        render(<App />)
+        await chooseView(user)
+        await user.selectOptions(within(trend()).getByLabelText('Granularity'), 'Quarter')
+        await waitFor(() => expect(trendTable()[0]).toEqual(['', 'Q1 2025', 'Q2 2025', 'Change']))
+        await user.click(screen.getByRole('button', { name: 'Transactions' }))
+        const requestsBefore = requestedMonthlySpending().length
+        handleMonthlySpending = (from, to) =>
+          Response.json(
+            monthlySpending(from, to, {
+              '2025-3': [{ categoryId: 1, amount: 300 }],
+              '2025-6': [{ categoryId: 1, amount: 150 }],
+            }),
+          )
+
+        await user.click(screen.getByRole('button', { name: 'PersonligFinans' }))
+
+        await waitFor(() =>
+          expect(trendTable()).toEqual([
+            ['', 'Q1 2025', 'Q2 2025', 'Change'],
+            ['Total', '300,00 kr', '50,00 kr', '▼ −83,3 %'],
+            ['Groceries', '300,00 kr', '50,00 kr', '▼ −83,3 %'],
+          ]),
+        )
+        expect(within(trend()).getByLabelText('Granularity')).toHaveDisplayValue('Quarter')
+        expect(selectedMonth('From')).toBe('03.2025')
+        expect(selectedMonth('To')).toBe('06.2025')
+        expect(within(trend()).getByRole('checkbox', { name: 'Include transfers' })).toBeChecked()
+        expect(switchedOn()).toEqual(['Groceries'])
+        expect(requestedMonthlySpending().slice(requestsBefore)).toEqual([
+          '/api/spending/monthly?fromYear=2025&fromMonth=3&toYear=2025&toMonth=6&includeTransfers=true',
+        ])
+      })
+
+      it('falls back to the months with Transactions when the kept Span ends on a month no longer offered', async () => {
         const user = userEvent.setup()
         render(<App />)
         await chooseView(user)
         await user.click(screen.getByRole('button', { name: 'Transactions' }))
+        months = [
+          { year: 2025, month: 5 },
+          { year: 2025, month: 1 },
+        ]
 
         await user.click(screen.getByRole('button', { name: 'PersonligFinans' }))
 
-        await waitFor(() => expect(trendTable()).toHaveLength(2))
-        expect(selectedMonth('From')).toBe('10.2025')
-        expect(selectedMonth('To')).toBe('09.2026')
-        expect(within(trend()).getByRole('checkbox', { name: 'Include transfers' })).not.toBeChecked()
-        expect(switchedOn()).toEqual(['Total'])
+        await waitFor(() => expect(trendTable()[0]).toEqual(['', 'January 2025', 'May 2025', 'Change']))
+        expect(selectedMonth('From')).toBe('01.2025')
+        expect(selectedMonth('To')).toBe('05.2025')
+        expect(within(trend()).getByRole('checkbox', { name: 'Include transfers' })).toBeChecked()
+        expect(switchedOn()).toEqual(['Groceries'])
         expect(requestedMonthlySpending().at(-1)).toBe(
-          '/api/spending/monthly?fromYear=2025&fromMonth=10&toYear=2026&toMonth=9',
+          '/api/spending/monthly?fromYear=2025&fromMonth=1&toYear=2025&toMonth=5&includeTransfers=true',
         )
       })
     })
