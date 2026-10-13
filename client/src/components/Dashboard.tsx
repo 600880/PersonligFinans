@@ -16,6 +16,7 @@ import { currentMonth } from '../lib/month'
 import { GranularitySelect } from './GranularitySelect'
 import { ErrorMessage } from './Messages'
 import { SpendingTrend } from './SpendingTrend'
+import type { TransactionsTarget } from './TransactionsPage'
 import {
   periodLabel,
   periodOfMonth,
@@ -37,6 +38,7 @@ const RING = { innerRadius: 76, outerRadius: 116, isAnimationActive: false } as 
 // One slice as the chart and the legend show it.
 interface SliceView {
   key: string
+  categoryId: number | null
   name: string
   amount: number
   share: number
@@ -53,6 +55,7 @@ interface LoadedSpending {
 function toSliceViews(spending: Spending, categories: Category[]): SliceView[] {
   return spending.slices.map(({ categoryId, amount }) => ({
     key: String(categoryId),
+    categoryId,
     name: categoryName(categoryId, categories),
     amount,
     share: amount / spending.total,
@@ -63,7 +66,14 @@ function toSliceViews(spending: Spending, categories: Category[]): SliceView[] {
 // Spending by Category for one Period, with the Spending trend over a Span below it. Opens on the
 // latest month with Transactions and the Transfers Category left out, and remembers nothing between
 // visits. A new version reloads it in place, keeping the chosen Period and Include transfers.
-export function Dashboard({ version }: { version: number }) {
+// Clicking a slice or its legend row opens that Category's Transactions for a month or year Period.
+export function Dashboard({
+  version,
+  onOpenTransactions,
+}: {
+  version: number
+  onOpenTransactions: (target: TransactionsTarget) => void
+}) {
   const headingId = useId()
   // Null until loaded, so the donut never shows a Category without its name.
   const [categories, setCategories] = useState<Category[] | null>(null)
@@ -130,6 +140,13 @@ export function Dashboard({ version }: { version: number }) {
       : null
   const slices = spending && categories ? toSliceViews(spending, categories) : []
   const periodOptions = selected ? periodsOfMonths(months, selected.granularity) : []
+  // The Period the slices lead to. The Transactions page lists a month or a year, so a quarter's
+  // slices lead nowhere yet.
+  const targetPeriod = spending && selected && selected.granularity !== 'quarter' ? selected : null
+
+  function openSlice(slice: SliceView) {
+    if (targetPeriod) onOpenTransactions({ period: targetPeriod, categoryId: slice.categoryId })
+  }
 
   function choosePeriod(period: Period) {
     setErrorMessage(null)
@@ -196,6 +213,8 @@ export function Dashboard({ version }: { version: number }) {
                   {...RING}
                   stroke="#ffffff"
                   strokeWidth={2}
+                  onClick={(_sector, index) => openSlice(slices[index])}
+                  style={targetPeriod ? { cursor: 'pointer' } : undefined}
                 >
                   {slices.map((slice) => (
                     <Cell key={slice.key} fill={slice.colour} />
@@ -241,14 +260,19 @@ export function Dashboard({ version }: { version: number }) {
                 {slices.map((slice) => (
                   <tr key={slice.key}>
                     <td className="py-2 pr-3">
-                      <span className="flex items-center gap-2">
-                        <span
-                          aria-hidden="true"
-                          className="size-3 shrink-0 rounded-sm"
-                          style={{ backgroundColor: slice.colour }}
-                        />
-                        {slice.name}
-                      </span>
+                      {targetPeriod ? (
+                        <button
+                          type="button"
+                          onClick={() => openSlice(slice)}
+                          className="flex cursor-pointer items-center gap-2 text-left"
+                        >
+                          <LegendLabel slice={slice} />
+                        </button>
+                      ) : (
+                        <span className="flex items-center gap-2">
+                          <LegendLabel slice={slice} />
+                        </span>
+                      )}
                     </td>
                     <td className="py-2 pr-3 text-right whitespace-nowrap tabular-nums">
                       {formatAmount(slice.amount)}
@@ -266,6 +290,16 @@ export function Dashboard({ version }: { version: number }) {
 
       {/* Waits for the months, which decide the Spans it offers. */}
       {selected && <SpendingTrend months={months} categories={categories} />}
+    </>
+  )
+}
+
+// A legend row's swatch and Category name.
+function LegendLabel({ slice }: { slice: SliceView }) {
+  return (
+    <>
+      <span aria-hidden="true" className="size-3 shrink-0 rounded-sm" style={{ backgroundColor: slice.colour }} />
+      {slice.name}
     </>
   )
 }

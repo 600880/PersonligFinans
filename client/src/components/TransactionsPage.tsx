@@ -33,6 +33,13 @@ interface LoadedPeriod {
 // The Category filter's value: '' for all Categories, UNCATEGORIZED, or a Category's id.
 const UNCATEGORIZED = 'uncategorized'
 
+// Where the page opens when reached from the Dashboard: a month or a whole year, filtered to a
+// Category, or to Uncategorized when categoryId is null.
+export interface TransactionsTarget {
+  period: YearOrMonth
+  categoryId: number | null
+}
+
 function matchesCategory(transaction: Transaction, categoryFilter: string) {
   if (categoryFilter === '') return true
   if (categoryFilter === UNCATEGORIZED) return transaction.categoryId === null
@@ -45,12 +52,14 @@ function matchesSearch(transaction: Transaction, search: string) {
   return transaction.description.toLowerCase().includes(search.trim().toLowerCase())
 }
 
-export function TransactionsPage() {
+// Opens on the target when given, with the search empty, and otherwise on the latest month with
+// Transactions and all Categories.
+export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
   const [categories, setCategories] = useState<Category[]>([])
   const [monthsWithTransactions, setMonthsWithTransactions] = useState<TransactionMonth[]>([])
-  // The chosen month or whole year. Null until the months are loaded, which decide the month the
-  // page opens on.
-  const [selected, setSelected] = useState<YearOrMonth | null>(null)
+  // The chosen month or whole year. Without a target, null until the months are loaded, which
+  // decide the month the page opens on.
+  const [selected, setSelected] = useState<YearOrMonth | null>(target?.period ?? null)
   const [loaded, setLoaded] = useState<LoadedPeriod | null>(null)
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
@@ -60,7 +69,9 @@ export function TransactionsPage() {
   // The Transaction whose delete is waiting for confirmation, and whether that delete is being saved.
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<number | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
-  const [categoryFilter, setCategoryFilter] = useState('')
+  const [categoryFilter, setCategoryFilter] = useState(
+    !target ? '' : target.categoryId === null ? UNCATEGORIZED : String(target.categoryId),
+  )
   const [search, setSearch] = useState('')
 
   useEffect(() => {
@@ -70,7 +81,7 @@ export function TransactionsPage() {
         if (ignore) return
         setCategories(loadedCategories)
         setMonthsWithTransactions(loadedMonths)
-        setSelected({ granularity: 'month', ...(loadedMonths[0] ?? currentMonth()) })
+        setSelected((chosen) => chosen ?? { granularity: 'month', ...(loadedMonths[0] ?? currentMonth()) })
       })
       .catch(() => {
         if (!ignore) setErrorMessage(LOAD_ERROR)

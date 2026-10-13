@@ -4,7 +4,7 @@ import { CategoriesPage } from './components/CategoriesPage'
 import { Dashboard } from './components/Dashboard'
 import { ErrorMessage, StatusMessage } from './components/Messages'
 import { RulesPage } from './components/RulesPage'
-import { TransactionsPage } from './components/TransactionsPage'
+import { TransactionsPage, type TransactionsTarget } from './components/TransactionsPage'
 import { uploadBankStatement, type ImportedBankStatement } from './lib/api'
 import { formatNorwegianDate } from './lib/date'
 
@@ -31,6 +31,8 @@ function App() {
   const [rejections, setRejections] = useState<Rejection[]>([])
   // Bumped after new Transactions are saved, so the Dashboard reloads in place.
   const [dashboardVersion, setDashboardVersion] = useState(0)
+  // Where the Transactions page opens when reached from the Dashboard; undefined from the header.
+  const [transactionsTarget, setTransactionsTarget] = useState<TransactionsTarget | undefined>()
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   function clearHomeMessages() {
@@ -43,7 +45,13 @@ function App() {
   // are seen on return.
   function chooseView(next: View) {
     if (view === 'home' && next !== 'home') clearHomeMessages()
+    setTransactionsTarget(undefined)
     setView(next)
+  }
+
+  function openTransactions(target: TransactionsTarget) {
+    chooseView('transactions')
+    setTransactionsTarget(target)
   }
 
   function handleSaved() {
@@ -112,7 +120,7 @@ function App() {
 
       {view === 'transactions' ? (
         <main className="flex flex-col items-center px-6 py-10">
-          <TransactionsPage />
+          <TransactionsPage target={transactionsTarget} />
         </main>
       ) : view === 'categories' ? (
         <main className="flex flex-col items-center px-6 py-10">
@@ -176,7 +184,7 @@ function App() {
             </ErrorMessage>
           )}
 
-          <Dashboard version={dashboardVersion} />
+          <Dashboard version={dashboardVersion} onOpenTransactions={openTransactions} />
         </main>
       )}
 

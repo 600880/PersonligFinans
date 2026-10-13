@@ -2643,6 +2643,151 @@ describe('Dashboard', () => {
     })
   })
 
+  describe('Drilling down', () => {
+    const groceriesAndUncategorized = [
+      {
+        id: 5,
+        date: '2026-09-24',
+        description: 'Rema 1000',
+        amount: -120,
+        reference: null,
+        categoryId: 1,
+        locked: false,
+        imported: true,
+      },
+      {
+        id: 4,
+        date: '2026-09-03',
+        description: 'Ukjent butikk',
+        amount: -450.5,
+        reference: null,
+        categoryId: null,
+        locked: false,
+        imported: true,
+      },
+    ]
+
+    function requestedPeriods() {
+      return fetchMock.mock.calls.map(([url]) => url).filter((url) => url.startsWith('/api/transactions?'))
+    }
+
+    function listedDescriptions() {
+      return screen
+        .getAllByRole('row')
+        .slice(1)
+        .map((row) => within(row).getAllByRole('cell')[1].textContent)
+    }
+
+    // Waits for the Spending, which may still be loading for a Period just chosen.
+    function legendButton(name: string) {
+      return within(dashboard()).findByRole('button', { name })
+    }
+
+    async function openDashboard() {
+      months = [
+        { year: 2026, month: 9 },
+        { year: 2025, month: 12 },
+      ]
+      handleSpending = () => Response.json(septemberSpending)
+      handleListPeriod = () => Response.json(groceriesAndUncategorized)
+      const user = userEvent.setup()
+      render(<App />)
+      await waitFor(() => expect(legendRows()).toHaveLength(3))
+      return user
+    }
+
+    it("opens the Transactions page on the Period's month, filtered to the clicked Category", async () => {
+      const user = await openDashboard()
+      await user.selectOptions(screen.getByLabelText('Period'), 'December 2025')
+
+      await user.click(await legendButton('Groceries'))
+
+      expect(await screen.findByRole('cell', { name: 'Rema 1000' })).toBeInTheDocument()
+      expect(listedDescriptions()).toEqual(['Rema 1000'])
+      expect(screen.getByLabelText('Year')).toHaveValue('2025')
+      expect(screen.getByLabelText('Month')).toHaveValue('12')
+      expect(screen.getByLabelText('Category')).toHaveDisplayValue('Groceries')
+      expect(requestedPeriods()).toEqual(['/api/transactions?year=2025&month=12'])
+    })
+
+    it('opens the whole year for a year Period', async () => {
+      const user = await openDashboard()
+      await user.selectOptions(within(dashboard()).getByLabelText('Granularity'), 'Year')
+      await user.selectOptions(screen.getByLabelText('Period'), '2025')
+
+      await user.click(await legendButton('Groceries'))
+
+      expect(await screen.findByRole('cell', { name: 'Rema 1000' })).toBeInTheDocument()
+      expect(screen.getByLabelText('Year')).toHaveValue('2025')
+      expect(screen.getByLabelText('Month')).toHaveDisplayValue('All months')
+      expect(screen.getByLabelText('Category')).toHaveDisplayValue('Groceries')
+      expect(requestedPeriods()).toEqual(['/api/transactions?year=2025'])
+    })
+
+    it('opens the Uncategorized filter from the Uncategorized row, using the keyboard', async () => {
+      const user = await openDashboard()
+      ;(await legendButton('Uncategorized')).focus()
+
+      await user.keyboard('{Enter}')
+
+      expect(await screen.findByRole('cell', { name: 'Ukjent butikk' })).toBeInTheDocument()
+      expect(listedDescriptions()).toEqual(['Ukjent butikk'])
+      expect(screen.getByLabelText('Category')).toHaveDisplayValue('Uncategorized')
+    })
+
+    it('arrives with the search empty, even after searching before', async () => {
+      const user = await openDashboard()
+      await user.click(screen.getByRole('button', { name: 'Transactions' }))
+      await user.type(await screen.findByLabelText('Search'), 'rema')
+      await user.click(screen.getByRole('button', { name: 'PersonligFinans' }))
+
+      await user.click(await legendButton('Uncategorized'))
+
+      expect(await screen.findByRole('cell', { name: 'Ukjent butikk' })).toBeInTheDocument()
+      expect(screen.getByLabelText('Search')).toHaveValue('')
+    })
+
+    // The donut's slice in the Category's colour. The chart has a fixed size, so recharts draws its
+    // slices in jsdom without any size to measure.
+    function slice(colour: string) {
+      const sectors = [...dashboard().querySelectorAll('.recharts-pie-sector path')]
+      return sectors.find((sector) => sector.getAttribute('fill') === colour)!
+    }
+
+    it('opens the same Transactions from a donut slice, which shows a pointer, as from its legend row', async () => {
+      const user = await openDashboard()
+      await user.selectOptions(screen.getByLabelText('Period'), 'December 2025')
+      await legendButton('Groceries')
+      expect(slice('#2a78d6')).toHaveStyle({ cursor: 'pointer' })
+
+      await user.click(slice('#2a78d6'))
+
+      expect(await screen.findByRole('cell', { name: 'Rema 1000' })).toBeInTheDocument()
+      expect(listedDescriptions()).toEqual(['Rema 1000'])
+      expect(screen.getByLabelText('Year')).toHaveValue('2025')
+      expect(screen.getByLabelText('Month')).toHaveValue('12')
+      expect(screen.getByLabelText('Category')).toHaveDisplayValue('Groceries')
+    })
+
+    it('still opens on the latest month, all Categories and no search from the header', async () => {
+      const user = await openDashboard()
+      await user.selectOptions(screen.getByLabelText('Period'), 'December 2025')
+      await user.click(await legendButton('Groceries'))
+      await screen.findByRole('cell', { name: 'Rema 1000' })
+      await user.click(screen.getByRole('button', { name: 'PersonligFinans' }))
+
+      await user.click(screen.getByRole('button', { name: 'Transactions' }))
+
+      expect(await screen.findByRole('cell', { name: 'Ukjent butikk' })).toBeInTheDocument()
+      expect(listedDescriptions()).toEqual(['Rema 1000', 'Ukjent butikk'])
+      expect(screen.getByLabelText('Year')).toHaveValue('2026')
+      expect(screen.getByLabelText('Month')).toHaveValue('9')
+      expect(screen.getByLabelText('Category')).toHaveDisplayValue('All categories')
+      expect(screen.getByLabelText('Search')).toHaveValue('')
+      expect(requestedPeriods().at(-1)).toBe('/api/transactions?year=2026&month=9')
+    })
+  })
+
   describe('Trend', () => {
     function trend() {
       return screen.getByRole('region', { name: 'Spending trend' })
