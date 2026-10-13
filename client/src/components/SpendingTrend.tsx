@@ -79,7 +79,7 @@ function trendRows(monthly: MonthSpending[], categories: Category[] | null): Tre
 // its line on and off; Total starts on and the Categories off, and they stay as switched when the
 // Span changes. `months` are the months with Transactions, newest first, which decide the months
 // offered. Opens on the 12 months ending at the latest of them. When they are reloaded, after
-// Transactions are saved, it fetches its Spending again, keeping the Span if both its ends are still
+// Transactions are saved or on coming back to Home, it fetches its Spending again, keeping the Span if both its ends are still
 // offered and otherwise going back to the 12 months; its Granularity, Include transfers and
 // switched-on lines are kept. Has its own Include transfers, off at first and apart from the donut's.
 export function SpendingTrend({ months, categories }: { months: TransactionMonth[]; categories: Category[] | null }) {

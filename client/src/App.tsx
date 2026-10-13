@@ -29,7 +29,8 @@ function App() {
   const isUploading = uploadProgress !== null
   const [importMessage, setImportMessage] = useState<string | null>(null)
   const [rejections, setRejections] = useState<Rejection[]>([])
-  // Bumped after new Transactions are saved, so the Dashboard reloads in place.
+  // Bumped after new Transactions are saved, and on coming back to Home, so the Dashboard reloads in
+  // place.
   const [dashboardVersion, setDashboardVersion] = useState(0)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -40,9 +41,11 @@ function App() {
   }
 
   // Leaving Home clears its messages. An upload that finishes while away sets them again, so they
-  // are seen on return.
+  // are seen on return. Home stays mounted while away, so the Dashboard is kept as it was left, and
+  // coming back reloads it, so changes made on the other pages show up.
   function chooseView(next: View) {
     if (view === 'home' && next !== 'home') clearHomeMessages()
+    if (view !== 'home' && next === 'home') setDashboardVersion((version) => version + 1)
     setView(next)
   }
 
@@ -122,63 +125,64 @@ function App() {
         <main className="flex flex-col items-center px-6 py-10">
           <RulesPage />
         </main>
-      ) : (
-        <main className="flex flex-col items-center gap-4 px-6 py-10">
-          <div className="flex gap-3">
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={isUploading}
-              aria-busy={isUploading}
-              className="flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-5 py-2.5 text-sm font-medium text-slate-900 shadow-sm hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {isUploading && (
-                <span
-                  aria-hidden="true"
-                  className="size-4 animate-spin rounded-full border-2 border-slate-300 border-t-slate-900"
-                />
-              )}
-              {uploadProgress
-                ? `Categorizing… (${uploadProgress.finished}/${uploadProgress.picked})`
-                : 'Upload transactions'}
-            </button>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="application/pdf"
-              aria-label="Bank Statement PDF"
-              multiple
-              hidden
-              onChange={(event) => {
-                void handleFilesChosen([...(event.target.files ?? [])])
-                event.target.value = ''
-              }}
-            />
-            <button
-              type="button"
-              onClick={() => setIsModalOpen(true)}
-              className="rounded-lg border border-slate-300 bg-white px-5 py-2.5 text-sm font-medium text-slate-900 shadow-sm hover:bg-slate-100"
-            >
-              Add transaction
-            </button>
-          </div>
+      ) : null}
 
-          {(rejections.length === 0 || importMessage || showSavedMessage) && (
-            <StatusMessage message={showSavedMessage ? 'Transaction saved' : importMessage} />
-          )}
-          {rejections.length > 0 && (
-            <ErrorMessage>
-              {rejections.map((rejection, index) => (
-                <p key={index}>
-                  {rejection.filename}: {rejection.message}
-                </p>
-              ))}
-            </ErrorMessage>
-          )}
+      {/* Hidden rather than unmounted while away, so the Dashboard keeps its choices. */}
+      <main hidden={view !== 'home'} className="flex flex-col items-center gap-4 px-6 py-10">
+        <div className="flex gap-3">
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={isUploading}
+            aria-busy={isUploading}
+            className="flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-5 py-2.5 text-sm font-medium text-slate-900 shadow-sm hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isUploading && (
+              <span
+                aria-hidden="true"
+                className="size-4 animate-spin rounded-full border-2 border-slate-300 border-t-slate-900"
+              />
+            )}
+            {uploadProgress
+              ? `Categorizing… (${uploadProgress.finished}/${uploadProgress.picked})`
+              : 'Upload transactions'}
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="application/pdf"
+            aria-label="Bank Statement PDF"
+            multiple
+            hidden
+            onChange={(event) => {
+              void handleFilesChosen([...(event.target.files ?? [])])
+              event.target.value = ''
+            }}
+          />
+          <button
+            type="button"
+            onClick={() => setIsModalOpen(true)}
+            className="rounded-lg border border-slate-300 bg-white px-5 py-2.5 text-sm font-medium text-slate-900 shadow-sm hover:bg-slate-100"
+          >
+            Add transaction
+          </button>
+        </div>
 
-          <Dashboard version={dashboardVersion} />
-        </main>
-      )}
+        {(rejections.length === 0 || importMessage || showSavedMessage) && (
+          <StatusMessage message={showSavedMessage ? 'Transaction saved' : importMessage} />
+        )}
+        {rejections.length > 0 && (
+          <ErrorMessage>
+            {rejections.map((rejection, index) => (
+              <p key={index}>
+                {rejection.filename}: {rejection.message}
+              </p>
+            ))}
+          </ErrorMessage>
+        )}
+
+        <Dashboard version={dashboardVersion} />
+      </main>
 
       {isModalOpen && (
         <AddTransactionModal
