@@ -67,7 +67,8 @@ function toSliceViews(spending: Spending, categories: Category[]): SliceView[] {
 // latest month with Transactions and the Transfers Category left out. A new version, after
 // Transactions are saved or on coming back to home, reloads it in place, keeping the chosen Period
 // and Include transfers. Its choices last until the browser reloads, never longer. Clicking a slice
-// or its legend row opens that Category's Transactions in the Period.
+// or its legend row opens that Category's Transactions in the Period, as a trend dot does for its
+// point.
 export function Dashboard({
   version,
   onOpenTransactions,
@@ -297,7 +298,9 @@ export function Dashboard({
       </section>
 
       {/* Waits for the months, which decide the Spans it offers. */}
-      {selected && <SpendingTrend months={months} categories={categories} />}
+      {selected && (
+        <SpendingTrend months={months} categories={categories} onOpenTransactions={onOpenTransactions} />
+      )}
     </>
   )
 }

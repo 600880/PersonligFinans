@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 import { todayIsoDate } from './lib/date'
+import { monthOfDate } from './lib/month'
 
 const categories = [
   {
@@ -2265,6 +2266,35 @@ describe('Dashboard', () => {
     return fetchMock.mock.calls.map(([url]) => url).filter((url) => url.startsWith('/api/spending?'))
   }
 
+  // The Transactions page's requests for a month or a year.
+  function requestedPeriods() {
+    return fetchMock.mock.calls.map(([url]) => url).filter((url) => url.startsWith('/api/transactions?'))
+  }
+
+  function listedDescriptions() {
+    return screen
+      .getAllByRole('row')
+      .slice(1)
+      .map((row) => within(row).getAllByRole('cell')[1].textContent)
+  }
+
+  // The Transactions page's Year, Month and Category as shown.
+  function chosenFilters() {
+    return ['Year', 'Month', 'Category'].map(
+      (label) => (screen.getByLabelText(label) as HTMLSelectElement).selectedOptions[0].textContent,
+    )
+  }
+
+  // Serves the Transactions of the requested year or month out of `transactions`.
+  function serveTransactions(transactions: { date: string }[]) {
+    handleListPeriod = (year, month) =>
+      Response.json(
+        transactions.filter(
+          (t) => monthOfDate(t.date).year === year && (month === undefined || monthOfDate(t.date).month === month),
+        ),
+      )
+  }
+
   it("opens on the latest month with Transactions and shows its Spending by Category, largest first", async () => {
     months = [
       { year: 2026, month: 9 },
@@ -2763,27 +2793,9 @@ describe('Dashboard', () => {
       },
     ]
 
-    function requestedPeriods() {
-      return fetchMock.mock.calls.map(([url]) => url).filter((url) => url.startsWith('/api/transactions?'))
-    }
-
-    function listedDescriptions() {
-      return screen
-        .getAllByRole('row')
-        .slice(1)
-        .map((row) => within(row).getAllByRole('cell')[1].textContent)
-    }
-
     // Waits for the Spending, which may still be loading for a Period just chosen.
     function legendButton(name: string) {
       return within(dashboard()).findByRole('button', { name })
-    }
-
-    // The Transactions page's Year, Month and Category as shown.
-    function chosenFilters() {
-      return ['Year', 'Month', 'Category'].map(
-        (label) => (screen.getByLabelText(label) as HTMLSelectElement).selectedOptions[0].textContent,
-      )
     }
 
     async function openDashboard() {
@@ -2873,16 +2885,6 @@ describe('Dashboard', () => {
         { id: 12, date: '2025-11-14', description: 'Kiwi', categoryId: 1 },
         { id: 13, date: '2025-12-02', description: 'Ukjent kiosk', categoryId: null },
       ].map((t) => ({ ...t, amount: -100, reference: null, locked: false, imported: true }))
-
-      // Serves the Transactions of the requested year or month out of `transactions`.
-      function serveTransactions(transactions: typeof q4Transactions) {
-        handleListPeriod = (year, month) =>
-          Response.json(
-            transactions.filter(
-              (t) => t.date.startsWith(`${year}-`) && (month === undefined || Number(t.date.slice(5, 7)) === month),
-            ),
-          )
-      }
 
       async function openQuarter() {
         const user = await openDashboard()
@@ -3938,6 +3940,185 @@ describe('Dashboard', () => {
         await waitFor(() => expect(trendTable()[1][2]).toBe('2 000,00 kr'))
         expect(donutToggle()).not.toBeChecked()
         expect(requestedSpending()).toEqual(['/api/spending?year=2026&month=9'])
+      })
+    })
+
+    describe('Drilling down', () => {
+      // Every month from October 2025 to June 2026 is offered. Groceries has Transactions and Spending
+      // in November, January and March, Uncategorized in February and Other in March.
+      const transactions = [
+        { id: 21, date: '2025-11-05', description: 'Rema 1000', categoryId: 1 },
+        { id: 22, date: '2026-01-10', description: 'Kiwi', categoryId: 1 },
+        { id: 23, date: '2026-02-14', description: 'Ukjent kiosk', categoryId: null },
+        { id: 24, date: '2026-03-05', description: 'Meny', categoryId: 1 },
+        { id: 25, date: '2026-03-20', description: 'Elkjøp', categoryId: 13 },
+      ].map((t) => ({ ...t, amount: -100, reference: null, locked: false, imported: true }))
+
+      const GROCERIES_COLOUR = '#2a78d6'
+      const UNCATEGORIZED_COLOUR = '#94a3b8'
+      const TOTAL_COLOUR = '#1e293b'
+
+      // The trend's chart is as wide as its container, which jsdom can't measure, so recharts draws
+      // nothing without a size. The stubs are undone after each test: the global by the file's
+      // afterEach.
+      let measure: { mockRestore: () => void }
+      beforeEach(() => {
+        vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
+        measure = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
+          x: 0, y: 0, top: 0, left: 0, right: 600, bottom: 280, width: 600, height: 280, toJSON: () => ({}),
+        })
+        months = [
+          { year: 2026, month: 6 },
+          { year: 2025, month: 10 },
+        ]
+        handleMonthlySpending = (from, to) =>
+          Response.json(
+            monthlySpending(from, to, {
+              '2025-11': [{ categoryId: 1, amount: 100 }],
+              '2026-1': [{ categoryId: 1, amount: 100 }],
+              '2026-2': [{ categoryId: null, amount: 100 }],
+              '2026-3': [
+                { categoryId: 1, amount: 100 },
+                { categoryId: 13, amount: 100 },
+              ],
+            }),
+          )
+        serveTransactions(transactions)
+      })
+
+      afterEach(() => measure.mockRestore())
+
+      // The line's dots in the given colour, one per point in order.
+      function dots(colour: string) {
+        const all = [...trend().querySelectorAll('.recharts-line-dot')]
+        return all.filter((dot) => dot.getAttribute('fill') === colour)
+      }
+
+      // Clicks the chart at the given spot, after moving the mouse there as a real click would.
+      async function clickChart(clientX: number, clientY: number) {
+        const wrapper = trend().querySelector('.recharts-wrapper')!
+        await act(async () => {
+          wrapper.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX, clientY }))
+          await new Promise((resolve) => setTimeout(resolve, 100))
+          wrapper.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX, clientY }))
+          await new Promise((resolve) => setTimeout(resolve, 100))
+        })
+      }
+
+      // Clicks the chart `below` pixels under the dot.
+      function clickNear(dot: Element, below = 0) {
+        return clickChart(Number(dot.getAttribute('cx')), Number(dot.getAttribute('cy')) + below)
+      }
+
+      // Waits for the trend, then switches the named lines on, or Total off.
+      async function openTrend(...lines: string[]) {
+        const user = userEvent.setup()
+        render(<App />)
+        await waitFor(() => expect(trendTable()).toHaveLength(5))
+        for (const line of lines) await user.click(within(trend()).getByRole('checkbox', { name: line }))
+        return user
+      }
+
+      it("opens a Category's Transactions in the month of the dot clicked, and the chart shows a pointer", async () => {
+        // Total is switched off, since it lies on the Groceries line in January and wins the click.
+        await openTrend('Total', 'Groceries')
+        await waitFor(() => expect(dots(GROCERIES_COLOUR)).toHaveLength(9))
+        expect(trend().querySelector('.recharts-wrapper')).toHaveStyle({ cursor: 'pointer' })
+
+        await clickNear(dots(GROCERIES_COLOUR)[3])
+
+        expect(await screen.findByRole('cell', { name: 'Kiwi' })).toBeInTheDocument()
+        expect(listedDescriptions()).toEqual(['Kiwi'])
+        expect(chosenFilters()).toEqual(['2026', 'January', 'Groceries'])
+        expect(requestedPeriods()).toEqual(['/api/transactions?year=2026&month=1'])
+      })
+
+      it("opens all Categories' Transactions from a dot on the Total line", async () => {
+        await openTrend()
+        await waitFor(() => expect(dots(TOTAL_COLOUR)).toHaveLength(9))
+
+        await clickNear(dots(TOTAL_COLOUR)[5])
+
+        expect(await screen.findByRole('cell', { name: 'Meny' })).toBeInTheDocument()
+        expect(listedDescriptions()).toEqual(['Meny', 'Elkjøp'])
+        expect(chosenFilters()).toEqual(['2026', 'March', 'All categories'])
+      })
+
+      it('opens the whole year from a year dot, though the Span covers only part of it', async () => {
+        const user = await openTrend('Total', 'Groceries')
+        await user.selectOptions(within(trend()).getByLabelText('Granularity'), 'Year')
+        await waitFor(() => expect(dots(GROCERIES_COLOUR)).toHaveLength(2))
+
+        await clickNear(dots(GROCERIES_COLOUR)[0])
+
+        expect(await screen.findByRole('cell', { name: 'Rema 1000' })).toBeInTheDocument()
+        expect(chosenFilters()).toEqual(['2025', 'All months', 'Groceries'])
+        expect(requestedPeriods()).toEqual(['/api/transactions?year=2025'])
+      })
+
+      describe('a quarter dot', () => {
+        // Waits for the trend, then shows it by Quarter over the Span from `from` to `to`.
+        async function openQuarters(from: string, to: string) {
+          const user = await openTrend('Groceries')
+          await user.selectOptions(within(trend()).getByLabelText('From'), from)
+          await user.selectOptions(within(trend()).getByLabelText('To'), to)
+          await user.selectOptions(within(trend()).getByLabelText('Granularity'), 'Quarter')
+          await waitFor(() => expect(dots(GROCERIES_COLOUR)).toHaveLength(2))
+        }
+
+        it('counts only the months inside the Span when it starts within the quarter', async () => {
+          await openQuarters('02.2026', '06.2026')
+
+          await clickNear(dots(GROCERIES_COLOUR)[0])
+
+          expect(await screen.findByRole('cell', { name: 'Meny' })).toBeInTheDocument()
+          expect(chosenFilters()).toEqual(['2026', 'March', 'Groceries'])
+          expect(requestedPeriods()).toEqual(['/api/transactions?year=2026', '/api/transactions?year=2026&month=3'])
+        })
+
+        it('counts only the months inside the Span when it ends within the quarter', async () => {
+          serveTransactions(transactions.filter((t) => t.description !== 'Kiwi'))
+          await openQuarters('10.2025', '02.2026')
+
+          await clickNear(dots(GROCERIES_COLOUR)[1])
+
+          expect(await screen.findByText('No transactions match')).toBeInTheDocument()
+          expect(chosenFilters()).toEqual(['2026', 'January', 'Groceries'])
+        })
+
+        it("opens the quarter's earliest month inside the Span when none has matching Transactions", async () => {
+          serveTransactions(transactions.filter((t) => t.description !== 'Meny'))
+          await openQuarters('02.2026', '06.2026')
+
+          await clickNear(dots(GROCERIES_COLOUR)[0])
+
+          expect(await screen.findByText('No transactions match')).toBeInTheDocument()
+          expect(chosenFilters()).toEqual(['2026', 'February', 'Groceries'])
+        })
+      })
+
+      it('opens the Category of the line whose dot is clicked, when several lines are on', async () => {
+        await openTrend('Total', 'Groceries', 'Uncategorized')
+        await waitFor(() => expect(dots(UNCATEGORIZED_COLOUR)).toHaveLength(9))
+
+        await clickNear(dots(UNCATEGORIZED_COLOUR)[4])
+
+        expect(await screen.findByRole('cell', { name: 'Ukjent kiosk' })).toBeInTheDocument()
+        expect(listedDescriptions()).toEqual(['Ukjent kiosk'])
+        expect(chosenFilters()).toEqual(['2026', 'February', 'Uncategorized'])
+      })
+
+      it.each([
+        ['just below the Groceries line', GROCERIES_COLOUR, 12, 'Groceries'],
+        ['just below the Total line', TOTAL_COLOUR, 12, 'All categories'],
+      ])('opens the line nearest a click away from the dots, %s', async (_case, colour, below, category) => {
+        await openTrend('Groceries')
+        await waitFor(() => expect(dots(colour)).toHaveLength(9))
+
+        await clickNear(dots(colour)[5], below)
+
+        expect(await screen.findByRole('cell', { name: 'Meny' })).toBeInTheDocument()
+        expect(chosenFilters()).toEqual(['2026', 'March', category])
       })
     })
   })

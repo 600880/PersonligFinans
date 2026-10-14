@@ -3,8 +3,9 @@ import type { Transaction } from './api'
 // The Category filter's value: '' for all Categories, UNCATEGORIZED, or a Category's id.
 export const UNCATEGORIZED = 'uncategorized'
 
-// The filter for one Category, or for Uncategorized when categoryId is null.
-export function categoryFilterOf(categoryId: number | null) {
+// The filter for one Category, for Uncategorized when categoryId is null, or for all Categories.
+export function categoryFilterOf(categoryId: number | null | 'all') {
+  if (categoryId === 'all') return ''
   return categoryId === null ? UNCATEGORIZED : String(categoryId)
 }
 

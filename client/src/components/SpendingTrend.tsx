@@ -1,5 +1,16 @@
-import { useEffect, useId, useMemo, useState } from 'react'
-import { CartesianGrid, Line, LineChart, Tooltip, XAxis, YAxis } from 'recharts'
+import { useEffect, useId, useMemo, useRef, useState, type MouseEvent } from 'react'
+import {
+  CartesianGrid,
+  getRelativeCoordinate,
+  Line,
+  LineChart,
+  Tooltip,
+  useYAxisInverseScale,
+  XAxis,
+  YAxis,
+  type InverseScaleFunction,
+  type MouseHandlerDataParam,
+} from 'recharts'
 import { fetchMonthlySpending, type Category, type MonthSpending, type TransactionMonth } from '../lib/api'
 import { formatAmount } from '../lib/amount'
 import { categoryColour } from '../lib/categoryColours'
@@ -27,6 +38,7 @@ import {
 } from '../lib/trend'
 import { GranularitySelect } from './GranularitySelect'
 import { ErrorMessage } from './Messages'
+import type { TransactionsTarget } from './TransactionsPage'
 
 const LOAD_ERROR = 'Could not load the Spending trend.'
 
@@ -52,22 +64,33 @@ interface LoadedTrend {
   monthly: MonthSpending[] | null
 }
 
-// One row of the table, and the line it switches on.
+// One row of the table, and the line it switches on. Its dots open the Transactions of its Category,
+// of Uncategorized when categoryId is null, or of all Categories for Total.
 interface TrendRow {
   key: string
+  categoryId: number | null | 'all'
   name: string
   colour: string
+}
+
+// Hands the y axis's conversion from pixels to NOK to `onScale`, since only the chart's own
+// children can reach it.
+function YAxisInverseScale({ onScale }: { onScale: (scale: InverseScaleFunction | undefined) => void }) {
+  const scale = useYAxisInverseScale()
+  useEffect(() => onScale(scale))
+  return null
 }
 
 // The Total row, then one per Category with Spending in the Span, largest first. The Categories wait
 // for their names, so a Category is never shown without its name.
 function trendRows(monthly: MonthSpending[], categories: Category[] | null): TrendRow[] {
-  const total = { key: TOTAL_ROW, name: 'Total', colour: TOTAL_COLOUR }
+  const total = { key: TOTAL_ROW, categoryId: 'all' as const, name: 'Total', colour: TOTAL_COLOUR }
   if (!categories) return [total]
   return [
     total,
     ...trendCategories(monthly).map((categoryId) => ({
       key: categoryRow(categoryId),
+      categoryId,
       name: categoryName(categoryId, categories),
       colour: categoryColour(categoryId, categories),
     })),
@@ -82,8 +105,17 @@ function trendRows(monthly: MonthSpending[], categories: Category[] | null): Tre
 // Transactions are saved or on coming back to home, it fetches its Spending again, keeping the Span
 // if both its ends are still offered and otherwise going back to the 12 months; its Granularity,
 // Include transfers and switched-on lines are kept. Has its own Include transfers, off at first and
-// apart from the donut's.
-export function SpendingTrend({ months, categories }: { months: TransactionMonth[]; categories: Category[] | null }) {
+// apart from the donut's. Clicking the chart opens the Transactions of the line nearest the click,
+// in the Period of the point clicked.
+export function SpendingTrend({
+  months,
+  categories,
+  onOpenTransactions,
+}: {
+  months: TransactionMonth[]
+  categories: Category[] | null
+  onOpenTransactions: (target: TransactionsTarget) => void
+}) {
   const headingId = useId()
   const offered = useMemo(() => offeredMonths(months), [months])
   const [granularity, setGranularity] = useState<Granularity>('month')
@@ -122,6 +154,26 @@ export function SpendingTrend({ months, categories }: { months: TransactionMonth
   const last = points[points.length - 1]
   const rows = current?.monthly ? trendRows(current.monthly, categories) : []
   const drawn = rows.filter((row) => switchedOn.has(row.key))
+  const yValueAt = useRef<InverseScaleFunction | undefined>(undefined)
+
+  // Opens the Transactions of the drawn line nearest the click, in the Period of the point clicked;
+  // Total wins a tie, being drawn on top. A quarter only looks for them in its months inside the
+  // Span.
+  function openNearestLine(
+    { activeTooltipIndex }: MouseHandlerDataParam,
+    event: MouseEvent<SVGGraphicsElement>,
+  ) {
+    const point = activeTooltipIndex == null ? undefined : points[Number(activeTooltipIndex)]
+    if (!point || drawn.length === 0) return
+    const clicked = Number(yValueAt.current?.(getRelativeCoordinate(event).relativeY))
+    const distance = (row: TrendRow) => Math.abs(point.values[row.key] - clicked)
+    const nearest = drawn.reduce((best, row) => (distance(row) < distance(best) ? row : best))
+    onOpenTransactions({
+      period: point.period,
+      categoryId: nearest.categoryId,
+      allowedMonths: current?.monthly ?? [],
+    })
+  }
 
   function switchRow(key: string, on: boolean) {
     setSwitchedOn((keys) => {
@@ -205,8 +257,10 @@ export function SpendingTrend({ months, categories }: { months: TransactionMonth
                 data={points}
                 margin={{ top: 8, right: 16, bottom: 8, left: 16 }}
                 className="mt-6"
-                style={{ width: '100%', height: CHART_HEIGHT }}
+                style={{ width: '100%', height: CHART_HEIGHT, cursor: drawn.length > 0 ? 'pointer' : undefined }}
+                onClick={openNearestLine}
               >
+                <YAxisInverseScale onScale={(scale) => (yValueAt.current = scale)} />
                 <CartesianGrid stroke="#e2e8f0" vertical={false} />
                 <XAxis dataKey="label" tick={{ fontSize: 12 }} />
                 <YAxis

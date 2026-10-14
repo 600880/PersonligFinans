@@ -1,7 +1,7 @@
 import type { MonthSpending } from './api'
 import { groupMonths } from './grouping'
 import { percent } from './percent'
-import type { Granularity } from './period'
+import type { Granularity, Period } from './period'
 
 // Identifies the Total row of the trend, and its line.
 export const TOTAL_ROW = 'total'
@@ -15,6 +15,7 @@ export function categoryRow(categoryId: number | null): string {
 // Span as NOK per month, keyed by row. `monthsCovered` is how many of the `monthsInPeriod` months of
 // its Period fall inside the Span.
 export interface TrendPoint {
+  period: Period
   key: string
   label: string
   monthsCovered: number
@@ -46,7 +47,8 @@ export function trendPoints(monthly: MonthSpending[], granularity: Granularity):
       sums[TOTAL_ROW] += amount
     }
     const values = Object.fromEntries(rows.map((row) => [row, sums[row] / monthsCovered]))
-    return { key: group.key, label: group.label, monthsCovered, monthsInPeriod: group.monthsInPeriod, values }
+    const { period, key, label, monthsInPeriod } = group
+    return { period, key, label, monthsCovered, monthsInPeriod, values }
   })
 }
 

@@ -11,11 +11,11 @@ import {
   type YearOrMonth,
 } from '../lib/api'
 import { categoryFilterOf, matchesCategory, UNCATEGORIZED } from '../lib/categoryFilter'
-import { monthsOfQuarter, quarterMonth } from '../lib/drillDown'
 import { formatAmount } from '../lib/amount'
 import { formatNorwegianDate } from '../lib/date'
 import { currentMonth, MONTH_NAMES } from '../lib/month'
 import { periodLabel, periodValue, type Period } from '../lib/period'
+import { firstMonthWithTransactions, monthsOfQuarter } from '../lib/quarter'
 import { ErrorMessage, StatusMessage } from './Messages'
 
 const LOAD_ERROR = 'Could not load the transactions.'
@@ -32,21 +32,26 @@ interface LoadedPeriod {
   transactions: Transaction[]
 }
 
-// Where the page opens when reached from the Dashboard, filtered to a Category, or to Uncategorized
-// when categoryId is null: a month, a whole year, or a quarter's first month with Transactions in
-// that Category.
+// Where the page opens when reached from the Dashboard, filtered to a Category, to Uncategorized
+// when categoryId is null, or to all Categories: a month, a whole year, or a quarter's first month
+// with Transactions in that Category. A quarter looks only at its months among `allowedMonths`, such
+// as the months inside the trend's Span, or at all three when not given.
 export interface TransactionsTarget {
   period: Period
-  categoryId: number | null
+  categoryId: number | null | 'all'
+  allowedMonths?: TransactionMonth[]
 }
 
-// The month a quarter target opens on, found in its year's Transactions; null for any other target.
-async function quarterTargetMonth(target?: TransactionsTarget): Promise<YearOrMonth | null> {
-  if (target?.period.granularity !== 'quarter') return null
-  const quarter = target.period
-  const transactions = await fetchTransactions({ granularity: 'year', year: quarter.year })
+// The month or year a target opens on; for a quarter, a month found in its year's Transactions.
+// Null without a target.
+async function openedPeriod(target?: TransactionsTarget): Promise<YearOrMonth | null> {
+  if (!target) return null
+  const { period } = target
+  if (period.granularity !== 'quarter') return period
+  const transactions = await fetchTransactions({ granularity: 'year', year: period.year })
   const filter = categoryFilterOf(target.categoryId)
-  return { granularity: 'month', ...quarterMonth(quarter, monthsOfQuarter(quarter), filter, transactions) }
+  const allowed = target.allowedMonths ?? monthsOfQuarter(period)
+  return { granularity: 'month', ...firstMonthWithTransactions(period, allowed, filter, transactions) }
 }
 
 // Whether the description contains the search text, ignoring case and the text's surrounding spaces.
@@ -60,11 +65,9 @@ function matchesSearch(transaction: Transaction, search: string) {
 export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
   const [categories, setCategories] = useState<Category[]>([])
   const [monthsWithTransactions, setMonthsWithTransactions] = useState<TransactionMonth[]>([])
-  // The chosen month or whole year. Null until loaded when there's no target, or when it is a
-  // quarter, whose month is found once loaded.
-  const [selected, setSelected] = useState<YearOrMonth | null>(
-    target && target.period.granularity !== 'quarter' ? target.period : null,
-  )
+  // The chosen month or whole year. Null until loaded, since the target's, or else the latest month
+  // with Transactions, decides the one the page opens on.
+  const [selected, setSelected] = useState<YearOrMonth | null>(null)
   const [loaded, setLoaded] = useState<LoadedPeriod | null>(null)
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
@@ -78,19 +81,17 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
     target ? categoryFilterOf(target.categoryId) : '',
   )
   const [search, setSearch] = useState('')
-  // Kept from mount, so a quarter target's month is looked for once.
+  // Kept from mount, so the target is looked at once.
   const [openingTarget] = useState(target)
 
   useEffect(() => {
     let ignore = false
-    Promise.all([fetchCategories(), fetchTransactionMonths(), quarterTargetMonth(openingTarget)])
-      .then(([loadedCategories, loadedMonths, targetMonth]) => {
+    Promise.all([fetchCategories(), fetchTransactionMonths(), openedPeriod(openingTarget)])
+      .then(([loadedCategories, loadedMonths, opened]) => {
         if (ignore) return
         setCategories(loadedCategories)
         setMonthsWithTransactions(loadedMonths)
-        setSelected(
-          (chosen) => chosen ?? targetMonth ?? { granularity: 'month', ...(loadedMonths[0] ?? currentMonth()) },
-        )
+        setSelected(opened ?? { granularity: 'month', ...(loadedMonths[0] ?? currentMonth()) })
       })
       .catch(() => {
         if (!ignore) setErrorMessage(LOAD_ERROR)
