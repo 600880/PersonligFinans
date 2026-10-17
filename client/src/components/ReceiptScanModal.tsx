@@ -3,6 +3,9 @@ import type { ReceiptSuggestion } from '../lib/api'
 import { emptyTransactionForm } from '../lib/transactionForm'
 import { TransactionForm } from './TransactionForm'
 
+const smallButtonClass =
+  'rounded-lg px-2 py-1 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-300'
+
 // One Receipt of a Receipt scan: its image, a browser-local URL showing it, and the server's
 // reading of it. The URL and the reading are made as soon as the Receipt is picked, so that every
 // Receipt is read at once. The URL is released once the Receipt is saved or skipped.
@@ -17,19 +20,45 @@ interface ReceiptScanModalProps {
   // Called for each Transaction the server records, including one whose Save finishes after its
   // Receipt was skipped or the window closed.
   onSaved: () => void
-  // Called once the last Receipt has been saved or skipped.
-  onFinished: () => void
+  // Called once the window closes: after the last Receipt has been saved or skipped, or once the
+  // remaining Receipts have been discarded.
+  onClosed: () => void
 }
 
 // Works through the Receipts one at a time, each saved as a manually-entered Transaction or
-// skipped. There is no going back.
-export function ReceiptScanModal({ receipts, onSaved, onFinished }: ReceiptScanModalProps) {
+// skipped. There is no going back. Closing partway, once confirmed, discards the remaining
+// Receipts and keeps the Transactions already saved.
+export function ReceiptScanModal({ receipts, onSaved, onClosed }: ReceiptScanModalProps) {
   const headingId = useId()
+  const confirmationId = useId()
   const [position, setPosition] = useState(0)
+  // Whether closing is waiting for the discard of the remaining Receipts to be confirmed. The step
+  // stays mounted meanwhile, so Keep going finds its form as it was left.
+  const [isConfirmingClose, setIsConfirmingClose] = useState(false)
+  const closeButtonRef = useRef<HTMLButtonElement>(null)
+  // Set once the remaining Receipts are discarded, so that a Save finishing afterwards never moves
+  // on, which would close the window again, possibly on a later scan.
+  const isDiscarded = useRef(false)
+  // The current Receipt and every one after it.
+  const remaining = receipts.length - position
 
   function moveOn() {
-    if (position + 1 === receipts.length) onFinished()
+    if (isDiscarded.current) return
+    if (position + 1 === receipts.length) onClosed()
     else setPosition(position + 1)
+  }
+
+  // Releases the previews here rather than when the window unmounts, since StrictMode unmounts it
+  // once on mounting, while the previews are still on screen.
+  function discard() {
+    isDiscarded.current = true
+    for (const receipt of receipts.slice(position)) URL.revokeObjectURL(receipt.previewUrl)
+    onClosed()
+  }
+
+  function keepGoing() {
+    setIsConfirmingClose(false)
+    closeButtonRef.current?.focus()
   }
 
   return (
@@ -38,17 +67,52 @@ export function ReceiptScanModal({ receipts, onSaved, onFinished }: ReceiptScanM
         role="dialog"
         aria-modal="true"
         aria-labelledby={headingId}
-        className="flex max-h-[calc(100vh-2rem)] w-full max-w-4xl gap-6 rounded-xl bg-white p-6 shadow-xl"
+        className="flex max-h-[calc(100vh-2rem)] w-full max-w-4xl flex-col rounded-xl bg-white shadow-xl"
       >
-        <ReceiptStep
-          // A new step for each Receipt, so its form starts over.
-          key={position}
-          receipt={receipts[position]}
-          heading={`Receipt ${position + 1} of ${receipts.length}`}
-          headingId={headingId}
-          onSaved={onSaved}
-          onDone={moveOn}
-        />
+        <div className="flex justify-end px-3 pt-3">
+          <button
+            ref={closeButtonRef}
+            type="button"
+            aria-label="Close"
+            onClick={() => setIsConfirmingClose(true)}
+            className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+          >
+            <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" className="h-5 w-5">
+              <path d="M3.72 3.72a.75.75 0 0 1 1.06 0L8 6.94l3.22-3.22a.75.75 0 1 1 1.06 1.06L9.06 8l3.22 3.22a.75.75 0 1 1-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 0 1-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 0 1 0-1.06Z" />
+            </svg>
+          </button>
+        </div>
+
+        {isConfirmingClose && (
+          <div
+            role="alertdialog"
+            aria-labelledby={confirmationId}
+            className="mx-6 flex flex-wrap items-center justify-end gap-2 rounded-lg bg-red-50 px-3 py-2 text-sm"
+          >
+            <span id={confirmationId} className="mr-auto text-red-800">
+              Discard the remaining {remaining} receipt{remaining === 1 ? '' : 's'}?
+            </span>
+            <button type="button" onClick={discard} className={smallButtonClass}>
+              Discard
+            </button>
+            <button type="button" autoFocus onClick={keepGoing} className={smallButtonClass}>
+              Keep going
+            </button>
+          </div>
+        )}
+
+        {/* Out of reach while closing waits for its confirmation. */}
+        <div inert={isConfirmingClose} className="flex min-h-0 gap-6 px-6 pt-2 pb-6">
+          <ReceiptStep
+            // A new step for each Receipt, so its form starts over.
+            key={position}
+            receipt={receipts[position]}
+            heading={`Receipt ${position + 1} of ${receipts.length}`}
+            headingId={headingId}
+            onSaved={onSaved}
+            onDone={moveOn}
+          />
+        </div>
       </div>
     </div>
   )

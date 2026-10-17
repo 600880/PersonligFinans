@@ -4629,4 +4629,109 @@ describe('Scan receipts', () => {
 
     expect(screen.getByRole('dialog', { name: 'Receipt 1 of 1' })).toBeInTheDocument()
   })
+
+  describe('leaving partway', () => {
+    function confirmation() {
+      return screen.queryByRole('alertdialog')
+    }
+
+    it('asks before discarding the remaining Receipts, and Keep going returns to the Receipt as it was', async () => {
+      const user = await scanUntilFormIsReady([kiwi, rema, narvesen])
+      await user.click(screen.getByRole('button', { name: 'Skip' }))
+      await formIsReady('Receipt 2 of 3')
+      await fillValidForm(user)
+
+      await user.click(screen.getByRole('button', { name: 'Close' }))
+
+      expect(screen.getByRole('alertdialog', { name: 'Discard the remaining 2 receipts?' })).toBeInTheDocument()
+      expect(within(confirmation()!).getByRole('button', { name: 'Discard' })).toBeInTheDocument()
+
+      await user.click(within(confirmation()!).getByRole('button', { name: 'Keep going' }))
+
+      expect(confirmation()).not.toBeInTheDocument()
+      const dialog = screen.getByRole('dialog', { name: 'Receipt 2 of 3' })
+      expect(within(dialog).getByLabelText(/description/i)).toHaveValue('Rema 1000')
+      expect(within(dialog).getByLabelText(/^out$/i)).toHaveValue(249.9)
+      expect(within(dialog).getByLabelText(/category/i)).toHaveValue('1')
+      expect(within(dialog).getByRole('img', { name: 'Receipt' })).toHaveAttribute('src', 'blob:rema.png')
+    })
+
+    it('discards the remaining Receipts, keeping and counting what was saved, and reloads the Dashboard', async () => {
+      const posted: unknown[] = []
+      handlePost = (body) => {
+        posted.push(body)
+        return Response.json({ id: 1 }, { status: 201 })
+      }
+      const user = await scanUntilFormIsReady([kiwi, rema, narvesen])
+      const before = monthsRequests()
+      await fillValidForm(user)
+      await user.click(screen.getByRole('button', { name: /^save$/i }))
+      await formIsReady('Receipt 2 of 3')
+      await user.type(screen.getByLabelText(/description/i), 'Rema')
+
+      await user.click(screen.getByRole('button', { name: 'Close' }))
+      await user.click(within(confirmation()!).getByRole('button', { name: 'Discard' }))
+
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+      expect(posted).toHaveLength(1)
+      expect(screen.getByRole('status')).toHaveTextContent(/^1 transaction saved$/)
+      await waitFor(() => expect(monthsRequests()).toBeGreaterThan(before))
+      expect(releasedUrls).toEqual(['blob:kiwi.jpg', 'blob:rema.png', 'blob:narvesen.webp'])
+    })
+
+    it('says none were saved, and leaves the Dashboard as it was, when nothing was saved before Discard', async () => {
+      const user = await scanUntilFormIsReady([kiwi, rema])
+      const before = monthsRequests()
+
+      await user.click(screen.getByRole('button', { name: 'Close' }))
+      expect(screen.getByRole('alertdialog', { name: 'Discard the remaining 2 receipts?' })).toBeInTheDocument()
+      await user.click(within(confirmation()!).getByRole('button', { name: 'Discard' }))
+
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+      expect(screen.getByRole('status')).toHaveTextContent('No transactions saved')
+      expect(monthsRequests()).toBe(before)
+      expect(releasedUrls).toEqual(['blob:kiwi.jpg', 'blob:rema.png'])
+    })
+
+    it('asks about the last Receipt in the singular', async () => {
+      const user = await scanUntilFormIsReady([kiwi, rema])
+      await user.click(screen.getByRole('button', { name: 'Skip' }))
+
+      await user.click(screen.getByRole('button', { name: 'Close' }))
+
+      expect(screen.getByRole('alertdialog', { name: 'Discard the remaining 1 receipt?' })).toBeInTheDocument()
+    })
+
+    it('counts a Save that finishes after the remaining Receipts were discarded', async () => {
+      let respond: (response: Response) => void = () => {}
+      handlePost = () => new Promise<Response>((resolve) => (respond = resolve)) as unknown as Response
+      const user = await scanUntilFormIsReady([kiwi, rema])
+      await fillValidForm(user)
+      await user.click(screen.getByRole('button', { name: /^save$/i }))
+      await user.click(screen.getByRole('button', { name: 'Close' }))
+      await user.click(within(confirmation()!).getByRole('button', { name: 'Discard' }))
+      expect(screen.getByRole('status')).toHaveTextContent('No transactions saved')
+
+      await act(async () => respond(Response.json({ id: 1 }, { status: 201 })))
+
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+      expect(screen.getByRole('status')).toHaveTextContent('1 transaction saved')
+    })
+
+    it('leaves a later scan alone when a Save from an earlier one finishes after it was discarded', async () => {
+      let respond: (response: Response) => void = () => {}
+      handlePost = () => new Promise<Response>((resolve) => (respond = resolve)) as unknown as Response
+      const user = await scanUntilFormIsReady([kiwi])
+      await fillValidForm(user)
+      await user.click(screen.getByRole('button', { name: /^save$/i }))
+      await user.click(screen.getByRole('button', { name: 'Close' }))
+      await user.click(within(confirmation()!).getByRole('button', { name: 'Discard' }))
+      await user.upload(screen.getByLabelText(/^receipts$/i), [rema, narvesen])
+      await formIsReady('Receipt 1 of 2')
+
+      await act(async () => respond(Response.json({ id: 1 }, { status: 201 })))
+
+      expect(screen.getByRole('dialog', { name: 'Receipt 1 of 2' })).toBeInTheDocument()
+    })
+  })
 })
