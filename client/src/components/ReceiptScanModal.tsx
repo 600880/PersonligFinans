@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react'
+import { useId, useRef, useState, type KeyboardEvent } from 'react'
 import type { ReceiptSuggestion } from '../lib/api'
 import { emptyTransactionForm } from '../lib/transactionForm'
 import { TransactionForm } from './TransactionForm'
@@ -160,15 +160,15 @@ function ReceiptStep({ receipt, heading, headingId, onSaved, onDone }: ReceiptSt
         />
       </div>
 
-      <ReceiptImage previewUrl={receipt.previewUrl} />
+      <ReceiptPreview previewUrl={receipt.previewUrl} />
     </>
   )
 }
 
 // The Receipt beside its form, or above it on a narrow screen, scrolling within its panel when tall
 // so the form stays in view. A click shows it full-screen, where a click or Escape closes it again.
-// The window has no Escape of its own, so that Escape only ever closes this view.
-function ReceiptImage({ previewUrl }: { previewUrl: string }) {
+// The full-screen view keeps the keyboard to itself, so its Escape never reaches the window.
+function ReceiptPreview({ previewUrl }: { previewUrl: string }) {
   const [isFullScreen, setIsFullScreen] = useState(false)
   const showButtonRef = useRef<HTMLButtonElement>(null)
 
@@ -177,14 +177,14 @@ function ReceiptImage({ previewUrl }: { previewUrl: string }) {
     showButtonRef.current?.focus()
   }
 
-  useEffect(() => {
-    if (!isFullScreen) return
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === 'Escape') closeFullScreen()
+  function handleFullScreenKeyDown(event: KeyboardEvent) {
+    // The view covers the whole screen and is its only control, so Tab stays on it.
+    if (event.key === 'Tab') event.preventDefault()
+    if (event.key === 'Escape') {
+      event.stopPropagation()
+      closeFullScreen()
     }
-    document.addEventListener('keydown', handleKeyDown)
-    return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [isFullScreen])
+  }
 
   return (
     <>
@@ -208,6 +208,7 @@ function ReceiptImage({ previewUrl }: { previewUrl: string }) {
           aria-label="Close the full-screen Receipt"
           autoFocus
           onClick={closeFullScreen}
+          onKeyDown={handleFullScreenKeyDown}
           className="fixed inset-0 z-10 flex cursor-zoom-out items-center justify-center bg-slate-900/90 p-4"
         >
           <img src={previewUrl} alt="Receipt" className="max-h-full max-w-full object-contain" />

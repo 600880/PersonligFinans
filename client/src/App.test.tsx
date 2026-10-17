@@ -4656,7 +4656,7 @@ describe('Scan receipts', () => {
       expect(within(dialog).getByRole('img', { name: 'Receipt' })).toHaveAttribute('src', 'blob:rema.png')
     })
 
-    it('discards the remaining Receipts, keeping and counting what was saved, and reloads the Dashboard', async () => {
+    it('discards the remaining Receipts, keeping and counting what was saved, with the Dashboard reloaded', async () => {
       const posted: unknown[] = []
       handlePost = (body) => {
         posted.push(body)
@@ -4740,7 +4740,7 @@ describe('Scan receipts', () => {
       return screen.queryByRole('button', { name: 'Close the full-screen Receipt' })
     }
 
-    it('opens on a click on the Receipt, showing the same image, and closes on a click', async () => {
+    it('opens on a click on the Receipt, showing the same preview, and closes on a click', async () => {
       const user = await scanUntilFormIsReady([kiwi, rema])
 
       await user.click(screen.getByRole('button', { name: 'Show the Receipt full-screen' }))
@@ -4767,6 +4767,15 @@ describe('Scan receipts', () => {
       const dialog = screen.getByRole('dialog', { name: 'Receipt 1 of 2' })
       expect(within(dialog).getByLabelText(/description/i)).toHaveValue('Kiwi')
       expect(screen.getByRole('button', { name: 'Show the Receipt full-screen' })).toHaveFocus()
+    })
+
+    it('keeps the keyboard on the full-screen view rather than the form behind it', async () => {
+      const user = await scanUntilFormIsReady([kiwi])
+      await user.click(screen.getByRole('button', { name: 'Show the Receipt full-screen' }))
+
+      await user.tab()
+
+      expect(fullScreenView()).toHaveFocus()
     })
   })
 
@@ -4829,16 +4838,18 @@ describe('Scan receipts', () => {
       expect(notice()).not.toBeInTheDocument()
     })
 
-    it('lists a Receipt saved earlier in the same scan on a later one with the same date and amount', async () => {
-      // The Transactions saved so far, which the endpoint answers from.
-      const saved: PossibleDuplicate[] = []
+    it('lists the Transaction saved from an earlier Receipt of the scan on a later one with the same date and amount', async () => {
+      // The Transactions saved so far, as the Possible duplicate endpoint answers with them.
+      const savedTransactions: PossibleDuplicate[] = []
       handlePost = (body) => {
-        const transaction = body as Omit<PossibleDuplicate, 'id'>
-        saved.push({ id: saved.length + 1, date: transaction.date, description: transaction.description, amount: transaction.amount })
-        return Response.json({ id: saved.length }, { status: 201 })
+        const { date, description, amount } = body as Omit<PossibleDuplicate, 'id'>
+        savedTransactions.push({ id: savedTransactions.length + 1, date, description, amount })
+        return Response.json({ id: savedTransactions.length }, { status: 201 })
       }
       handlePossibleDuplicates = (date, amount) =>
-        Response.json(saved.filter((transaction) => transaction.date === date && transaction.amount === amount))
+        Response.json(
+          savedTransactions.filter((transaction) => transaction.date === date && transaction.amount === amount),
+        )
       // A second photo of the same Receipt.
       const kiwiAgain = receipt('kiwi-2.jpg')
       const user = await scanUntilFormIsReady([kiwi, kiwiAgain])
