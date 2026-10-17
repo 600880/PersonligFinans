@@ -595,4 +595,93 @@ public class TransactionEndpointsTests
 
         Assert.Equal(HttpStatusCode.NotFound, noteResponse.StatusCode);
     }
+
+    // The Possible duplicate tests use dates in 2047, which no other test uses, and only look at
+    // their own Transactions.
+    private async Task<List<PossibleDuplicateResponse>> OwnPossibleDuplicates(string date, string amount)
+    {
+        var duplicates = await _client.GetFromJsonAsync<List<PossibleDuplicateResponse>>(
+            $"/api/transactions/possible-duplicates?date={date}&amount={amount}");
+        return duplicates!.Where(d => d.Description.StartsWith(_token)).ToList();
+    }
+
+    [Fact]
+    public async Task Get_PossibleDuplicates_MatchesUpToThreeDaysEitherWayOrderedByDate()
+    {
+        await AddManualTransaction("2047-03-06", $"{_token} four days after");
+        await AddManualTransaction("2047-03-05", $"{_token} three days after");
+        await AddManualTransaction("2047-03-02", $"{_token} same day");
+        await AddManualTransaction("2047-02-27", $"{_token} three days before");
+        await AddManualTransaction("2047-02-26", $"{_token} four days before");
+
+        var duplicates = await OwnPossibleDuplicates("2047-03-02", "-249.90");
+
+        Assert.Equal(
+            [
+                (new DateOnly(2047, 2, 27), $"{_token} three days before", -249.90m),
+                (new DateOnly(2047, 3, 2), $"{_token} same day", -249.90m),
+                (new DateOnly(2047, 3, 5), $"{_token} three days after", -249.90m),
+            ],
+            duplicates.Select(d => (d.Date, d.Description, d.Amount)));
+        Assert.All(duplicates, d => Assert.True(d.Id > 0));
+    }
+
+    [Fact]
+    public async Task Get_PossibleDuplicates_MatchesImportedAndManualTransactions()
+    {
+        // Each imported row is a purchase of 10,00.
+        await ImportStatement("01.05.2047 - 31.05.2047", ("0905", $"{_token} imported"));
+        await _client.PostAsJsonAsync(
+            "/api/transactions", ValidRequest(date: "2047-05-11", description: $"{_token} manual", amount: -10m));
+
+        var duplicates = await OwnPossibleDuplicates("2047-05-10", "-10");
+
+        Assert.Equal([$"{_token} imported", $"{_token} manual"], duplicates.Select(d => d.Description));
+    }
+
+    [Fact]
+    public async Task Get_PossibleDuplicates_RequiresTheExactSignedAmount()
+    {
+        await AddManualTransaction("2047-07-15", $"{_token} spent");
+        await _client.PostAsJsonAsync(
+            "/api/transactions", ValidRequest(date: "2047-07-15", description: $"{_token} received", amount: 249.90m));
+        await _client.PostAsJsonAsync(
+            "/api/transactions", ValidRequest(date: "2047-07-15", description: $"{_token} a cent more", amount: -249.91m));
+
+        var duplicates = await OwnPossibleDuplicates("2047-07-15", "-249.9");
+
+        Assert.Equal([$"{_token} spent"], duplicates.Select(d => d.Description));
+    }
+
+    [Fact]
+    public async Task Get_PossibleDuplicates_WithoutMatches_ReturnsEmptyList()
+    {
+        var duplicates = await _client.GetFromJsonAsync<List<PossibleDuplicateResponse>>(
+            "/api/transactions/possible-duplicates?date=2047-09-15&amount=-12345.67");
+
+        Assert.Empty(duplicates!);
+    }
+
+    [Theory]
+    [InlineData("amount=-10", "date")]
+    [InlineData("date=&amount=-10", "date")]
+    [InlineData("date=soon&amount=-10", "date")]
+    [InlineData("date=2047-02-30&amount=-10", "date")]
+    [InlineData("date=15.09.2047&amount=-10", "date")]
+    [InlineData("date=0001-01-01&amount=-10", "date")]
+    [InlineData("date=3000-01-01&amount=-10", "date")]
+    [InlineData("date=2047-09-15", "amount")]
+    [InlineData("date=2047-09-15&amount=lots", "amount")]
+    [InlineData("date=2047-09-15&amount=-249,90", "amount")]
+    [InlineData("date=2047-09-15&amount=0", "amount")]
+    [InlineData("date=2047-09-15&amount=-10.005", "amount")]
+    [InlineData("date=2047-09-15&amount=-10000000000", "amount")]
+    public async Task Get_PossibleDuplicates_InvalidDateOrAmount_IsRejected(string query, string field)
+    {
+        var response = await _client.GetAsync($"/api/transactions/possible-duplicates?{query}");
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var problem = await response.Content.ReadFromJsonAsync<ValidationProblemDetails>();
+        Assert.Equal([field], problem!.Errors.Keys);
+    }
 }

@@ -1,12 +1,17 @@
-import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
+import { useEffect, useId, useState, type FormEvent, type ReactNode } from 'react'
+import { formatAmount } from '../lib/amount'
 import {
   createTransaction,
   fetchCategories,
+  fetchPossibleDuplicates,
   type Category,
   type FieldErrors,
+  type PossibleDuplicate,
 } from '../lib/api'
+import { formatNorwegianDate } from '../lib/date'
 import {
   isTransactionFormValid,
+  possibleDuplicateQuery,
   toCreateTransactionRequest,
   type TransactionFormValues,
 } from '../lib/transactionForm'
@@ -30,6 +35,39 @@ function Field({ label, error, children }: FieldProps) {
   )
 }
 
+// How long typing in the Date or amount must pause before the form asks for Possible duplicates.
+const POSSIBLE_DUPLICATE_DELAY_MS = 300
+
+// The Possible duplicates of what the form holds: none until the Date and a valid amount are filled
+// in, and then those the server answered for exactly that date and Amount. An answer for values the
+// form no longer holds is never shown, and a failed check shows none.
+function usePossibleDuplicates(values: TransactionFormValues): PossibleDuplicate[] {
+  const query = possibleDuplicateQuery(values)
+  const date = query?.date ?? null
+  const amount = query?.amount ?? null
+  const key = query && `${date} ${amount}`
+  const [answer, setAnswer] = useState<{ key: string; duplicates: PossibleDuplicate[] } | null>(null)
+
+  useEffect(() => {
+    if (date === null || amount === null) return
+    let ignore = false
+    const timer = setTimeout(() => {
+      fetchPossibleDuplicates(date, amount)
+        .then((duplicates) => {
+          if (!ignore) setAnswer({ key: `${date} ${amount}`, duplicates })
+        })
+        // A failed check only means no notice: it never stands in the way of saving.
+        .catch(() => {})
+    }, POSSIBLE_DUPLICATE_DELAY_MS)
+    return () => {
+      ignore = true
+      clearTimeout(timer)
+    }
+  }, [date, amount])
+
+  return answer !== null && answer.key === key ? answer.duplicates : []
+}
+
 interface TransactionFormProps {
   initialValues: TransactionFormValues
   disabled?: boolean
@@ -42,7 +80,8 @@ interface TransactionFormProps {
 // give the form a new key to start it over. disabled keeps the fields and Save from being used,
 // e.g. while a Receipt is still being read. secondaryAction is the button beside Save, such as
 // Add transaction's Cancel, and stays usable while disabled. onSaved is called once the server
-// has recorded the Transaction.
+// has recorded the Transaction. Under the fields, a notice lists the Possible duplicates of the
+// date and Amount entered; it only warns and never keeps Save from being used.
 export function TransactionForm({
   initialValues,
   disabled = false,
@@ -55,6 +94,8 @@ export function TransactionForm({
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [isSaving, setIsSaving] = useState(false)
   const canSave = isTransactionFormValid(values) && !isSaving && !disabled
+  const possibleDuplicates = usePossibleDuplicates(values)
+  const possibleDuplicatesHeadingId = useId()
 
   useEffect(() => {
     let ignore = false
@@ -182,6 +223,26 @@ export function TransactionForm({
             ))}
           </select>
         </Field>
+
+        {possibleDuplicates.length > 0 && (
+          <section
+            aria-labelledby={possibleDuplicatesHeadingId}
+            className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900"
+          >
+            <h3 id={possibleDuplicatesHeadingId} className="font-medium">
+              {possibleDuplicates.length === 1 ? 'Possible duplicate' : 'Possible duplicates'}
+            </h3>
+            <ul className="mt-1 flex flex-col gap-1">
+              {possibleDuplicates.map((duplicate) => (
+                <li key={duplicate.id} className="flex gap-3">
+                  <span className="whitespace-nowrap">{formatNorwegianDate(duplicate.date)}</span>
+                  <span className="min-w-0 flex-1 break-words">{duplicate.description}</span>
+                  <span className="whitespace-nowrap tabular-nums">{formatAmount(duplicate.amount)}</span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
 
         <div className="mt-2 flex justify-end gap-3">
           <button

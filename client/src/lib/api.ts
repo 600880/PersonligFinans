@@ -268,6 +268,24 @@ export async function deleteTransaction(id: number): Promise<DeleteTransactionRe
   return { ok: false, message: `Deleting failed (${response.status}).` }
 }
 
+// An existing Transaction, imported or manually-entered, with the same Amount and a posted date
+// within three days of one being entered.
+export interface PossibleDuplicate {
+  id: number
+  date: string
+  description: string
+  amount: number
+}
+
+// The Possible duplicates of a Transaction on the given date with the given signed Amount, oldest
+// first.
+export async function fetchPossibleDuplicates(date: string, amount: number): Promise<PossibleDuplicate[]> {
+  const query = new URLSearchParams({ date, amount: String(amount) })
+  const response = await fetch(`/api/transactions/possible-duplicates?${query}`)
+  if (!response.ok) throw new Error(`Checking for possible duplicates failed (${response.status})`)
+  return (await response.json()) as PossibleDuplicate[]
+}
+
 export async function createTransaction(
   request: CreateTransactionRequest,
 ): Promise<CreateTransactionResult> {

@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.EntityFrameworkCore;
 using PersonligFinans.Api.CategorizationRules;
 using PersonligFinans.Api.Data;
@@ -28,6 +29,8 @@ public record TransactionResponse(
 
 public record TransactionMonthResponse(int Year, int Month);
 
+public record PossibleDuplicateResponse(int Id, DateOnly Date, string Description, decimal Amount);
+
 public static class TransactionEndpoints
 {
     // numeric(12,2) holds at most 10 digits before the decimal point.
@@ -35,6 +38,9 @@ public static class TransactionEndpoints
 
     private const int MinYear = 1900;
     private const int MaxYear = 2999;
+
+    // An imported Transaction is usually booked one to three days after the purchase it records.
+    private const int PossibleDuplicateDays = 3;
 
     public static void MapTransactionEndpoints(this IEndpointRouteBuilder app)
     {
@@ -50,6 +56,7 @@ public static class TransactionEndpoints
                 .ToListAsync());
 
         api.MapGet("/transactions", ListPeriod);
+        api.MapGet("/transactions/possible-duplicates", ListPossibleDuplicates);
         api.MapPost("/transactions", CreateTransaction);
         api.MapPut("/transactions/{id:int}/category", ChangeCategory);
         api.MapPut("/transactions/{id:int}/note", ChangeNote);
@@ -73,6 +80,40 @@ public static class TransactionEndpoints
             .OrderByDescending(t => t.PostedDate)
             .ThenByDescending(t => t.Id)
             .Select(t => ToResponse(t))
+            .ToListAsync());
+    }
+
+    // The Possible duplicates of a Transaction being entered by hand: every Transaction, imported or
+    // manual, with exactly the same signed Amount and a posted date within three days of the given
+    // date either way, both ends included, oldest first with the id as a stable tie-break. Only a
+    // warning for the user: saving a Transaction never checks for them. The date and Amount are read
+    // as text, so that a malformed one gets a validation problem rather than a framework error: the
+    // date as YYYY-MM-DD and the Amount with a point for decimals.
+    private static async Task<IResult> ListPossibleDuplicates(string? date, string? amount, AppDbContext db)
+    {
+        var errors = new Dictionary<string, string[]>();
+
+        if (!DateOnly.TryParseExact(date, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var day)
+            || day.Year is not (>= MinYear and <= MaxYear))
+            errors["date"] = [$"Date must be a date between {MinYear} and {MaxYear}, as YYYY-MM-DD."];
+
+        var amountError = decimal.TryParse(
+            amount, NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var value)
+            ? AmountError(value)
+            : "Amount must be a number.";
+        if (amountError is not null)
+            errors["amount"] = [amountError];
+
+        if (errors.Count > 0)
+            return Results.ValidationProblem(errors);
+
+        var first = day.AddDays(-PossibleDuplicateDays);
+        var last = day.AddDays(PossibleDuplicateDays);
+        return Results.Ok(await db.Transactions
+            .Where(t => t.Amount == value && t.PostedDate >= first && t.PostedDate <= last)
+            .OrderBy(t => t.PostedDate)
+            .ThenBy(t => t.Id)
+            .Select(t => new PossibleDuplicateResponse(t.Id, t.PostedDate, t.Description, t.Amount))
             .ToListAsync());
     }
 
@@ -114,12 +155,8 @@ public static class TransactionEndpoints
         else if (description.Length > AppDbContext.DescriptionMaxLength)
             Fail("description", $"Description must be at most {AppDbContext.DescriptionMaxLength} characters.");
 
-        if (request.Amount is not { } amount || amount == 0)
-            Fail("amount", "Amount must be non-zero.");
-        else if (Math.Abs(amount) > MaxAbsoluteAmount)
-            Fail("amount", "Amount is too large.");
-        else if (amount != Math.Round(amount, 2))
-            Fail("amount", "Amount can have at most 2 decimal places.");
+        if (AmountError(request.Amount) is { } amountError)
+            Fail("amount", amountError);
 
         if (note?.Length > AppDbContext.NoteMaxLength)
             Fail("note", $"Note must be at most {AppDbContext.NoteMaxLength} characters.");
@@ -162,6 +199,18 @@ public static class TransactionEndpoints
         await db.SaveChangesAsync();
 
         return Results.Ok(ToResponse(transaction));
+    }
+
+    // Why an Amount can't be a Transaction's, or null when it can.
+    private static string? AmountError(decimal? amount)
+    {
+        if (amount is not { } value || value == 0)
+            return "Amount must be non-zero.";
+        if (Math.Abs(value) > MaxAbsoluteAmount)
+            return "Amount is too large.";
+        if (value != Math.Round(value, 2))
+            return "Amount can have at most 2 decimal places.";
+        return null;
     }
 
     private static string? NormalizeNote(string? raw) =>
