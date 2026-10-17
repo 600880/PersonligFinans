@@ -4757,4 +4757,243 @@ describe('Scan receipts', () => {
       expect(within(dialog()).queryByText('Reading…')).not.toBeInTheDocument()
     })
   })
+
+  describe('leaving partway', () => {
+    function confirmation() {
+      return screen.queryByRole('alertdialog')
+    }
+
+    it('asks before discarding the remaining Receipts, and Keep going returns to the Receipt as it was', async () => {
+      const user = await scanUntilFormIsReady([kiwi, rema, narvesen])
+      await user.click(screen.getByRole('button', { name: 'Skip' }))
+      await formIsReady('Receipt 2 of 3')
+      await fillValidForm(user)
+
+      await user.click(screen.getByRole('button', { name: 'Close' }))
+
+      expect(screen.getByRole('alertdialog', { name: 'Discard the remaining 2 receipts?' })).toBeInTheDocument()
+      expect(within(confirmation()!).getByRole('button', { name: 'Discard' })).toBeInTheDocument()
+
+      await user.click(within(confirmation()!).getByRole('button', { name: 'Keep going' }))
+
+      expect(confirmation()).not.toBeInTheDocument()
+      const dialog = screen.getByRole('dialog', { name: 'Receipt 2 of 3' })
+      expect(within(dialog).getByLabelText(/description/i)).toHaveValue('Rema 1000')
+      expect(within(dialog).getByLabelText(/^out$/i)).toHaveValue(249.9)
+      expect(within(dialog).getByLabelText(/category/i)).toHaveValue('1')
+      expect(within(dialog).getByRole('img', { name: 'Receipt' })).toHaveAttribute('src', 'blob:rema.png')
+    })
+
+    it('discards the remaining Receipts, keeping and counting what was saved, with the Dashboard reloaded', async () => {
+      const posted: unknown[] = []
+      handlePost = (body) => {
+        posted.push(body)
+        return Response.json({ id: 1 }, { status: 201 })
+      }
+      const user = await scanUntilFormIsReady([kiwi, rema, narvesen])
+      const before = monthsRequests()
+      await fillValidForm(user)
+      await user.click(screen.getByRole('button', { name: /^save$/i }))
+      await formIsReady('Receipt 2 of 3')
+      await user.type(screen.getByLabelText(/description/i), 'Rema')
+
+      await user.click(screen.getByRole('button', { name: 'Close' }))
+      await user.click(within(confirmation()!).getByRole('button', { name: 'Discard' }))
+
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+      expect(posted).toHaveLength(1)
+      expect(screen.getByRole('status')).toHaveTextContent(/^1 transaction saved$/)
+      await waitFor(() => expect(monthsRequests()).toBeGreaterThan(before))
+      expect(releasedUrls).toEqual(['blob:kiwi.jpg', 'blob:rema.png', 'blob:narvesen.webp'])
+    })
+
+    it('says none were saved, and leaves the Dashboard as it was, when nothing was saved before Discard', async () => {
+      const user = await scanUntilFormIsReady([kiwi, rema])
+      const before = monthsRequests()
+
+      await user.click(screen.getByRole('button', { name: 'Close' }))
+      expect(screen.getByRole('alertdialog', { name: 'Discard the remaining 2 receipts?' })).toBeInTheDocument()
+      await user.click(within(confirmation()!).getByRole('button', { name: 'Discard' }))
+
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+      expect(screen.getByRole('status')).toHaveTextContent('No transactions saved')
+      expect(monthsRequests()).toBe(before)
+      expect(releasedUrls).toEqual(['blob:kiwi.jpg', 'blob:rema.png'])
+    })
+
+    it('asks about the last Receipt in the singular', async () => {
+      const user = await scanUntilFormIsReady([kiwi, rema])
+      await user.click(screen.getByRole('button', { name: 'Skip' }))
+
+      await user.click(screen.getByRole('button', { name: 'Close' }))
+
+      expect(screen.getByRole('alertdialog', { name: 'Discard the remaining 1 receipt?' })).toBeInTheDocument()
+    })
+
+    it('counts a Save that finishes after the remaining Receipts were discarded', async () => {
+      let respond: (response: Response) => void = () => {}
+      handlePost = () => new Promise<Response>((resolve) => (respond = resolve)) as unknown as Response
+      const user = await scanUntilFormIsReady([kiwi, rema])
+      await fillValidForm(user)
+      await user.click(screen.getByRole('button', { name: /^save$/i }))
+      await user.click(screen.getByRole('button', { name: 'Close' }))
+      await user.click(within(confirmation()!).getByRole('button', { name: 'Discard' }))
+      expect(screen.getByRole('status')).toHaveTextContent('No transactions saved')
+
+      await act(async () => respond(Response.json({ id: 1 }, { status: 201 })))
+
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+      expect(screen.getByRole('status')).toHaveTextContent('1 transaction saved')
+    })
+
+    it('leaves a later scan alone when a Save from an earlier one finishes after it was discarded', async () => {
+      let respond: (response: Response) => void = () => {}
+      handlePost = () => new Promise<Response>((resolve) => (respond = resolve)) as unknown as Response
+      const user = await scanUntilFormIsReady([kiwi])
+      await fillValidForm(user)
+      await user.click(screen.getByRole('button', { name: /^save$/i }))
+      await user.click(screen.getByRole('button', { name: 'Close' }))
+      await user.click(within(confirmation()!).getByRole('button', { name: 'Discard' }))
+      await user.upload(screen.getByLabelText(/^receipts$/i), [rema, narvesen])
+      await formIsReady('Receipt 1 of 2')
+
+      await act(async () => respond(Response.json({ id: 1 }, { status: 201 })))
+
+      expect(screen.getByRole('dialog', { name: 'Receipt 1 of 2' })).toBeInTheDocument()
+    })
+  })
+
+  describe('seeing the Receipt full-screen', () => {
+    function fullScreenView() {
+      return screen.queryByRole('button', { name: 'Close the full-screen Receipt' })
+    }
+
+    it('opens on a click on the Receipt, showing the same preview, and closes on a click', async () => {
+      const user = await scanUntilFormIsReady([kiwi, rema])
+
+      await user.click(screen.getByRole('button', { name: 'Show the Receipt full-screen' }))
+
+      expect(within(fullScreenView()!).getByRole('img', { name: 'Receipt' })).toHaveAttribute('src', 'blob:kiwi.jpg')
+
+      await user.click(fullScreenView()!)
+
+      expect(fullScreenView()).not.toBeInTheDocument()
+      expect(screen.getByRole('dialog', { name: 'Receipt 1 of 2' })).toBeInTheDocument()
+    })
+
+    it('opens from the keyboard and closes on Escape, leaving the window on the Receipt as it was', async () => {
+      const user = await scanUntilFormIsReady([kiwi, rema])
+      await user.type(screen.getByLabelText(/description/i), 'Kiwi')
+      screen.getByRole('button', { name: 'Show the Receipt full-screen' }).focus()
+
+      await user.keyboard('{Enter}')
+      expect(fullScreenView()).toBeInTheDocument()
+      await user.keyboard('{Escape}')
+
+      expect(fullScreenView()).not.toBeInTheDocument()
+      expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+      const dialog = screen.getByRole('dialog', { name: 'Receipt 1 of 2' })
+      expect(within(dialog).getByLabelText(/description/i)).toHaveValue('Kiwi')
+      expect(screen.getByRole('button', { name: 'Show the Receipt full-screen' })).toHaveFocus()
+    })
+
+    it('keeps the keyboard on the full-screen view rather than the form behind it', async () => {
+      const user = await scanUntilFormIsReady([kiwi])
+      await user.click(screen.getByRole('button', { name: 'Show the Receipt full-screen' }))
+
+      await user.tab()
+
+      expect(fullScreenView()).toHaveFocus()
+    })
+  })
+
+  describe('Possible duplicates', () => {
+    type PossibleDuplicate = { id: number; date: string; description: string; amount: number }
+
+    // What the Possible duplicate endpoint answers for a date and a signed Amount.
+    let handlePossibleDuplicates: (date: string, amount: number) => Response
+
+    // The form asks only once typing has paused, so the tests move the clock on past that pause.
+    async function afterThePause() {
+      await act(() => vi.advanceTimersByTimeAsync(1_000))
+    }
+
+    function notice() {
+      return screen.queryByRole('region', { name: /possible duplicate/i })
+    }
+
+    beforeEach(() => {
+      vi.useFakeTimers({ shouldAdvanceTime: true })
+      handlePossibleDuplicates = () => Response.json([])
+      // The scan's fetch, which answers the read-a-Receipt requests.
+      const scanFetch = globalThis.fetch
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (url: string, init?: RequestInit) => {
+          const possibleDuplicatesUrl = /^\/api\/transactions\/possible-duplicates\?(.*)$/.exec(url)
+          if (!possibleDuplicatesUrl) return scanFetch(url, init)
+          const query = new URLSearchParams(possibleDuplicatesUrl[1])
+          return handlePossibleDuplicates(query.get('date')!, Number(query.get('amount')))
+        }),
+      )
+    })
+
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
+    it('shows the notice on a Receipt form, and Save still saves and moves on', async () => {
+      const imported: PossibleDuplicate = { id: 5, date: '2026-10-14', description: 'REMA 1000 GRØNLAND', amount: -249.9 }
+      handlePossibleDuplicates = (_date, amount) => Response.json(amount === -249.9 ? [imported] : [])
+      const posted: unknown[] = []
+      handlePost = (body) => {
+        posted.push(body)
+        return Response.json({ id: 1 }, { status: 201 })
+      }
+      const user = await scanUntilFormIsReady([kiwi, rema])
+      await fillValidForm(user)
+      await afterThePause()
+
+      const dialog = screen.getByRole('dialog', { name: 'Receipt 1 of 2' })
+      expect(await within(dialog).findByRole('region', { name: 'Possible duplicate' })).toHaveTextContent(
+        'REMA 1000 GRØNLAND',
+      )
+
+      await user.click(screen.getByRole('button', { name: /^save$/i }))
+
+      expect(posted).toHaveLength(1)
+      await formIsReady('Receipt 2 of 2')
+      expect(notice()).not.toBeInTheDocument()
+    })
+
+    it('lists the Transaction saved from an earlier Receipt of the scan on a later one with the same date and amount', async () => {
+      // The Transactions saved so far, as the Possible duplicate endpoint answers with them.
+      const savedTransactions: PossibleDuplicate[] = []
+      handlePost = (body) => {
+        const { date, description, amount } = body as Omit<PossibleDuplicate, 'id'>
+        savedTransactions.push({ id: savedTransactions.length + 1, date, description, amount })
+        return Response.json({ id: savedTransactions.length }, { status: 201 })
+      }
+      handlePossibleDuplicates = (date, amount) =>
+        Response.json(
+          savedTransactions.filter((transaction) => transaction.date === date && transaction.amount === amount),
+        )
+      // A second photo of the same Receipt.
+      const kiwiAgain = receipt('kiwi-2.jpg')
+      const user = await scanUntilFormIsReady([kiwi, kiwiAgain])
+      await fillValidForm(user)
+      await afterThePause()
+      expect(notice()).not.toBeInTheDocument()
+
+      await user.click(screen.getByRole('button', { name: /^save$/i }))
+      await formIsReady('Receipt 2 of 2')
+      await user.type(screen.getByLabelText(/^out$/i), '249.90')
+      await afterThePause()
+
+      const items = within(await screen.findByRole('region', { name: 'Possible duplicate' })).getAllByRole('listitem')
+      expect(items).toHaveLength(1)
+      expect(items[0]).toHaveTextContent('Rema 1000')
+      expect(items[0]).toHaveTextContent('-249,90 kr')
+    })
+  })
 })

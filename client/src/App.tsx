@@ -143,9 +143,10 @@ function App() {
     setDashboardVersion((version) => version + 1)
   }
 
-  // Closes the window and says how many Transactions the scan saved, keeping the names of any files
-  // left out of the pick on screen.
-  function handleScanFinished() {
+  // Closes the window, after the last Receipt or once the rest are discarded, and says how many
+  // Transactions the scan saved, keeping the names of any files left out of the pick on screen. The
+  // Dashboard has already reloaded after each of them.
+  function handleScanClosed() {
     setScan(null)
     setShowSavedMessage(false)
     setImportMessage(null)
@@ -287,7 +288,7 @@ function App() {
           key={scan.id}
           receipts={scan.receipts}
           onSaved={() => handleReceiptSaved(scan.id)}
-          onFinished={handleScanFinished}
+          onClosed={handleScanClosed}
         />
       )}
     </div>
