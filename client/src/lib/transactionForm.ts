@@ -1,3 +1,5 @@
+import { todayIsoDate } from './date'
+
 export interface TransactionFormValues {
   date: string
   description: string
@@ -5,6 +7,18 @@ export interface TransactionFormValues {
   amountOut: string
   note: string
   categoryId: string
+}
+
+// The form a manually-entered Transaction starts from: today's date and nothing else.
+export function emptyTransactionForm(): TransactionFormValues {
+  return {
+    date: todayIsoDate(),
+    description: '',
+    amountIn: '',
+    amountOut: '',
+    note: '',
+    categoryId: '',
+  }
 }
 
 export interface CreateTransactionRequest {
