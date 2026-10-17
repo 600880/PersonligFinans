@@ -5,7 +5,7 @@ namespace PersonligFinans.Api.Data;
 public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(options)
 {
     public const int DescriptionMaxLength = 200;
-    public const int ReferenceMaxLength = 100;
+    public const int NoteMaxLength = 256;
     public const int AccountNumberMaxLength = 20;
     public const int KeywordMaxLength = 100;
     public const int CategoryNameMaxLength = 50;
@@ -34,7 +34,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             transaction.ToTable(t => t.HasCheckConstraint("ck_transactions_amount_nonzero", "amount <> 0"));
             transaction.Property(t => t.Description).HasMaxLength(DescriptionMaxLength);
             transaction.Property(t => t.Amount).HasPrecision(12, 2);
-            transaction.Property(t => t.Reference).HasMaxLength(ReferenceMaxLength);
+            transaction.Property(t => t.Note).HasMaxLength(NoteMaxLength);
             transaction.HasOne(t => t.Category)
                 .WithMany()
                 .HasForeignKey(t => t.CategoryId)

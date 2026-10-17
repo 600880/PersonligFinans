@@ -41,9 +41,9 @@ public class TransactionEndpointsTests
         string? date = "2026-09-24",
         string? description = "Rema 1000",
         decimal? amount = -249.90m,
-        string? reference = null,
+        string? note = null,
         int? categoryId = OtherCategoryId) =>
-        new { date, description, amount, reference, categoryId };
+        new { date, description, amount, note, categoryId };
 
     private async Task<Dictionary<string, string[]>> PostExpectingValidationErrors(object request)
     {
@@ -70,7 +70,7 @@ public class TransactionEndpointsTests
     {
         var response = await _client.PostAsJsonAsync(
             "/api/transactions",
-            ValidRequest(description: "  Invoice 42 paid  ", amount: 1500m, reference: "INV-42"));
+            ValidRequest(description: "  Invoice 42 paid  ", amount: 1500m, note: "INV-42"));
 
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         var created = await response.Content.ReadFromJsonAsync<TransactionResponse>();
@@ -81,18 +81,18 @@ public class TransactionEndpointsTests
         Assert.Equal(new DateOnly(2026, 9, 24), stored.PostedDate);
         Assert.Equal("Invoice 42 paid", stored.Description);
         Assert.Equal(1500m, stored.Amount);
-        Assert.Equal("INV-42", stored.Reference);
+        Assert.Equal("INV-42", stored.Note);
         Assert.Equal(OtherCategoryId, stored.CategoryId);
         Assert.Null(stored.BankStatementId);
     }
 
     [Fact]
-    public async Task Post_BlankReference_IsStoredAsNull()
+    public async Task Post_BlankNote_IsStoredAsNull()
     {
-        var response = await _client.PostAsJsonAsync("/api/transactions", ValidRequest(reference: "   "));
+        var response = await _client.PostAsJsonAsync("/api/transactions", ValidRequest(note: "   "));
 
         var created = await response.Content.ReadFromJsonAsync<TransactionResponse>();
-        Assert.Null(created!.Reference);
+        Assert.Null(created!.Note);
     }
 
     [Fact]
@@ -129,13 +129,13 @@ public class TransactionEndpointsTests
     }
 
     [Fact]
-    public async Task Post_TooLongDescriptionAndReference_AreRejected()
+    public async Task Post_TooLongDescriptionAndNote_AreRejected()
     {
         var errors = await PostExpectingValidationErrors(
-            ValidRequest(description: new string('x', 201), reference: new string('x', 101)));
+            ValidRequest(description: new string('x', 201), note: new string('x', 257)));
 
         Assert.Contains("description", errors.Keys);
-        Assert.Contains("reference", errors.Keys);
+        Assert.Contains("note", errors.Keys);
     }
 
     private async Task AddManualTransaction(string date, string description)
@@ -403,7 +403,7 @@ public class TransactionEndpointsTests
     {
         var response = await _client.PostAsJsonAsync(
             "/api/transactions",
-            ValidRequest(date: "2044-01-20", description: $"{_token} Lunsj", reference: "INV-7"));
+            ValidRequest(date: "2044-01-20", description: $"{_token} Lunsj", note: "INV-7"));
         var manual = (await response.Content.ReadFromJsonAsync<TransactionResponse>())!;
 
         await CategoryChanged(manual.Id, GroceriesCategoryId);
@@ -530,5 +530,69 @@ public class TransactionEndpointsTests
         var response = await _client.DeleteAsync($"/api/transactions/{int.MaxValue}");
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    private Task<HttpResponseMessage> ChangeNote(int transactionId, string? note) =>
+        _client.PutAsJsonAsync($"/api/transactions/{transactionId}/note", new { note });
+
+    [Fact]
+    public async Task Put_Note_OnManualTransaction_SetsItAndReturnsUpdatedTransaction()
+    {
+        var response = await _client.PostAsJsonAsync(
+            "/api/transactions", ValidRequest(date: "2044-01-20", description: $"{_token} Kvittering"));
+        var manual = (await response.Content.ReadFromJsonAsync<TransactionResponse>())!;
+
+        var noteResponse = await ChangeNote(manual.Id, "Reimbursed by work");
+
+        Assert.Equal(HttpStatusCode.OK, noteResponse.StatusCode);
+        var updated = (await noteResponse.Content.ReadFromJsonAsync<TransactionResponse>())!;
+        Assert.Equal(manual with { Note = "Reimbursed by work" }, updated);
+        Assert.Equal("Reimbursed by work", (await Own("Kvittering")).Note);
+    }
+
+    [Fact]
+    public async Task Put_Note_OnImportedTransaction_SetsIt()
+    {
+        await ImportForCorrection("Imported med notat");
+        var imported = await Own("Imported med notat");
+
+        var noteResponse = await ChangeNote(imported.Id, "Disputed");
+
+        Assert.Equal(HttpStatusCode.OK, noteResponse.StatusCode);
+        Assert.Equal("Disputed", (await Own("Imported med notat")).Note);
+    }
+
+    [Fact]
+    public async Task Put_Note_BlankOrNull_ClearsIt()
+    {
+        var response = await _client.PostAsJsonAsync(
+            "/api/transactions", ValidRequest(date: "2044-01-20", description: $"{_token} Med notat", note: "Old note"));
+        var transaction = (await response.Content.ReadFromJsonAsync<TransactionResponse>())!;
+
+        await ChangeNote(transaction.Id, "   ");
+
+        Assert.Null((await Own("Med notat")).Note);
+    }
+
+    [Fact]
+    public async Task Put_Note_ThatIsTooLong_IsRejected()
+    {
+        var response = await _client.PostAsJsonAsync(
+            "/api/transactions", ValidRequest(date: "2044-01-20", description: $"{_token} Notat for langt"));
+        var transaction = (await response.Content.ReadFromJsonAsync<TransactionResponse>())!;
+
+        var noteResponse = await ChangeNote(transaction.Id, new string('x', 257));
+
+        Assert.Equal(HttpStatusCode.BadRequest, noteResponse.StatusCode);
+        var problem = await noteResponse.Content.ReadFromJsonAsync<ValidationProblemDetails>();
+        Assert.Contains("note", problem!.Errors.Keys);
+    }
+
+    [Fact]
+    public async Task Put_Note_OnUnknownTransaction_ReturnsNotFound()
+    {
+        var noteResponse = await ChangeNote(int.MaxValue, "test");
+
+        Assert.Equal(HttpStatusCode.NotFound, noteResponse.StatusCode);
     }
 }

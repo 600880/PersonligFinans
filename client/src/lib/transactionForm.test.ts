@@ -11,7 +11,7 @@ function validForm(overrides: Partial<TransactionFormValues> = {}): TransactionF
     description: 'Rema 1000',
     amountIn: '100',
     amountOut: '',
-    reference: '',
+    note: '',
     categoryId: '13',
     ...overrides,
   }
@@ -67,8 +67,8 @@ describe('isTransactionFormValid', () => {
     expect(isTransactionFormValid(validForm({ description: '   ' }))).toBe(false)
   })
 
-  it('does not require Reference', () => {
-    expect(isTransactionFormValid(validForm({ reference: '' }))).toBe(true)
+  it('does not require Note', () => {
+    expect(isTransactionFormValid(validForm({ note: '' }))).toBe(true)
   })
 })
 
@@ -83,16 +83,16 @@ describe('toCreateTransactionRequest', () => {
     ).toBe(-249.9)
   })
 
-  it('trims text, sends a blank Reference as null, and parses the category id', () => {
+  it('trims text, sends a blank Note as null, and parses the category id', () => {
     expect(
       toCreateTransactionRequest(
-        validForm({ description: '  Rema 1000 ', reference: '  ', categoryId: '1' }),
+        validForm({ description: '  Rema 1000 ', note: '  ', categoryId: '1' }),
       ),
     ).toEqual({
       date: '2026-09-19',
       description: 'Rema 1000',
       amount: 100,
-      reference: null,
+      note: null,
       categoryId: 1,
     })
   })

@@ -20,9 +20,9 @@ _Avoid_: Batch, import, file upload
 The signed value of a Transaction in NOK: negative when money is spent, positive when money is received. All Transactions share one currency.
 _Avoid_: Balance change, sum, value
 
-**Reference**:
-An optional, free-text identifier a user attaches to a manually-entered Transaction (the bank's own reference numbers on a Bank Statement are not Reference), pointing to an external document (e.g. an invoice or check number). Distinct from Description, which says what the Transaction was for.
-_Avoid_: Note, memo, ID
+**Note**:
+An optional, free-form annotation a user attaches to any Transaction — imported or manually-entered — to record anything relevant: a reimbursement, a disputed charge, an external reference number. Distinct from Description, which is the merchant or payee name and cannot be changed.
+_Avoid_: Reference, memo, comment
 
 **Category**:
 A label classifying a Transaction by type of spending (e.g. "Restaurants", "Groceries"), used to group spending on the Dashboard. Has a unique name (ignoring case) and a short description of what belongs in it, which the LLM also reads when creating AI-generated rules. The user manages the list (adding, editing and deleting Categories), which starts from a seeded set. Deleting a Category that is in use means choosing either a replacement Category, which its Transactions and Categorization Rules move to (each Transaction keeping whether it was categorized manually or by a rule), or to delete its Categorization Rules, after which its Transactions are matched against the remaining rules like any rule change, and those left without a Category become Uncategorized.

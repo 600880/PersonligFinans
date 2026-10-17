@@ -3,7 +3,7 @@ export interface TransactionFormValues {
   description: string
   amountIn: string
   amountOut: string
-  reference: string
+  note: string
   categoryId: string
 }
 
@@ -11,7 +11,7 @@ export interface CreateTransactionRequest {
   date: string
   description: string
   amount: number
-  reference: string | null
+  note: string | null
   categoryId: number
 }
 
@@ -40,13 +40,13 @@ export function isTransactionFormValid(values: TransactionFormValues): boolean {
 export function toCreateTransactionRequest(values: TransactionFormValues): CreateTransactionRequest {
   const isIn = values.amountIn.trim() !== ''
   const magnitude = Number((isIn ? values.amountIn : values.amountOut).trim())
-  const reference = values.reference.trim()
+  const note = values.note.trim()
 
   return {
     date: values.date,
     description: values.description.trim(),
     amount: isIn ? magnitude : -magnitude,
-    reference: reference === '' ? null : reference,
+    note: note === '' ? null : note,
     categoryId: Number(values.categoryId),
   }
 }

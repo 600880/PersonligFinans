@@ -105,7 +105,7 @@ public class BankStatementEndpointsTests
             stored.Select(t => (t.PostedDate, t.Description, t.Amount)));
         // Seeded rules categorize the merchants they know; the rest stay Uncategorized.
         Assert.Equal([null, null, GroceriesId, TransfersId, null], stored.Select(t => t.CategoryId));
-        Assert.All(stored, t => Assert.Null(t.Reference));
+        Assert.All(stored, t => Assert.Null(t.Note));
     }
 
     [Fact]

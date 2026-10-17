@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useState } from 'react'
 import {
   changeTransactionCategory,
+  changeTransactionNote,
   deleteTransaction,
   fetchCategories,
   fetchTransactionMonths,
@@ -77,6 +78,10 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
   // The Transaction whose delete is waiting for confirmation, and whether that delete is being saved.
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<number | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
+  // The Transaction whose note editor is open, the draft text, and whether the save is in flight.
+  const [editingNoteId, setEditingNoteId] = useState<number | null>(null)
+  const [noteDraft, setNoteDraft] = useState('')
+  const [isSavingNote, setIsSavingNote] = useState(false)
   const [categoryFilter, setCategoryFilter] = useState(
     target ? categoryFilterOf(target.categoryId) : '',
   )
@@ -134,18 +139,20 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
     setStatusMessage(null)
     setErrorMessage(null)
     setConfirmingDeleteId(null)
+    setEditingNoteId(null)
     setSelected(period)
   }
 
-  // Changing the filter or search may hide the row whose delete is waiting, so the confirmation
-  // closes rather than coming back with the row later.
+  // Changing the filter or search may hide the row whose inline editor is open, so close both.
   function chooseCategoryFilter(value: string) {
     setConfirmingDeleteId(null)
+    setEditingNoteId(null)
     setCategoryFilter(value)
   }
 
   function chooseSearch(value: string) {
     setConfirmingDeleteId(null)
+    setEditingNoteId(null)
     setSearch(value)
   }
 
@@ -191,9 +198,35 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
     }
   }
 
+  function openNoteEditor(transaction: Transaction) {
+    setStatusMessage(null)
+    setErrorMessage(null)
+    setConfirmingDeleteId(null)
+    setEditingNoteId(transaction.id)
+    setNoteDraft(transaction.note ?? '')
+  }
+
+  async function saveNote(transaction: Transaction) {
+    if (isSavingNote) return
+
+    setIsSavingNote(true)
+    const result = await changeTransactionNote(transaction.id, noteDraft || null).finally(() =>
+      setIsSavingNote(false),
+    )
+
+    if (result.ok) {
+      setEditingNoteId(null)
+      showChange(transaction.id, { note: result.transaction.note })
+      setStatusMessage('Note saved.')
+    } else {
+      setErrorMessage(result.message)
+    }
+  }
+
   function startDelete(transaction: Transaction) {
     setStatusMessage(null)
     setErrorMessage(null)
+    setEditingNoteId(null)
     setConfirmingDeleteId(transaction.id)
   }
 
@@ -310,6 +343,9 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
               <th className="py-2 font-medium">Category</th>
               <th className="py-2 text-right font-medium">Amount</th>
               <th className="py-2">
+                <span className="sr-only">Note</span>
+              </th>
+              <th className="py-2">
                 <span className="sr-only">Delete</span>
               </th>
             </tr>
@@ -357,7 +393,20 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
                   <td className="py-2 text-right whitespace-nowrap tabular-nums">
                     {formatAmount(transaction.amount)}
                   </td>
-                  <td className="py-2 pl-3 text-right">
+                  <td className="py-2 pl-1 text-right">
+                    <button
+                      type="button"
+                      aria-label={`${transaction.note ? 'Edit' : 'Add'} note for ${transaction.description}`}
+                      title={transaction.note ?? undefined}
+                      onClick={() => openNoteEditor(transaction)}
+                      className="rounded p-1 hover:bg-slate-100"
+                    >
+                      <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" className={`h-4 w-4 ${transaction.note ? 'text-slate-600' : 'text-slate-300'}`}>
+                        <path d="M11.013 1.427a1.75 1.75 0 0 1 2.474 0l1.086 1.086a1.75 1.75 0 0 1 0 2.474l-8.61 8.61c-.21.21-.47.364-.756.445l-3.251.93a.75.75 0 0 1-.927-.928l.929-3.25c.081-.286.235-.547.445-.758l8.61-8.61Zm1.414 1.06a.25.25 0 0 0-.354 0L10.811 3.75l1.439 1.44 1.263-1.263a.25.25 0 0 0 0-.354l-1.086-1.086ZM11.189 6.25 9.75 4.81 3.23 11.33c-.03.03-.05.064-.06.1l-.635 2.223 2.222-.635a.2.2 0 0 0 .1-.06L11.19 6.25Z" />
+                      </svg>
+                    </button>
+                  </td>
+                  <td className="py-2 pl-1 text-right">
                     <button
                       type="button"
                       aria-label={`Delete ${transaction.description}`}
@@ -372,9 +421,46 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
                     </button>
                   </td>
                 </tr>
+                {editingNoteId === transaction.id && (
+                  <tr>
+                    <td colSpan={6} className="pb-3">
+                      <div className="flex flex-wrap items-end gap-2 rounded-lg bg-slate-50 px-3 py-2">
+                        <label className="flex flex-1 flex-col gap-1 text-sm font-medium text-slate-700">
+                          Note
+                          <textarea
+                            rows={2}
+                            maxLength={256}
+                            value={noteDraft}
+                            onChange={(e) => setNoteDraft(e.target.value)}
+                            placeholder="Add a note…"
+                            className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-normal text-slate-900 focus:border-slate-500 focus:outline-none"
+                          />
+                        </label>
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            disabled={isSavingNote}
+                            onClick={() => saveNote(transaction)}
+                            className={smallButtonClass}
+                          >
+                            {isSavingNote ? 'Saving…' : 'Save'}
+                          </button>
+                          <button
+                            type="button"
+                            disabled={isSavingNote}
+                            onClick={() => setEditingNoteId(null)}
+                            className={smallButtonClass}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+                )}
                 {confirmingDeleteId === transaction.id && (
                   <tr>
-                    <td colSpan={5} className="pb-3">
+                    <td colSpan={6} className="pb-3">
                       <div className="flex flex-wrap items-center justify-end gap-2 rounded-lg bg-red-50 px-3 py-2">
                         <span className="mr-auto text-red-800">
                           Delete "{transaction.description}" ({formatAmount(transaction.amount)} on{' '}

@@ -9,7 +9,7 @@ public class Transaction
     // Signed, in NOK: negative = spent, positive = received. Never zero.
     public decimal Amount { get; set; }
 
-    public string? Reference { get; set; }
+    public string? Note { get; set; }
 
     // Null means Uncategorized.
     public int? CategoryId { get; set; }

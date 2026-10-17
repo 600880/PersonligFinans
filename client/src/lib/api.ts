@@ -136,7 +136,7 @@ export interface Transaction {
   date: string
   description: string
   amount: number
-  reference: string | null
+  note: string | null
   categoryId: number | null
   locked: boolean
   imported: boolean
@@ -213,6 +213,26 @@ export async function changeTransactionCategory(
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ categoryId }),
+    })
+  } catch {
+    return { ok: false, message: 'Could not reach the server.' }
+  }
+
+  if (response.ok) return { ok: true, transaction: (await response.json()) as Transaction }
+
+  return { ok: false, message: `Saving failed (${response.status}).` }
+}
+
+export type ChangeNoteResult = { ok: true; transaction: Transaction } | { ok: false; message: string }
+
+// Sets or clears the Note on any Transaction — imported or manual. Blank clears it.
+export async function changeTransactionNote(id: number, note: string | null): Promise<ChangeNoteResult> {
+  let response: Response
+  try {
+    response = await fetch(`/api/transactions/${id}/note`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ note }),
     })
   } catch {
     return { ok: false, message: 'Could not reach the server.' }

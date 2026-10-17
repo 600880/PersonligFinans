@@ -21,7 +21,7 @@ function emptyForm(): TransactionFormValues {
     description: '',
     amountIn: '',
     amountOut: '',
-    reference: '',
+    note: '',
     categoryId: '',
   }
 }
@@ -161,12 +161,12 @@ export function AddTransactionModal({ onCancel, onSaved }: AddTransactionModalPr
             )}
           </div>
 
-          <Field label="Reference" error={fieldErrors.reference}>
+          <Field label="Note" error={fieldErrors.note}>
             <input
               type="text"
-              maxLength={100}
-              value={values.reference}
-              onChange={(e) => updateField('reference', e.target.value)}
+              maxLength={256}
+              value={values.note}
+              onChange={(e) => updateField('note', e.target.value)}
               className={inputClassName}
             />
           </Field>

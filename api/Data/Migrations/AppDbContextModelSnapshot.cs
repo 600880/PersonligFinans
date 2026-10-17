@@ -304,14 +304,14 @@ namespace PersonligFinans.Api.Data.Migrations
                         .HasColumnType("character varying(200)")
                         .HasColumnName("description");
 
+                    b.Property<string>("Note")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)")
+                        .HasColumnName("note");
+
                     b.Property<DateOnly>("PostedDate")
                         .HasColumnType("date")
                         .HasColumnName("posted_date");
-
-                    b.Property<string>("Reference")
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)")
-                        .HasColumnName("reference");
 
                     b.HasKey("Id")
                         .HasName("pk_transactions");

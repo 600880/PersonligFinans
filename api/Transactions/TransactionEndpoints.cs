@@ -8,8 +8,10 @@ public record CreateTransactionRequest(
     DateOnly? Date,
     string? Description,
     decimal? Amount,
-    string? Reference,
+    string? Note,
     int? CategoryId);
+
+public record ChangeNoteRequest(string? Note);
 
 public record ChangeCategoryRequest(int? CategoryId);
 
@@ -18,7 +20,7 @@ public record TransactionResponse(
     DateOnly Date,
     string Description,
     decimal Amount,
-    string? Reference,
+    string? Note,
     int? CategoryId,
     // Locked: the rules will never change its Category.
     bool Locked,
@@ -50,6 +52,7 @@ public static class TransactionEndpoints
         api.MapGet("/transactions", ListPeriod);
         api.MapPost("/transactions", CreateTransaction);
         api.MapPut("/transactions/{id:int}/category", ChangeCategory);
+        api.MapPut("/transactions/{id:int}/note", ChangeNote);
         api.MapDelete("/transactions/{id:int}", DeleteTransaction);
     }
 
@@ -101,7 +104,7 @@ public static class TransactionEndpoints
         void Fail(string field, string message) => errors[field] = [message];
 
         var description = request.Description?.Trim() ?? "";
-        var reference = string.IsNullOrWhiteSpace(request.Reference) ? null : request.Reference.Trim();
+        var note = NormalizeNote(request.Note);
 
         if (request.Date is null)
             Fail("date", "Date is required.");
@@ -118,8 +121,8 @@ public static class TransactionEndpoints
         else if (amount != Math.Round(amount, 2))
             Fail("amount", "Amount can have at most 2 decimal places.");
 
-        if (reference?.Length > AppDbContext.ReferenceMaxLength)
-            Fail("reference", $"Reference must be at most {AppDbContext.ReferenceMaxLength} characters.");
+        if (note?.Length > AppDbContext.NoteMaxLength)
+            Fail("note", $"Note must be at most {AppDbContext.NoteMaxLength} characters.");
 
         if (request.CategoryId is null)
             Fail("categoryId", "Category is required.");
@@ -134,7 +137,7 @@ public static class TransactionEndpoints
             PostedDate = request.Date!.Value,
             Description = description,
             Amount = request.Amount!.Value,
-            Reference = reference,
+            Note = note,
             CategoryId = request.CategoryId,
         };
         db.Transactions.Add(transaction);
@@ -142,6 +145,27 @@ public static class TransactionEndpoints
 
         return Results.Created($"/api/transactions/{transaction.Id}", ToResponse(transaction));
     }
+
+    // Sets the Note on any Transaction — imported or manual. Blank and null both clear it.
+    private static async Task<IResult> ChangeNote(int id, ChangeNoteRequest request, AppDbContext db)
+    {
+        var transaction = await db.Transactions.FindAsync(id);
+        if (transaction is null)
+            return Results.NotFound();
+
+        var note = NormalizeNote(request.Note);
+        if (note?.Length > AppDbContext.NoteMaxLength)
+            return Results.ValidationProblem(
+                new Dictionary<string, string[]> { ["note"] = [$"Note must be at most {AppDbContext.NoteMaxLength} characters."] });
+
+        transaction.Note = note;
+        await db.SaveChangesAsync();
+
+        return Results.Ok(ToResponse(transaction));
+    }
+
+    private static string? NormalizeNote(string? raw) =>
+        string.IsNullOrWhiteSpace(raw) ? null : raw.Trim();
 
     // Categorizes one Transaction manually: an imported Transaction loses its rule link, so rules
     // never change it again. Never creates, changes or deletes a Categorization Rule.
@@ -195,7 +219,7 @@ public static class TransactionEndpoints
             transaction.PostedDate,
             transaction.Description,
             transaction.Amount,
-            transaction.Reference,
+            transaction.Note,
             transaction.CategoryId,
             Categorizer.IsLocked(transaction),
             transaction.IsImported);

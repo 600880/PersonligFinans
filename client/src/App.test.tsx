@@ -217,7 +217,7 @@ describe('App', () => {
     expect(screen.getByLabelText(/description/i)).toHaveValue('')
     expect(screen.getByLabelText(/^in$/i)).toHaveValue(null)
     expect(screen.getByLabelText(/^out$/i)).toHaveValue(null)
-    expect(screen.getByLabelText(/reference/i)).toHaveValue('')
+    expect(screen.getByLabelText(/^note$/i)).toHaveValue('')
     expect(screen.getByLabelText(/category/i)).toHaveValue('')
   })
 
@@ -258,7 +258,7 @@ describe('App', () => {
       date: todayIsoDate(),
       description: 'Rema 1000',
       amount: -249.9,
-      reference: null,
+      note: null,
       categoryId: 1,
     })
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
@@ -1624,7 +1624,7 @@ describe('Transactions page', () => {
       date: '2026-09-24',
       description: 'Rema 1000',
       amount: -1249.9,
-      reference: null,
+      note: null,
       categoryId: 1,
       locked: false,
       imported: true,
@@ -1634,7 +1634,7 @@ describe('Transactions page', () => {
       date: '2026-09-03',
       description: 'Lønn Fra: Testfirma AS',
       amount: 24500,
-      reference: null,
+      note: null,
       categoryId: null,
       locked: false,
       imported: true,
@@ -1646,7 +1646,7 @@ describe('Transactions page', () => {
     date: '2026-10-02',
     description: 'Kiwi',
     amount: -89.9,
-    reference: null,
+    note: null,
     categoryId: 1,
     locked: false,
     imported: true,
@@ -1661,7 +1661,7 @@ describe('Transactions page', () => {
       date: '2026-09-20',
       description: 'Vipps *Ola Nordmann',
       amount: -200,
-      reference: null,
+      note: null,
       categoryId: 13,
       locked: false,
       imported: true,
@@ -1671,7 +1671,7 @@ describe('Transactions page', () => {
       date: '2026-09-12',
       description: 'Gave',
       amount: -500,
-      reference: null,
+      note: null,
       categoryId: 13,
       locked: true,
       imported: true,
@@ -1749,8 +1749,8 @@ describe('Transactions page', () => {
 
     await screen.findByRole('cell', { name: 'Rema 1000' })
     expect(rowCells()).toEqual([
-      ['24.09.2026', 'Rema 1000', 'Groceries', '-1\u00a0249,90\u00a0kr', ''],
-      ['03.09.2026', 'Lønn Fra: Testfirma AS', 'Uncategorized', '24\u00a0500,00\u00a0kr', ''],
+      ['24.09.2026', 'Rema 1000', 'Groceries', '-1\u00a0249,90\u00a0kr', '', ''],
+      ['03.09.2026', 'Lønn Fra: Testfirma AS', 'Uncategorized', '24\u00a0500,00\u00a0kr', '', ''],
     ])
   })
 
@@ -1875,8 +1875,8 @@ describe('Transactions page', () => {
     expect(screen.queryByRole('table')).not.toBeInTheDocument()
   })
 
-  it('searches only the descriptions, not the Reference or the Amount', async () => {
-    const invoice = { ...septemberTransactions[0], id: 11, description: 'Rørlegger', amount: -349, reference: 'Kiwi-17' }
+  it('searches only the descriptions, not the Note or the Amount', async () => {
+    const invoice = { ...septemberTransactions[0], id: 11, description: 'Rørlegger', amount: -349, note: 'Kiwi-17' }
     months = [{ year: 2026, month: 9 }]
     handleListPeriod = () => Response.json([...septemberTransactions, invoice])
     const user = await openTransactionsPage()
@@ -2050,7 +2050,7 @@ describe('Transactions page', () => {
       date: '2026-09-15',
       description: 'Frisør',
       amount: -450,
-      reference: 'KVITT-7',
+      note: 'KVITT-7',
       categoryId: 13,
       locked: true,
       imported: false,
@@ -2573,7 +2573,7 @@ describe('Dashboard', () => {
         date: '2026-09-03',
         description: 'Rema 1000',
         amount: -450.5,
-        reference: null,
+        note: null,
         categoryId: null,
         locked: false,
         imported: true,
@@ -2776,7 +2776,7 @@ describe('Dashboard', () => {
         date: '2026-09-24',
         description: 'Rema 1000',
         amount: -120,
-        reference: null,
+        note: null,
         categoryId: 1,
         locked: false,
         imported: true,
@@ -2786,7 +2786,7 @@ describe('Dashboard', () => {
         date: '2026-09-03',
         description: 'Ukjent butikk',
         amount: -450.5,
-        reference: null,
+        note: null,
         categoryId: null,
         locked: false,
         imported: true,
@@ -2884,7 +2884,7 @@ describe('Dashboard', () => {
         { id: 11, date: '2025-10-08', description: 'Elkjøp', categoryId: 13 },
         { id: 12, date: '2025-11-14', description: 'Kiwi', categoryId: 1 },
         { id: 13, date: '2025-12-02', description: 'Ukjent kiosk', categoryId: null },
-      ].map((t) => ({ ...t, amount: -100, reference: null, locked: false, imported: true }))
+      ].map((t) => ({ ...t, amount: -100, note: null, locked: false, imported: true }))
 
       async function openQuarter() {
         const user = await openDashboard()
@@ -3952,7 +3952,7 @@ describe('Dashboard', () => {
         { id: 23, date: '2026-02-14', description: 'Ukjent kiosk', categoryId: null },
         { id: 24, date: '2026-03-05', description: 'Meny', categoryId: 1 },
         { id: 25, date: '2026-03-20', description: 'Elkjøp', categoryId: 13 },
-      ].map((t) => ({ ...t, amount: -100, reference: null, locked: false, imported: true }))
+      ].map((t) => ({ ...t, amount: -100, note: null, locked: false, imported: true }))
 
       const GROCERIES_COLOUR = '#2a78d6'
       const UNCATEGORIZED_COLOUR = '#94a3b8'
