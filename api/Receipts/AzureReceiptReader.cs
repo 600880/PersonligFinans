@@ -20,7 +20,8 @@ public class AzureReceiptReader(ChatClient chat, ILogger<AzureReceiptReader> log
         about norwegian merchants, receipts and dates. You get a photo of one receipt and the list of
         categories, each with a name and a description of what belongs in it.
 
-        When the photo is not of a receipt, set notAReceipt to true and leave every other field null.
+        When the photo is not of a receipt, set notAReceipt to true, isRefund to false and every other
+        field to null.
         Otherwise set notAReceipt to false and read:
         - purchaseDate: the date of the purchase, as YYYY-MM-DD. Norwegian receipts write the day
           first, such as 12.10.2026 or 12.10.26. Ignore any other date, such as a return deadline.

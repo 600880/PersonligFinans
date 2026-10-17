@@ -1,8 +1,6 @@
 using System.Diagnostics;
 using System.Net;
 using System.Text.Json.Nodes;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using PersonligFinans.Api.CategorizationRules;
@@ -288,31 +286,4 @@ public class AzureReceiptReaderTests
             property!.AsObject().Remove("description");
         Assert.True(JsonNode.DeepEquals(expected, schema), $"Unexpected schema: {schema}");
     }
-
-    [Fact]
-    public void AddRuleGenerator_WithoutAnEndpoint_RegistersNoReceiptReader()
-    {
-        var services = Services(new() { ["RuleGenerator:Deployment"] = "gpt-4.1-mini" });
-
-        Assert.Null(services.GetService<IReceiptReader>());
-    }
-
-    [Fact]
-    public void AddRuleGenerator_WithAnEndpointAndDeployment_RegistersTheAzureReceiptReaderAlongsideTheRuleGenerator()
-    {
-        var services = Services(new()
-        {
-            ["RuleGenerator:Endpoint"] = "https://example.invalid/",
-            ["RuleGenerator:Deployment"] = "gpt-4.1-mini",
-        });
-
-        Assert.IsType<AzureReceiptReader>(services.GetService<IReceiptReader>());
-        Assert.IsType<AzureRuleGenerator>(services.GetService<IRuleGenerator>());
-    }
-
-    private static ServiceProvider Services(Dictionary<string, string?> settings) =>
-        new ServiceCollection()
-            .AddLogging()
-            .AddRuleGenerator(new ConfigurationBuilder().AddInMemoryCollection(settings).Build())
-            .BuildServiceProvider();
 }

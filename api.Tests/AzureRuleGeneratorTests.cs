@@ -5,6 +5,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using PersonligFinans.Api.CategorizationRules;
+using PersonligFinans.Api.Receipts;
 
 namespace PersonligFinans.Api.Tests;
 
@@ -182,15 +183,16 @@ public class AzureRuleGeneratorTests
     }
 
     [Fact]
-    public void AddRuleGenerator_WithoutAnEndpoint_RegistersNoRuleGenerator()
+    public void AddRuleGenerator_WithoutAnEndpoint_RegistersNeitherTheRuleGeneratorNorTheReceiptReader()
     {
         var services = Services(new() { ["RuleGenerator:Deployment"] = "gpt-4.1-mini" });
 
         Assert.Null(services.GetService<IRuleGenerator>());
+        Assert.Null(services.GetService<IReceiptReader>());
     }
 
     [Fact]
-    public void AddRuleGenerator_WithAnEndpointAndDeployment_RegistersTheAzureRuleGenerator()
+    public void AddRuleGenerator_WithAnEndpointAndDeployment_RegistersTheAzureRuleGeneratorAndReceiptReader()
     {
         var services = Services(new()
         {
@@ -199,6 +201,7 @@ public class AzureRuleGeneratorTests
         });
 
         Assert.IsType<AzureRuleGenerator>(services.GetService<IRuleGenerator>());
+        Assert.IsType<AzureReceiptReader>(services.GetService<IReceiptReader>());
     }
 
     [Fact]
