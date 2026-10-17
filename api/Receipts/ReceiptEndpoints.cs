@@ -74,7 +74,7 @@ public static class ReceiptEndpoints
         if (file.Length > MaxFileBytes)
             return FileProblem("The file is larger than 10 MB.");
 
-        ReceiptImage image;
+        Receipt receipt;
         await using (var stream = file.OpenReadStream())
         {
             if (await ImageTypeOf(stream) is not { } mediaType)
@@ -84,25 +84,29 @@ public static class ReceiptEndpoints
 
             using var bytes = new MemoryStream();
             await stream.CopyToAsync(bytes);
-            image = new ReceiptImage(bytes.ToArray(), mediaType);
+            receipt = new Receipt(bytes.ToArray(), mediaType);
         }
 
-        // Read at each Receipt, so an edited description reaches the next prompt.
+        // Read for each Receipt, so an edited Category description reaches the next reading.
         var categories = await db.Categories.AsNoTracking().OrderBy(c => c.Name).ToListAsync();
         var reading = await receiptReader.ReadAsync(
-            image, categories.Select(c => new CategoryChoice(c.Name, c.Description)).ToList());
+            receipt, categories.Select(c => new CategoryChoice(c.Name, c.Description)).ToList());
         if (reading is not ReceiptReading.Read read)
             return Results.Ok(ReceiptSuggestion.Unreadable);
 
         var description = DescriptionOf(read);
-        // The rule matching the Description wins, chosen as the import chooses one, so a Receipt gets
-        // the Category its merchant's imported Transactions get. Only without one does the reader's
-        // Category count; names are unique ignoring case.
         var rules = await db.CategorizationRules.AsNoTracking().ToListAsync();
-        var categoryId = (description is null ? null : Categorizer.ChooseRule(description, rules)?.CategoryId)
-            ?? categories.FirstOrDefault(c => string.Equals(c.Name, read.CategoryName, StringComparison.OrdinalIgnoreCase))?.Id;
-        return Results.Ok(new ReceiptSuggestion(ReceiptOutcome.Read, read.PurchaseDate, description, AmountOf(read), categoryId));
+        return Results.Ok(new ReceiptSuggestion(
+            ReceiptOutcome.Read, read.PurchaseDate, description, AmountOf(read), CategoryIdOf(description, read, rules, categories)));
     }
+
+    // The Category of the rule matching the Description, chosen as the import chooses one, so a
+    // Receipt gets the Category its merchant's imported Transactions get. Only without one does the
+    // reader's Category count, found by its name, which is unique ignoring case.
+    private static int? CategoryIdOf(
+        string? description, ReceiptReading.Read read, List<CategorizationRule> rules, List<Category> categories) =>
+        (description is null ? null : Categorizer.ChooseRule(description, rules)?.CategoryId)
+        ?? categories.FirstOrDefault(c => string.Equals(c.Name, read.CategoryName, StringComparison.OrdinalIgnoreCase))?.Id;
 
     // The merchant name read, as an imported Transaction's Description would be: without a Payment
     // Channel in front of it, trimmed and cut to the Description max length. Null when blank.

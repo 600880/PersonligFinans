@@ -9,11 +9,11 @@ public class FakeReceiptReader : IReceiptReader
 {
     public ReceiptReading Reading { get; init; } = new ReceiptReading.Unreadable();
 
-    public List<(ReceiptImage Image, IReadOnlyList<CategoryChoice> Categories)> Calls { get; } = [];
+    public List<(Receipt Receipt, IReadOnlyList<CategoryChoice> Categories)> Calls { get; } = [];
 
-    public Task<ReceiptReading> ReadAsync(ReceiptImage image, IReadOnlyList<CategoryChoice> categories)
+    public Task<ReceiptReading> ReadAsync(Receipt receipt, IReadOnlyList<CategoryChoice> categories)
     {
-        Calls.Add((image, categories));
+        Calls.Add((receipt, categories));
         return Task.FromResult(Reading);
     }
 }

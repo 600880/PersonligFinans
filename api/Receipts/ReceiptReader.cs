@@ -2,9 +2,9 @@ using PersonligFinans.Api.CategorizationRules;
 
 namespace PersonligFinans.Api.Receipts;
 
-// One Receipt's image as the receipt reader sees it: its bytes, and its media type as told from
-// those bytes, e.g. "image/jpeg".
-public record ReceiptImage(byte[] Bytes, string MediaType);
+// A Receipt as the receipt reader sees it: the photo's bytes, and its media type as told from those
+// bytes, e.g. "image/jpeg".
+public record Receipt(byte[] Image, string MediaType);
 
 // The outcome of reading one Receipt.
 public abstract record ReceiptReading
@@ -25,9 +25,9 @@ public abstract record ReceiptReading
     public sealed record Unreadable : ReceiptReading;
 }
 
-// Reads a Receipt's image: the purchase it records, and which of the given Categories it belongs
+// Reads a Receipt: the purchase it records, and which of the given Categories it belongs
 // in. Never throws; any failure is reported as Unreadable.
 public interface IReceiptReader
 {
-    Task<ReceiptReading> ReadAsync(ReceiptImage image, IReadOnlyList<CategoryChoice> categories);
+    Task<ReceiptReading> ReadAsync(Receipt receipt, IReadOnlyList<CategoryChoice> categories);
 }

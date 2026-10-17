@@ -6,8 +6,8 @@ public enum AmountSign { Negative, Positive }
 // description and whether money was spent or received, never the Amount itself.
 public record UnmatchedRow(string Description, AmountSign Sign);
 
-// A Category the rule generator may choose, as it sees it: its name and the description of what
-// belongs in it.
+// A Category the LLM may choose, as the rule generator and the receipt reader see it: its name and
+// the description of what belongs in it.
 public record CategoryChoice(string Name, string Description);
 
 // A keyword and the name of the Category it should assign, proposed for one unmatched row.

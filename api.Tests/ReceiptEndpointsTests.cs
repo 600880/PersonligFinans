@@ -61,7 +61,7 @@ public class ReceiptEndpointsTests
     }
 
     // Reads a JPEG Receipt with an API that has the given receipt reader, and returns its suggestion.
-    private async Task<ReceiptSuggestion> Read(IReceiptReader receiptReader)
+    private async Task<ReceiptSuggestion> SuggestionFrom(IReceiptReader receiptReader)
     {
         var response = await Read(Jpeg, "kvittering.jpg", "image/jpeg", receiptReader);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -69,7 +69,7 @@ public class ReceiptEndpointsTests
     }
 
     // A reader that reads every Receipt as a purchase with these details.
-    private static FakeReceiptReader Reading(
+    private static FakeReceiptReader ReaderReading(
         DateOnly? purchaseDate = null,
         string? merchantName = null,
         decimal? total = null,
@@ -197,7 +197,7 @@ public class ReceiptEndpointsTests
     {
         await AddRule($"{_token} kafé", RestaurantsId);
 
-        var suggestion = await Read(Reading(
+        var suggestion = await SuggestionFrom(ReaderReading(
             purchaseDate: new DateOnly(2026, 10, 12),
             merchantName: $"{_token} Kafé Sentrum",
             total: 249.90m,
@@ -211,7 +211,7 @@ public class ReceiptEndpointsTests
     [Fact]
     public async Task Post_ReadReceiptNoRuleMatches_SuggestsTheReadersCategory()
     {
-        var suggestion = await Read(Reading(merchantName: $"{_token} Torghandel", total: 89m, categoryName: "Groceries"));
+        var suggestion = await SuggestionFrom(ReaderReading(merchantName: $"{_token} Torghandel", total: 89m, categoryName: "Groceries"));
 
         Assert.Equal(GroceriesId, suggestion.CategoryId);
     }
@@ -219,7 +219,7 @@ public class ReceiptEndpointsTests
     [Fact]
     public async Task Post_ReadReceiptNoRuleMatches_FindsTheReadersCategoryIgnoringCase()
     {
-        var suggestion = await Read(Reading(merchantName: $"{_token} Torghandel", total: 89m, categoryName: "groceries"));
+        var suggestion = await SuggestionFrom(ReaderReading(merchantName: $"{_token} Torghandel", total: 89m, categoryName: "groceries"));
 
         Assert.Equal(GroceriesId, suggestion.CategoryId);
     }
@@ -227,7 +227,7 @@ public class ReceiptEndpointsTests
     [Fact]
     public async Task Post_ReadReceiptWithAnUnknownCategory_SuggestsNoCategory()
     {
-        var suggestion = await Read(Reading(merchantName: $"{_token} Torghandel", total: 89m, categoryName: "Groceries and more"));
+        var suggestion = await SuggestionFrom(ReaderReading(merchantName: $"{_token} Torghandel", total: 89m, categoryName: "Groceries and more"));
 
         Assert.Null(suggestion.CategoryId);
     }
@@ -235,7 +235,7 @@ public class ReceiptEndpointsTests
     [Fact]
     public async Task Post_ReadReceiptWithoutAMerchantName_SuggestsTheReadersCategory()
     {
-        var suggestion = await Read(Reading(total: 89m, categoryName: "Groceries"));
+        var suggestion = await SuggestionFrom(ReaderReading(total: 89m, categoryName: "Groceries"));
 
         Assert.Null(suggestion.Description);
         Assert.Equal(GroceriesId, suggestion.CategoryId);
@@ -244,7 +244,7 @@ public class ReceiptEndpointsTests
     [Fact]
     public async Task Post_ReadRefundReceipt_SuggestsAPositiveAmount()
     {
-        var suggestion = await Read(Reading(merchantName: $"{_token} Sport", total: 499m, isRefund: true));
+        var suggestion = await SuggestionFrom(ReaderReading(merchantName: $"{_token} Sport", total: 499m, isRefund: true));
 
         Assert.Equal(499m, suggestion.Amount);
     }
@@ -256,7 +256,7 @@ public class ReceiptEndpointsTests
     [InlineData("")]
     public async Task Post_ReadReceiptInNokOrWithoutACurrency_SuggestsItsAmount(string? currencyCode)
     {
-        var suggestion = await Read(Reading(merchantName: $"{_token} Sport", total: 129.50m, currencyCode: currencyCode));
+        var suggestion = await SuggestionFrom(ReaderReading(merchantName: $"{_token} Sport", total: 129.50m, currencyCode: currencyCode));
 
         Assert.Equal(-129.50m, suggestion.Amount);
     }
@@ -264,7 +264,7 @@ public class ReceiptEndpointsTests
     [Fact]
     public async Task Post_ReadReceiptInAForeignCurrency_SuggestsNoAmountButTheRest()
     {
-        var suggestion = await Read(Reading(
+        var suggestion = await SuggestionFrom(ReaderReading(
             purchaseDate: new DateOnly(2026, 7, 3),
             merchantName: $"{_token} Café de Paris",
             total: 18.40m,
@@ -282,7 +282,7 @@ public class ReceiptEndpointsTests
     [InlineData(null)]
     public async Task Post_ReadReceiptWithoutAPositiveTotal_SuggestsNoAmount(int? total)
     {
-        var suggestion = await Read(Reading(merchantName: $"{_token} Sport", total: total));
+        var suggestion = await SuggestionFrom(ReaderReading(merchantName: $"{_token} Sport", total: total));
 
         Assert.Null(suggestion.Amount);
     }
@@ -296,7 +296,7 @@ public class ReceiptEndpointsTests
     public async Task Post_ReadReceipt_SuggestsTheMerchantNameAsTheDescriptionWithoutAPaymentChannel(
         string merchantName, string description)
     {
-        var suggestion = await Read(Reading(merchantName: string.Format(merchantName, _token), total: 35m));
+        var suggestion = await SuggestionFrom(ReaderReading(merchantName: string.Format(merchantName, _token), total: 35m));
 
         Assert.Equal(string.Format(description, _token), suggestion.Description);
     }
@@ -306,7 +306,7 @@ public class ReceiptEndpointsTests
     {
         await AddRule($"{_token} kiosk", RestaurantsId);
 
-        var suggestion = await Read(Reading(merchantName: $"Vipps*{_token} Kiosk", total: 35m, categoryName: "Other"));
+        var suggestion = await SuggestionFrom(ReaderReading(merchantName: $"Vipps*{_token} Kiosk", total: 35m, categoryName: "Other"));
 
         Assert.Equal(RestaurantsId, suggestion.CategoryId);
     }
@@ -316,7 +316,7 @@ public class ReceiptEndpointsTests
     {
         var merchantName = $"{_token} " + new string('x', AppDbContext.DescriptionMaxLength);
 
-        var suggestion = await Read(Reading(merchantName: merchantName, total: 35m));
+        var suggestion = await SuggestionFrom(ReaderReading(merchantName: merchantName, total: 35m));
 
         Assert.Equal(merchantName[..AppDbContext.DescriptionMaxLength], suggestion.Description);
     }
@@ -326,7 +326,7 @@ public class ReceiptEndpointsTests
     [InlineData("   ")]
     public async Task Post_ReadReceiptWithABlankMerchantName_SuggestsNoDescription(string merchantName)
     {
-        var suggestion = await Read(Reading(merchantName: merchantName, total: 35m));
+        var suggestion = await SuggestionFrom(ReaderReading(merchantName: merchantName, total: 35m));
 
         Assert.Null(suggestion.Description);
     }
@@ -334,7 +334,7 @@ public class ReceiptEndpointsTests
     [Fact]
     public async Task Post_UnreadableReceipt_AnswersUnreadableWithEveryFieldNull()
     {
-        var suggestion = await Read(new FakeReceiptReader { Reading = new ReceiptReading.Unreadable() });
+        var suggestion = await SuggestionFrom(new FakeReceiptReader { Reading = new ReceiptReading.Unreadable() });
 
         Assert.Equal(new ReceiptSuggestion(ReceiptOutcome.Unreadable, null, null, null, null), suggestion);
     }
@@ -342,7 +342,7 @@ public class ReceiptEndpointsTests
     [Fact]
     public async Task Post_ReceiptReadWithNothingMadeOut_AnswersReadWithEveryFieldNull()
     {
-        var suggestion = await Read(Reading(currencyCode: null));
+        var suggestion = await SuggestionFrom(ReaderReading(currencyCode: null));
 
         Assert.Equal(new ReceiptSuggestion(ReceiptOutcome.Read, null, null, null, null), suggestion);
     }
@@ -352,11 +352,11 @@ public class ReceiptEndpointsTests
     {
         var reader = new FakeReceiptReader();
 
-        await Read(reader);
+        await SuggestionFrom(reader);
 
         var call = Assert.Single(reader.Calls);
-        Assert.Equal(Jpeg, call.Image.Bytes);
-        Assert.Equal("image/jpeg", call.Image.MediaType);
+        Assert.Equal(Jpeg, call.Receipt.Image);
+        Assert.Equal("image/jpeg", call.Receipt.MediaType);
         Assert.Equal(
             SeedCategories.All.Select(c => new CategoryChoice(c.Name, c.Description)).OrderBy(c => c.Name),
             call.Categories.OrderBy(c => c.Name));
@@ -369,7 +369,7 @@ public class ReceiptEndpointsTests
 
         await Read(Png, "kvittering.jpg", "image/jpeg", reader);
 
-        Assert.Equal("image/png", Assert.Single(reader.Calls).Image.MediaType);
+        Assert.Equal("image/png", Assert.Single(reader.Calls).Receipt.MediaType);
     }
 
     [Fact]
@@ -378,7 +378,7 @@ public class ReceiptEndpointsTests
         await AddRule($"{_token} kafé", RestaurantsId);
         var before = await Stored();
 
-        await Read(Reading(merchantName: $"{_token} Kafé", total: 249.90m, categoryName: "Groceries"));
+        await SuggestionFrom(ReaderReading(merchantName: $"{_token} Kafé", total: 249.90m, categoryName: "Groceries"));
 
         Assert.Equal(before, await Stored());
     }
