@@ -1,4 +1,4 @@
-import { useId, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import type { ReceiptSuggestion } from '../lib/api'
 import { emptyTransactionForm } from '../lib/transactionForm'
 import { TransactionForm } from './TransactionForm'
@@ -101,8 +101,12 @@ export function ReceiptScanModal({ receipts, onSaved, onClosed }: ReceiptScanMod
           </div>
         )}
 
-        {/* Out of reach while closing waits for its confirmation. */}
-        <div inert={isConfirmingClose} className="flex min-h-0 gap-6 px-6 pt-2 pb-6">
+        {/* The form with the Receipt to its right, or below the breakpoint the Receipt above it, the
+            two scrolling together. Out of reach while closing waits for its confirmation. */}
+        <div
+          inert={isConfirmingClose}
+          className="flex min-h-0 flex-col gap-6 overflow-y-auto px-6 pt-2 pb-6 md:flex-row"
+        >
           <ReceiptStep
             // A new step for each Receipt, so its form starts over.
             key={position}
@@ -156,10 +160,59 @@ function ReceiptStep({ receipt, heading, headingId, onSaved, onDone }: ReceiptSt
         />
       </div>
 
-      {/* A tall Receipt scrolls here, keeping the form in view. */}
-      <div className="min-w-0 flex-1 overflow-auto rounded-lg border border-slate-200 bg-slate-50">
-        <img src={receipt.previewUrl} alt="Receipt" className="w-full" />
+      <ReceiptImage previewUrl={receipt.previewUrl} />
+    </>
+  )
+}
+
+// The Receipt beside its form, or above it on a narrow screen, scrolling within its panel when tall
+// so the form stays in view. A click shows it full-screen, where a click or Escape closes it again.
+// The window has no Escape of its own, so that Escape only ever closes this view.
+function ReceiptImage({ previewUrl }: { previewUrl: string }) {
+  const [isFullScreen, setIsFullScreen] = useState(false)
+  const showButtonRef = useRef<HTMLButtonElement>(null)
+
+  function closeFullScreen() {
+    setIsFullScreen(false)
+    showButtonRef.current?.focus()
+  }
+
+  useEffect(() => {
+    if (!isFullScreen) return
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') closeFullScreen()
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [isFullScreen])
+
+  return (
+    <>
+      {/* Placed first rather than reversing the row, which would start a narrow window scrolled to
+          the bottom of the form. */}
+      <div className="order-first max-h-72 shrink-0 overflow-auto rounded-lg border border-slate-200 bg-slate-50 md:order-none md:max-h-none md:min-w-0 md:flex-1">
+        <button
+          ref={showButtonRef}
+          type="button"
+          aria-label="Show the Receipt full-screen"
+          onClick={() => setIsFullScreen(true)}
+          className="block w-full cursor-zoom-in"
+        >
+          <img src={previewUrl} alt="Receipt" className="w-full" />
+        </button>
       </div>
+
+      {isFullScreen && (
+        <button
+          type="button"
+          aria-label="Close the full-screen Receipt"
+          autoFocus
+          onClick={closeFullScreen}
+          className="fixed inset-0 z-10 flex cursor-zoom-out items-center justify-center bg-slate-900/90 p-4"
+        >
+          <img src={previewUrl} alt="Receipt" className="max-h-full max-w-full object-contain" />
+        </button>
+      )}
     </>
   )
 }
