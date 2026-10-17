@@ -84,7 +84,7 @@ public static class TransactionEndpoints
     }
 
     // The Possible duplicates of a Transaction being entered by hand: every Transaction, imported or
-    // manual, with exactly the same signed Amount and a posted date within three days of the given
+    // manually-entered, with exactly the same signed Amount and a posted date within three days of the given
     // date either way, both ends included, oldest first with the id as a stable tie-break. Only a
     // warning for the user: saving a Transaction never checks for them. The date and Amount are read
     // as text, so that a malformed one gets a validation problem rather than a framework error: the

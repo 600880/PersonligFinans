@@ -55,11 +55,14 @@ export function isTransactionFormValid(values: TransactionFormValues): boolean {
   return signedAmount(values) !== null
 }
 
-// What to ask for the form's Possible duplicates: its date and signed Amount, or null until both
-// the Date and a valid amount are filled in.
-export function possibleDuplicateQuery(
-  values: TransactionFormValues,
-): { date: string; amount: number } | null {
+// What the Possible duplicates are asked for: a date and a signed Amount.
+export interface PossibleDuplicateQuery {
+  date: string
+  amount: number
+}
+
+// The form's date and signed Amount, or null until both the Date and a valid amount are filled in.
+export function possibleDuplicateQuery(values: TransactionFormValues): PossibleDuplicateQuery | null {
   const amount = signedAmount(values)
   if (values.date.trim() === '' || amount === null) return null
   return { date: values.date, amount }

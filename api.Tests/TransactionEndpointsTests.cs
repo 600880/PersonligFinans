@@ -597,7 +597,7 @@ public class TransactionEndpointsTests
     }
 
     // The Possible duplicate tests use dates in 2047, which no other test uses, and only look at
-    // their own Transactions.
+    // their own Transactions, except for the one asking about an Amount no test enters.
     private async Task<List<PossibleDuplicateResponse>> OwnPossibleDuplicates(string date, string amount)
     {
         var duplicates = await _client.GetFromJsonAsync<List<PossibleDuplicateResponse>>(
@@ -606,7 +606,7 @@ public class TransactionEndpointsTests
     }
 
     [Fact]
-    public async Task Get_PossibleDuplicates_MatchesUpToThreeDaysEitherWayOrderedByDate()
+    public async Task Get_PossibleDuplicates_AreThoseUpToThreeDaysEitherWayOrderedByDate()
     {
         await AddManualTransaction("2047-03-06", $"{_token} four days after");
         await AddManualTransaction("2047-03-05", $"{_token} three days after");
@@ -627,7 +627,7 @@ public class TransactionEndpointsTests
     }
 
     [Fact]
-    public async Task Get_PossibleDuplicates_MatchesImportedAndManualTransactions()
+    public async Task Get_PossibleDuplicates_IncludeImportedAndManuallyEnteredTransactions()
     {
         // Each imported row is a purchase of 10,00.
         await ImportStatement("01.05.2047 - 31.05.2047", ("0905", $"{_token} imported"));
@@ -654,7 +654,7 @@ public class TransactionEndpointsTests
     }
 
     [Fact]
-    public async Task Get_PossibleDuplicates_WithoutMatches_ReturnsEmptyList()
+    public async Task Get_PossibleDuplicates_WhenThereAreNone_ReturnsEmptyList()
     {
         var duplicates = await _client.GetFromJsonAsync<List<PossibleDuplicateResponse>>(
             "/api/transactions/possible-duplicates?date=2047-09-15&amount=-12345.67");

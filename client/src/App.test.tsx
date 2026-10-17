@@ -739,8 +739,8 @@ describe('Possible duplicate notice', () => {
   const rema: PossibleDuplicate = { id: 5, date: '2026-10-14', description: 'REMA 1000 GRØNLAND', amount: -249.9 }
   const kiwi: PossibleDuplicate = { id: 9, date: '2026-10-16', description: 'Kiwi Torggata', amount: -249.9 }
 
-  // Answers rema and kiwi for -249.90 and nothing for any other Amount.
-  function answerRemaAndKiwiFor24990() {
+  // Answers rema and kiwi as the Possible duplicates of Out 249.90, and none for any other Amount.
+  function answerTwoForOut24990() {
     handlePossibleDuplicates = (_date, amount) => Response.json(amount === -249.9 ? [rema, kiwi] : [])
   }
 
@@ -751,6 +751,17 @@ describe('Possible duplicate notice', () => {
 
   function notice() {
     return screen.queryByRole('region', { name: /possible duplicate/i })
+  }
+
+  function findNotice() {
+    return screen.findByRole('region', { name: /possible duplicate/i })
+  }
+
+  // Puts the whole value in at once, so that no half-typed value is ever valid on the way, such as
+  // 10.00 of 10.005.
+  async function enter(user: ReturnType<typeof userEvent.setup>, label: RegExp, value: string) {
+    await user.clear(screen.getByLabelText(label))
+    if (value !== '') await user.paste(value)
   }
 
   beforeEach(() => {
@@ -775,13 +786,13 @@ describe('Possible duplicate notice', () => {
   })
 
   it("lists each Possible duplicate's date, Description and Amount once Date and amount are filled", async () => {
-    answerRemaAndKiwiFor24990()
+    answerTwoForOut24990()
     const user = await openModal()
 
     await user.type(screen.getByLabelText(/^out$/i), '249.90')
     await afterThePause()
 
-    const items = within(await screen.findByRole('region', { name: /possible duplicate/i })).getAllByRole('listitem')
+    const items = within(await findNotice()).getAllByRole('listitem')
     expect(items).toHaveLength(2)
     expect(within(items[0]).getByText('14.10.2026')).toBeInTheDocument()
     expect(within(items[0]).getByText('REMA 1000 GRØNLAND')).toBeInTheDocument()
@@ -794,62 +805,53 @@ describe('Possible duplicate notice', () => {
   it('asks nothing and shows no notice while the Date or amount is empty or invalid', async () => {
     handlePossibleDuplicates = () => Response.json([rema])
     const user = await openModal()
-    // Pasted whole, so that no half-typed value is ever valid on the way, such as 10.00 of 10.005.
-    async function enter(label: RegExp, value: string) {
-      await user.clear(screen.getByLabelText(label))
-      if (value !== '') await user.paste(value)
-    }
 
     // Today's date but no amount.
     await afterThePause()
     expect(asked).toEqual([])
 
-    await enter(/^out$/i, '0')
+    await enter(user, /^out$/i, '0')
     await afterThePause()
     expect(asked).toEqual([])
 
-    await enter(/^out$/i, '10.005')
+    await enter(user, /^out$/i, '10.005')
     await afterThePause()
     expect(asked).toEqual([])
 
     // Both In and Out.
-    await enter(/^in$/i, '249.90')
+    await enter(user, /^in$/i, '249.90')
     await afterThePause()
     expect(asked).toEqual([])
 
     // A valid amount but no date.
-    await enter(/date/i, '')
-    await enter(/^out$/i, '')
+    await enter(user, /date/i, '')
+    await enter(user, /^out$/i, '')
     await afterThePause()
     expect(asked).toEqual([])
     expect(screen.getByLabelText(/^in$/i)).toHaveValue(249.9)
     expect(notice()).not.toBeInTheDocument()
   })
 
-  it('follows the Date and amount, and goes away when nothing matches them', async () => {
+  it('follows the Date and amount, and goes away when there are none for them', async () => {
     handlePossibleDuplicates = (date, amount) =>
       Response.json(date === '2026-10-15' && amount === -249.9 ? [rema] : [])
     const user = await openModal()
-    async function enter(label: RegExp, value: string) {
-      await user.clear(screen.getByLabelText(label))
-      await user.paste(value)
-    }
-    await enter(/date/i, '2026-10-15')
+    await enter(user, /date/i, '2026-10-15')
 
-    await enter(/^out$/i, '249.90')
+    await enter(user, /^out$/i, '249.90')
     await afterThePause()
-    expect(await screen.findByRole('region', { name: /possible duplicate/i })).toHaveTextContent('REMA 1000 GRØNLAND')
+    expect(await findNotice()).toHaveTextContent('REMA 1000 GRØNLAND')
 
-    await enter(/^out$/i, '100')
+    await enter(user, /^out$/i, '100')
     await afterThePause()
     await waitFor(() => expect(asked.at(-1)).toEqual({ date: '2026-10-15', amount: -100 }))
     expect(notice()).not.toBeInTheDocument()
 
-    await enter(/^out$/i, '249.90')
+    await enter(user, /^out$/i, '249.90')
     await afterThePause()
-    expect(await screen.findByRole('region', { name: /possible duplicate/i })).toBeInTheDocument()
+    expect(await findNotice()).toBeInTheDocument()
 
-    await enter(/date/i, '2026-10-25')
+    await enter(user, /date/i, '2026-10-25')
     await afterThePause()
     await waitFor(() => expect(asked.at(-1)).toEqual({ date: '2026-10-25', amount: -249.9 }))
     expect(notice()).not.toBeInTheDocument()
@@ -886,7 +888,7 @@ describe('Possible duplicate notice', () => {
   })
 
   it('saves the Transaction while the notice shows', async () => {
-    answerRemaAndKiwiFor24990()
+    answerTwoForOut24990()
     let posted: unknown
     handlePost = (body) => {
       posted = body
@@ -895,7 +897,7 @@ describe('Possible duplicate notice', () => {
     const user = await openModal()
     await fillValidForm(user)
     await afterThePause()
-    await screen.findByRole('region', { name: /possible duplicate/i })
+    await findNotice()
 
     await user.click(screen.getByRole('button', { name: /^save$/i }))
 

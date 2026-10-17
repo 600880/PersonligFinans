@@ -13,6 +13,7 @@ import {
   isTransactionFormValid,
   possibleDuplicateQuery,
   toCreateTransactionRequest,
+  type PossibleDuplicateQuery,
   type TransactionFormValues,
 } from '../lib/transactionForm'
 
@@ -45,16 +46,18 @@ function usePossibleDuplicates(values: TransactionFormValues): PossibleDuplicate
   const query = possibleDuplicateQuery(values)
   const date = query?.date ?? null
   const amount = query?.amount ?? null
-  const key = query && `${date} ${amount}`
-  const [answer, setAnswer] = useState<{ key: string; duplicates: PossibleDuplicate[] } | null>(null)
+  // The answer remembers what it was asked, so that it is only shown while the form still holds it.
+  const [answer, setAnswer] = useState<
+    (PossibleDuplicateQuery & { possibleDuplicates: PossibleDuplicate[] }) | null
+  >(null)
 
   useEffect(() => {
     if (date === null || amount === null) return
     let ignore = false
     const timer = setTimeout(() => {
-      fetchPossibleDuplicates(date, amount)
-        .then((duplicates) => {
-          if (!ignore) setAnswer({ key: `${date} ${amount}`, duplicates })
+      fetchPossibleDuplicates({ date, amount })
+        .then((possibleDuplicates) => {
+          if (!ignore) setAnswer({ date, amount, possibleDuplicates })
         })
         // A failed check only means no notice: it never stands in the way of saving.
         .catch(() => {})
@@ -65,7 +68,9 @@ function usePossibleDuplicates(values: TransactionFormValues): PossibleDuplicate
     }
   }, [date, amount])
 
-  return answer !== null && answer.key === key ? answer.duplicates : []
+  return answer !== null && answer.date === date && answer.amount === amount
+    ? answer.possibleDuplicates
+    : []
 }
 
 interface TransactionFormProps {
@@ -233,11 +238,11 @@ export function TransactionForm({
               {possibleDuplicates.length === 1 ? 'Possible duplicate' : 'Possible duplicates'}
             </h3>
             <ul className="mt-1 flex flex-col gap-1">
-              {possibleDuplicates.map((duplicate) => (
-                <li key={duplicate.id} className="flex gap-3">
-                  <span className="whitespace-nowrap">{formatNorwegianDate(duplicate.date)}</span>
-                  <span className="min-w-0 flex-1 break-words">{duplicate.description}</span>
-                  <span className="whitespace-nowrap tabular-nums">{formatAmount(duplicate.amount)}</span>
+              {possibleDuplicates.map((possibleDuplicate) => (
+                <li key={possibleDuplicate.id} className="flex gap-3">
+                  <span className="whitespace-nowrap">{formatNorwegianDate(possibleDuplicate.date)}</span>
+                  <span className="min-w-0 flex-1 break-words">{possibleDuplicate.description}</span>
+                  <span className="whitespace-nowrap tabular-nums">{formatAmount(possibleDuplicate.amount)}</span>
                 </li>
               ))}
             </ul>

@@ -1,6 +1,6 @@
 import { periodQuery, type Period } from './period'
 import { spanQuery, type Span } from './span'
-import type { CreateTransactionRequest } from './transactionForm'
+import type { CreateTransactionRequest, PossibleDuplicateQuery } from './transactionForm'
 
 // colour is what the Dashboard draws the Category in, as #rrggbb. transactionCount and ruleCount are
 // how many Transactions and Categorization Rules have the Category.
@@ -277,11 +277,10 @@ export interface PossibleDuplicate {
   amount: number
 }
 
-// The Possible duplicates of a Transaction on the given date with the given signed Amount, oldest
-// first.
-export async function fetchPossibleDuplicates(date: string, amount: number): Promise<PossibleDuplicate[]> {
-  const query = new URLSearchParams({ date, amount: String(amount) })
-  const response = await fetch(`/api/transactions/possible-duplicates?${query}`)
+// The Possible duplicates of a Transaction on the query's date with its signed Amount, oldest first.
+export async function fetchPossibleDuplicates({ date, amount }: PossibleDuplicateQuery): Promise<PossibleDuplicate[]> {
+  const search = new URLSearchParams({ date, amount: String(amount) })
+  const response = await fetch(`/api/transactions/possible-duplicates?${search}`)
   if (!response.ok) throw new Error(`Checking for possible duplicates failed (${response.status})`)
   return (await response.json()) as PossibleDuplicate[]
 }
