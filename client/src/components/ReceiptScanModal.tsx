@@ -1,6 +1,6 @@
-import { useId, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import type { ReceiptSuggestion } from '../lib/api'
-import { emptyTransactionForm } from '../lib/transactionForm'
+import { emptyTransactionForm, suggestedTransactionForm } from '../lib/transactionForm'
 import { TransactionForm } from './TransactionForm'
 
 // One Receipt of a Receipt scan: its image, a browser-local URL showing it, and the server's
@@ -62,11 +62,25 @@ interface ReceiptStepProps {
   onDone: () => void
 }
 
-// One Receipt's form beside its image. onDone is called once, on the first Save or Skip, which
+// One Receipt's form beside its image. Until the Receipt has been read the form is disabled, and
+// then it starts over from what was read. onDone is called once, on the first Save or Skip, which
 // also releases the preview: a Save that finishes after Skip is still reported to onSaved, but
 // doesn't move the scan on again.
 function ReceiptStep({ receipt, heading, headingId, onSaved, onDone }: ReceiptStepProps) {
   const isDone = useRef(false)
+  // null while the Receipt is still being read.
+  const [suggestion, setSuggestion] = useState<ReceiptSuggestion | null>(null)
+
+  useEffect(() => {
+    let ignore = false
+    // Never rejects: a Receipt that couldn't be read comes back unreadable.
+    void receipt.suggestion.then((read) => {
+      if (!ignore) setSuggestion(read)
+    })
+    return () => {
+      ignore = true
+    }
+  }, [receipt.suggestion])
 
   function done() {
     if (isDone.current) return
@@ -82,8 +96,18 @@ function ReceiptStep({ receipt, heading, headingId, onSaved, onDone }: ReceiptSt
           {heading}
         </h2>
 
+        {suggestion === null && <p className="mt-3 text-sm text-slate-500">Reading…</p>}
+        {suggestion?.outcome === 'unreadable' && (
+          <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            Couldn't read this receipt
+          </p>
+        )}
+
         <TransactionForm
-          initialValues={emptyTransactionForm()}
+          // Started over from what was read, once the Receipt has been read.
+          key={suggestion === null ? 'reading' : 'read'}
+          initialValues={suggestion === null ? emptyTransactionForm() : suggestedTransactionForm(suggestion)}
+          disabled={suggestion === null}
           secondaryAction={{ label: 'Skip', onClick: done }}
           onSaved={() => {
             onSaved()

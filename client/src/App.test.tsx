@@ -4364,12 +4364,15 @@ describe('Scan receipts', () => {
 
   async function scanUntilFormIsReady(files: File[]) {
     const user = await scan(files)
-    await within(screen.getByRole('dialog')).findByRole('option', { name: 'Groceries' })
+    await formIsReady()
     return user
   }
 
-  async function formIsReady(name: string) {
-    await within(await screen.findByRole('dialog', { name })).findByRole('option', { name: 'Groceries' })
+  // Once the Receipt has been read, its form starts over and loads the Categories again.
+  async function formIsReady(name?: string) {
+    const dialog = await screen.findByRole('dialog', name === undefined ? {} : { name })
+    await waitFor(() => expect(within(dialog).queryByText('Reading…')).not.toBeInTheDocument())
+    await within(dialog).findByRole('option', { name: 'Groceries' })
   }
 
   function monthsRequests() {
@@ -4628,5 +4631,130 @@ describe('Scan receipts', () => {
     await user.upload(screen.getByLabelText(/^receipts$/i), [kiwi])
 
     expect(screen.getByRole('dialog', { name: 'Receipt 1 of 1' })).toBeInTheDocument()
+  })
+
+  describe('pre-filled from what was read', () => {
+    const kiwiRead = { outcome: 'read', date: '2026-10-12', description: 'Kiwi Majorstuen', amount: -249.9, categoryId: 1 }
+    const remaRefund = { outcome: 'read', date: '2026-10-14', description: 'Rema 1000', amount: 89, categoryId: 13 }
+    const unreadable = { outcome: 'unreadable', date: null, description: null, amount: null, categoryId: null }
+
+    // Answers each Receipt with the suggestion given for its file name, or unavailable.
+    function answer(suggestions: Record<string, unknown>) {
+      handleReadReceipt = (body) => Response.json(suggestions[(body.get('file') as File).name] ?? unavailable)
+    }
+
+    function dialog() {
+      return screen.getByRole('dialog')
+    }
+
+    it("fills the form with the Receipt's date, Description, Out and Category, and leaves Note empty", async () => {
+      answer({ 'kiwi.jpg': kiwiRead })
+
+      await scanUntilFormIsReady([kiwi, rema])
+
+      expect(within(dialog()).getByLabelText(/date/i)).toHaveValue('2026-10-12')
+      expect(within(dialog()).getByLabelText(/description/i)).toHaveValue('Kiwi Majorstuen')
+      expect(within(dialog()).getByLabelText(/^in$/i)).toHaveValue(null)
+      expect(within(dialog()).getByLabelText(/^out$/i)).toHaveValue(249.9)
+      expect(within(dialog()).getByLabelText(/^note$/i)).toHaveValue('')
+      expect(within(dialog()).getByLabelText(/category/i)).toHaveValue('1')
+    })
+
+    it('fills a refund into In', async () => {
+      answer({ 'rema.png': remaRefund })
+
+      await scanUntilFormIsReady([rema])
+
+      expect(within(dialog()).getByLabelText(/^in$/i)).toHaveValue(89)
+      expect(within(dialog()).getByLabelText(/^out$/i)).toHaveValue(null)
+    })
+
+    it('shows Reading… with the image and a disabled form until a slow read finishes, then the suggested values', async () => {
+      let respond: (response: Response) => void = () => {}
+      handleReadReceipt = () => new Promise<Response>((resolve) => (respond = resolve))
+
+      await scan([kiwi])
+
+      expect(within(dialog()).getByText('Reading…')).toBeInTheDocument()
+      expect(within(dialog()).getByRole('img', { name: 'Receipt' })).toHaveAttribute('src', 'blob:kiwi.jpg')
+      expect(within(dialog()).getByLabelText(/description/i)).toBeDisabled()
+      expect(within(dialog()).getByRole('button', { name: /^save$/i })).toBeDisabled()
+      expect(within(dialog()).getByRole('button', { name: 'Skip' })).toBeEnabled()
+
+      await act(async () => respond(Response.json(kiwiRead)))
+
+      await waitFor(() => expect(within(dialog()).queryByText('Reading…')).not.toBeInTheDocument())
+      expect(within(dialog()).getByLabelText(/description/i)).toBeEnabled()
+      expect(within(dialog()).getByLabelText(/description/i)).toHaveValue('Kiwi Majorstuen')
+      await within(dialog()).findByRole('option', { name: 'Groceries' })
+      expect(within(dialog()).getByRole('button', { name: /^save$/i })).toBeEnabled()
+    })
+
+    it('opens the first form as soon as the first Receipt is read, while the others are still being read', async () => {
+      handleReadReceipt = (body) =>
+        (body.get('file') as File).name === 'kiwi.jpg' ? Response.json(kiwiRead) : new Promise(() => {})
+
+      const user = await scanUntilFormIsReady([kiwi, rema])
+
+      expect(within(dialog()).getByLabelText(/description/i)).toHaveValue('Kiwi Majorstuen')
+      await user.click(screen.getByRole('button', { name: 'Skip' }))
+      expect(screen.getByRole('dialog', { name: 'Receipt 2 of 2' })).toHaveTextContent('Reading…')
+    })
+
+    it("fills each Receipt's form with what was read on that Receipt", async () => {
+      answer({ 'kiwi.jpg': kiwiRead, 'rema.png': remaRefund })
+      const user = await scanUntilFormIsReady([kiwi, rema])
+
+      await user.click(screen.getByRole('button', { name: 'Skip' }))
+
+      await formIsReady('Receipt 2 of 2')
+      expect(within(dialog()).getByLabelText(/date/i)).toHaveValue('2026-10-14')
+      expect(within(dialog()).getByLabelText(/description/i)).toHaveValue('Rema 1000')
+      expect(within(dialog()).getByLabelText(/category/i)).toHaveValue('13')
+    })
+
+    it('saves the suggested values with the edits made to them', async () => {
+      const posted: unknown[] = []
+      handlePost = (body) => {
+        posted.push(body)
+        return Response.json({ id: 1 }, { status: 201 })
+      }
+      answer({ 'kiwi.jpg': kiwiRead })
+      const user = await scanUntilFormIsReady([kiwi])
+      await user.clear(screen.getByLabelText(/description/i))
+      await user.type(screen.getByLabelText(/description/i), 'Kiwi')
+
+      await user.click(screen.getByRole('button', { name: /^save$/i }))
+
+      expect(posted).toEqual([{ date: '2026-10-12', description: 'Kiwi', amount: -249.9, note: null, categoryId: 1 }])
+    })
+
+    it("says Couldn't read this receipt above an empty form with today's date when it couldn't be read", async () => {
+      answer({ 'kiwi.jpg': unreadable })
+
+      await scanUntilFormIsReady([kiwi])
+
+      expect(within(dialog()).getByText("Couldn't read this receipt")).toBeInTheDocument()
+      expect(within(dialog()).getByLabelText(/date/i)).toHaveValue(todayIsoDate())
+      expect(within(dialog()).getByLabelText(/description/i)).toHaveValue('')
+      expect(within(dialog()).getByLabelText(/^out$/i)).toHaveValue(null)
+      expect(within(dialog()).getByLabelText(/category/i)).toHaveValue('')
+    })
+
+    it("says Couldn't read this receipt when the server rejects it", async () => {
+      handleReadReceipt = () =>
+        Response.json({ errors: { file: ['The file is not a JPEG, PNG, WebP or GIF image.'] } }, { status: 400 })
+
+      await scanUntilFormIsReady([kiwi])
+
+      expect(within(dialog()).getByText("Couldn't read this receipt")).toBeInTheDocument()
+    })
+
+    it('shows no notice when no receipt reader is configured', async () => {
+      await scanUntilFormIsReady([kiwi])
+
+      expect(within(dialog()).queryByText("Couldn't read this receipt")).not.toBeInTheDocument()
+      expect(within(dialog()).queryByText('Reading…')).not.toBeInTheDocument()
+    })
   })
 })

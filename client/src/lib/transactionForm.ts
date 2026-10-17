@@ -1,3 +1,4 @@
+import type { ReceiptSuggestion } from './api'
 import { todayIsoDate } from './date'
 
 export interface TransactionFormValues {
@@ -18,6 +19,22 @@ export function emptyTransactionForm(): TransactionFormValues {
     amountOut: '',
     note: '',
     categoryId: '',
+  }
+}
+
+// The form a Receipt's Transaction starts from: what was read on the Receipt, with today's date if
+// none was, a purchase in Out and a refund in In, and every field that wasn't suggested empty. The
+// Note is the user's alone, so it always starts empty.
+export function suggestedTransactionForm(suggestion: ReceiptSuggestion): TransactionFormValues {
+  const { date, description, amount, categoryId } = suggestion
+  const magnitude = amount === null ? '' : Math.abs(amount).toFixed(2)
+  return {
+    date: date ?? todayIsoDate(),
+    description: description ?? '',
+    amountIn: amount !== null && amount > 0 ? magnitude : '',
+    amountOut: amount !== null && amount < 0 ? magnitude : '',
+    note: '',
+    categoryId: categoryId === null ? '' : String(categoryId),
   }
 }
 

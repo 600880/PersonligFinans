@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
+import type { ReceiptSuggestion } from './api'
+import { todayIsoDate } from './date'
 import {
   isTransactionFormValid,
+  suggestedTransactionForm,
   toCreateTransactionRequest,
   type TransactionFormValues,
 } from './transactionForm'
@@ -95,5 +98,55 @@ describe('toCreateTransactionRequest', () => {
       note: null,
       categoryId: 1,
     })
+  })
+})
+
+describe('suggestedTransactionForm', () => {
+  function suggestion(overrides: Partial<ReceiptSuggestion> = {}): ReceiptSuggestion {
+    return {
+      outcome: 'read',
+      date: '2026-10-12',
+      description: 'Rema 1000',
+      amount: -249.9,
+      categoryId: 1,
+      ...overrides,
+    }
+  }
+
+  it('fills a purchase into Out, with the date, Description and Category, and leaves Note empty', () => {
+    expect(suggestedTransactionForm(suggestion())).toEqual({
+      date: '2026-10-12',
+      description: 'Rema 1000',
+      amountIn: '',
+      amountOut: '249.90',
+      note: '',
+      categoryId: '1',
+    })
+  })
+
+  it('fills a refund into In', () => {
+    const values = suggestedTransactionForm(suggestion({ amount: 1500 }))
+
+    expect(values.amountIn).toBe('1500.00')
+    expect(values.amountOut).toBe('')
+  })
+
+  it("falls back to today's date and leaves every other field empty when nothing was suggested", () => {
+    expect(
+      suggestedTransactionForm(
+        suggestion({ outcome: 'unreadable', date: null, description: null, amount: null, categoryId: null }),
+      ),
+    ).toEqual({
+      date: todayIsoDate(),
+      description: '',
+      amountIn: '',
+      amountOut: '',
+      note: '',
+      categoryId: '',
+    })
+  })
+
+  it('gives a form that can be saved as it is when every field was suggested', () => {
+    expect(isTransactionFormValid(suggestedTransactionForm(suggestion({ amount: -0.5 })))).toBe(true)
   })
 })
