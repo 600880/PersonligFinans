@@ -50,12 +50,20 @@ public static partial class DescriptionCleaner
         else if (GoodsPattern().Match(text) is { Success: true } goods)
             description = goods.Groups["shop"].Value;
 
-        if (PaymentChannelPattern().Match(description) is { Success: true } channel &&
-            Categorizer.PaymentChannels.Contains(channel.Groups["channel"].Value.ToLowerInvariant()))
-            description = channel.Groups["merchant"].Value;
+        return CutToMaxLength(StripPaymentChannel(description));
+    }
 
-        return description.Length > AppDbContext.DescriptionMaxLength
+    // Removes the Payment Channel in front of a merchant or payee name, as Clean does, on its own:
+    // e.g. for a Receipt's merchant name, which has none of a Bank Statement's details. A name
+    // without one is kept as-is.
+    public static string StripPaymentChannel(string name) =>
+        PaymentChannelPattern().Match(name) is { Success: true } channel &&
+        Categorizer.PaymentChannels.Contains(channel.Groups["channel"].Value.ToLowerInvariant())
+            ? channel.Groups["merchant"].Value
+            : name;
+
+    public static string CutToMaxLength(string description) =>
+        description.Length > AppDbContext.DescriptionMaxLength
             ? description[..AppDbContext.DescriptionMaxLength]
             : description;
-    }
 }

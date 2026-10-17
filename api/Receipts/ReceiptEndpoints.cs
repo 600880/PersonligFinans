@@ -1,4 +1,9 @@
 using System.Text.Json.Serialization;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using PersonligFinans.Api.BankStatements;
+using PersonligFinans.Api.CategorizationRules;
+using PersonligFinans.Api.Data;
 
 namespace PersonligFinans.Api.Receipts;
 
@@ -24,6 +29,8 @@ public record ReceiptSuggestion(
     decimal? Amount,
     int? CategoryId)
 {
+    public static readonly ReceiptSuggestion Unreadable = new(ReceiptOutcome.Unreadable, null, null, null, null);
+
     public static readonly ReceiptSuggestion Unavailable = new(ReceiptOutcome.Unavailable, null, null, null, null);
 }
 
@@ -44,10 +51,11 @@ public static class ReceiptEndpoints
 
     // Suggests a manually-entered Transaction from one Receipt's image. The form is read by hand
     // rather than bound to an IFormFile, so that a missing or oversized file gets the same validation
-    // problem as every other rejected file. The image is only looked at, never stored or logged, and
-    // nothing is written to the database. There is no receipt reader yet, so every Receipt is
-    // answered Unavailable.
-    private static async Task<IResult> ReadReceipt(HttpRequest request)
+    // problem as every other rejected file. The image is only passed to the receipt reader, never
+    // stored or logged, and nothing is written to the database.
+    // The receipt reader is optional: without one, every Receipt is answered Unavailable.
+    private static async Task<IResult> ReadReceipt(
+        HttpRequest request, AppDbContext db, [FromServices] IReceiptReader? receiptReader)
     {
         IFormFile? file;
         try
@@ -66,13 +74,56 @@ public static class ReceiptEndpoints
         if (file.Length > MaxFileBytes)
             return FileProblem("The file is larger than 10 MB.");
 
-        await using (var image = file.OpenReadStream())
+        ReceiptImage image;
+        await using (var stream = file.OpenReadStream())
         {
-            if (await ImageTypeOf(image) is null)
+            if (await ImageTypeOf(stream) is not { } mediaType)
                 return FileProblem("The file is not a JPEG, PNG, WebP or GIF image.");
+            if (receiptReader is null)
+                return Results.Ok(ReceiptSuggestion.Unavailable);
+
+            using var bytes = new MemoryStream();
+            await stream.CopyToAsync(bytes);
+            image = new ReceiptImage(bytes.ToArray(), mediaType);
         }
 
-        return Results.Ok(ReceiptSuggestion.Unavailable);
+        // Read at each Receipt, so an edited description reaches the next prompt.
+        var categories = await db.Categories.AsNoTracking().OrderBy(c => c.Name).ToListAsync();
+        var reading = await receiptReader.ReadAsync(
+            image, categories.Select(c => new CategoryChoice(c.Name, c.Description)).ToList());
+        if (reading is not ReceiptReading.Read read)
+            return Results.Ok(ReceiptSuggestion.Unreadable);
+
+        var description = DescriptionOf(read);
+        // The rule matching the Description wins, chosen as the import chooses one, so a Receipt gets
+        // the Category its merchant's imported Transactions get. Only without one does the reader's
+        // Category count; names are unique ignoring case.
+        var rules = await db.CategorizationRules.AsNoTracking().ToListAsync();
+        var categoryId = (description is null ? null : Categorizer.ChooseRule(description, rules)?.CategoryId)
+            ?? categories.FirstOrDefault(c => string.Equals(c.Name, read.CategoryName, StringComparison.OrdinalIgnoreCase))?.Id;
+        return Results.Ok(new ReceiptSuggestion(ReceiptOutcome.Read, read.PurchaseDate, description, AmountOf(read), categoryId));
+    }
+
+    // The merchant name read, as an imported Transaction's Description would be: without a Payment
+    // Channel in front of it, trimmed and cut to the Description max length. Null when blank.
+    private static string? DescriptionOf(ReceiptReading.Read read)
+    {
+        if (read.MerchantName is null)
+            return null;
+        var merchant = DescriptionCleaner.StripPaymentChannel(read.MerchantName.Trim()).Trim();
+        var description = DescriptionCleaner.CutToMaxLength(merchant).TrimEnd();
+        return description == "" ? null : description;
+    }
+
+    // The signed Amount of what was read: negative for a purchase, positive for a refund. Null
+    // unless a positive total was read in NOK, so a foreign total is never mistaken for one in NOK.
+    // A Receipt with no currency printed is in NOK.
+    private static decimal? AmountOf(ReceiptReading.Read read)
+    {
+        var currencyCode = string.IsNullOrWhiteSpace(read.CurrencyCode) ? "NOK" : read.CurrencyCode.Trim();
+        if (read.Total is not > 0 || !string.Equals(currencyCode, "NOK", StringComparison.OrdinalIgnoreCase))
+            return null;
+        return read.IsRefund ? read.Total : -read.Total;
     }
 
     private static IResult FileProblem(string message) =>

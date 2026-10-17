@@ -3,9 +3,12 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using PersonligFinans.Api.CategorizationRules;
 using PersonligFinans.Api.Data;
+using PersonligFinans.Api.Receipts;
 
 namespace PersonligFinans.Api.Tests;
 
@@ -14,6 +17,13 @@ public class ReceiptEndpointsTests
 {
     private readonly PostgresApiFactory _factory;
     private readonly HttpClient _client;
+
+    private const int GroceriesId = 1;
+    private const int RestaurantsId = 2;
+
+    // The tests share one database, so the tests that add rules put a token of their own in each
+    // keyword and merchant name.
+    private readonly string _token = "t" + Guid.NewGuid().ToString("N")[..8];
 
     public ReceiptEndpointsTests(PostgresApiFactory factory)
     {
@@ -28,12 +38,50 @@ public class ReceiptEndpointsTests
     private static readonly byte[] WebP = [.."RIFF"u8, 0x24, 0x00, 0x00, 0x00, .."WEBPVP8 "u8];
     private static readonly byte[] Gif = [.."GIF89a"u8, 0x01, 0x00, 0x01, 0x00];
 
-    private async Task<HttpResponseMessage> Read(byte[] content, string fileName, string contentType)
+    // Sends a Receipt to the API as configured by default, with no receipt reader.
+    private Task<HttpResponseMessage> Read(byte[] content, string fileName, string contentType) =>
+        Read(content, fileName, contentType, _client);
+
+    // Sends a Receipt to an API that has the given receipt reader.
+    private async Task<HttpResponseMessage> Read(
+        byte[] content, string fileName, string contentType, IReceiptReader receiptReader)
+    {
+        await using var api = _factory.WithWebHostBuilder(builder =>
+            builder.ConfigureTestServices(services => services.AddSingleton(receiptReader)));
+        using var client = api.CreateClient();
+        return await Read(content, fileName, contentType, client);
+    }
+
+    private static async Task<HttpResponseMessage> Read(byte[] content, string fileName, string contentType, HttpClient client)
     {
         var file = new ByteArrayContent(content);
         file.Headers.ContentType = new MediaTypeHeaderValue(contentType);
         using var form = new MultipartFormDataContent { { file, "file", fileName } };
-        return await _client.PostAsync("/api/receipts/read", form);
+        return await client.PostAsync("/api/receipts/read", form);
+    }
+
+    // Reads a JPEG Receipt with an API that has the given receipt reader, and returns its suggestion.
+    private async Task<ReceiptSuggestion> Read(IReceiptReader receiptReader)
+    {
+        var response = await Read(Jpeg, "kvittering.jpg", "image/jpeg", receiptReader);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        return (await response.Content.ReadFromJsonAsync<ReceiptSuggestion>())!;
+    }
+
+    // A reader that reads every Receipt as a purchase with these details.
+    private static FakeReceiptReader Reading(
+        DateOnly? purchaseDate = null,
+        string? merchantName = null,
+        decimal? total = null,
+        string? currencyCode = "NOK",
+        bool isRefund = false,
+        string? categoryName = null) =>
+        new() { Reading = new ReceiptReading.Read(purchaseDate, merchantName, total, currencyCode, isRefund, categoryName) };
+
+    private async Task AddRule(string keyword, int categoryId)
+    {
+        var response = await _client.PostAsJsonAsync("/api/categorization-rules", new { keyword, categoryId });
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
     }
 
     private static async Task<string[]> FileErrors(HttpResponseMessage response)
@@ -142,5 +190,207 @@ public class ReceiptEndpointsTests
         var response = await _client.PostAsJsonAsync("/api/receipts/read", new { file = "kvittering.jpg" });
 
         Assert.Equal(["Choose a Receipt to read."], await FileErrors(response));
+    }
+
+    [Fact]
+    public async Task Post_ReadReceipt_SuggestsItsDateDescriptionAndAmountWithTheCategoryOfAMatchingRule()
+    {
+        await AddRule($"{_token} kafé", RestaurantsId);
+
+        var suggestion = await Read(Reading(
+            purchaseDate: new DateOnly(2026, 10, 12),
+            merchantName: $"{_token} Kafé Sentrum",
+            total: 249.90m,
+            categoryName: "Groceries"));
+
+        Assert.Equal(
+            new ReceiptSuggestion(ReceiptOutcome.Read, new DateOnly(2026, 10, 12), $"{_token} Kafé Sentrum", -249.90m, RestaurantsId),
+            suggestion);
+    }
+
+    [Fact]
+    public async Task Post_ReadReceiptNoRuleMatches_SuggestsTheReadersCategory()
+    {
+        var suggestion = await Read(Reading(merchantName: $"{_token} Torghandel", total: 89m, categoryName: "Groceries"));
+
+        Assert.Equal(GroceriesId, suggestion.CategoryId);
+    }
+
+    [Fact]
+    public async Task Post_ReadReceiptNoRuleMatches_FindsTheReadersCategoryIgnoringCase()
+    {
+        var suggestion = await Read(Reading(merchantName: $"{_token} Torghandel", total: 89m, categoryName: "groceries"));
+
+        Assert.Equal(GroceriesId, suggestion.CategoryId);
+    }
+
+    [Fact]
+    public async Task Post_ReadReceiptWithAnUnknownCategory_SuggestsNoCategory()
+    {
+        var suggestion = await Read(Reading(merchantName: $"{_token} Torghandel", total: 89m, categoryName: "Groceries and more"));
+
+        Assert.Null(suggestion.CategoryId);
+    }
+
+    [Fact]
+    public async Task Post_ReadReceiptWithoutAMerchantName_SuggestsTheReadersCategory()
+    {
+        var suggestion = await Read(Reading(total: 89m, categoryName: "Groceries"));
+
+        Assert.Null(suggestion.Description);
+        Assert.Equal(GroceriesId, suggestion.CategoryId);
+    }
+
+    [Fact]
+    public async Task Post_ReadRefundReceipt_SuggestsAPositiveAmount()
+    {
+        var suggestion = await Read(Reading(merchantName: $"{_token} Sport", total: 499m, isRefund: true));
+
+        Assert.Equal(499m, suggestion.Amount);
+    }
+
+    [Theory]
+    [InlineData("NOK")]
+    [InlineData("nok")]
+    [InlineData(null)]
+    [InlineData("")]
+    public async Task Post_ReadReceiptInNokOrWithoutACurrency_SuggestsItsAmount(string? currencyCode)
+    {
+        var suggestion = await Read(Reading(merchantName: $"{_token} Sport", total: 129.50m, currencyCode: currencyCode));
+
+        Assert.Equal(-129.50m, suggestion.Amount);
+    }
+
+    [Fact]
+    public async Task Post_ReadReceiptInAForeignCurrency_SuggestsNoAmountButTheRest()
+    {
+        var suggestion = await Read(Reading(
+            purchaseDate: new DateOnly(2026, 7, 3),
+            merchantName: $"{_token} Café de Paris",
+            total: 18.40m,
+            currencyCode: "EUR",
+            categoryName: "Restaurants"));
+
+        Assert.Equal(
+            new ReceiptSuggestion(ReceiptOutcome.Read, new DateOnly(2026, 7, 3), $"{_token} Café de Paris", null, RestaurantsId),
+            suggestion);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-25)]
+    [InlineData(null)]
+    public async Task Post_ReadReceiptWithoutAPositiveTotal_SuggestsNoAmount(int? total)
+    {
+        var suggestion = await Read(Reading(merchantName: $"{_token} Sport", total: total));
+
+        Assert.Null(suggestion.Amount);
+    }
+
+    [Theory]
+    [InlineData("Vipps*{0} Kiosk", "{0} Kiosk")]
+    [InlineData("  PAYPAL * {0} Kiosk  ", "{0} Kiosk")]
+    // Only a Payment Channel is stripped.
+    [InlineData("Butikk*{0} Kiosk", "Butikk*{0} Kiosk")]
+    [InlineData("  {0} Kiosk ", "{0} Kiosk")]
+    public async Task Post_ReadReceipt_SuggestsTheMerchantNameAsTheDescriptionWithoutAPaymentChannel(
+        string merchantName, string description)
+    {
+        var suggestion = await Read(Reading(merchantName: string.Format(merchantName, _token), total: 35m));
+
+        Assert.Equal(string.Format(description, _token), suggestion.Description);
+    }
+
+    [Fact]
+    public async Task Post_ReadReceiptWithAPaymentChannel_SuggestsTheCategoryOfTheRuleMatchingTheMerchant()
+    {
+        await AddRule($"{_token} kiosk", RestaurantsId);
+
+        var suggestion = await Read(Reading(merchantName: $"Vipps*{_token} Kiosk", total: 35m, categoryName: "Other"));
+
+        Assert.Equal(RestaurantsId, suggestion.CategoryId);
+    }
+
+    [Fact]
+    public async Task Post_ReadReceiptWithAnOverLongMerchantName_CutsTheDescriptionToTheMaxLength()
+    {
+        var merchantName = $"{_token} " + new string('x', AppDbContext.DescriptionMaxLength);
+
+        var suggestion = await Read(Reading(merchantName: merchantName, total: 35m));
+
+        Assert.Equal(merchantName[..AppDbContext.DescriptionMaxLength], suggestion.Description);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task Post_ReadReceiptWithABlankMerchantName_SuggestsNoDescription(string merchantName)
+    {
+        var suggestion = await Read(Reading(merchantName: merchantName, total: 35m));
+
+        Assert.Null(suggestion.Description);
+    }
+
+    [Fact]
+    public async Task Post_UnreadableReceipt_AnswersUnreadableWithEveryFieldNull()
+    {
+        var suggestion = await Read(new FakeReceiptReader { Reading = new ReceiptReading.Unreadable() });
+
+        Assert.Equal(new ReceiptSuggestion(ReceiptOutcome.Unreadable, null, null, null, null), suggestion);
+    }
+
+    [Fact]
+    public async Task Post_ReceiptReadWithNothingMadeOut_AnswersReadWithEveryFieldNull()
+    {
+        var suggestion = await Read(Reading(currencyCode: null));
+
+        Assert.Equal(new ReceiptSuggestion(ReceiptOutcome.Read, null, null, null, null), suggestion);
+    }
+
+    [Fact]
+    public async Task Post_Image_ReaderIsGivenTheImageAndEveryCategoryWithItsDescription()
+    {
+        var reader = new FakeReceiptReader();
+
+        await Read(reader);
+
+        var call = Assert.Single(reader.Calls);
+        Assert.Equal(Jpeg, call.Image.Bytes);
+        Assert.Equal("image/jpeg", call.Image.MediaType);
+        Assert.Equal(
+            SeedCategories.All.Select(c => new CategoryChoice(c.Name, c.Description)).OrderBy(c => c.Name),
+            call.Categories.OrderBy(c => c.Name));
+    }
+
+    [Fact]
+    public async Task Post_ImageDeclaredAsAnotherType_ReaderIsGivenTheTypeItsBytesShow()
+    {
+        var reader = new FakeReceiptReader();
+
+        await Read(Png, "kvittering.jpg", "image/jpeg", reader);
+
+        Assert.Equal("image/png", Assert.Single(reader.Calls).Image.MediaType);
+    }
+
+    [Fact]
+    public async Task Post_ReadReceipt_LeavesTransactionsAndCategorizationRulesUnchanged()
+    {
+        await AddRule($"{_token} kafé", RestaurantsId);
+        var before = await Stored();
+
+        await Read(Reading(merchantName: $"{_token} Kafé", total: 249.90m, categoryName: "Groceries"));
+
+        Assert.Equal(before, await Stored());
+    }
+
+    [Fact]
+    public async Task Post_FileThatIsNotAnImage_IsRejectedWithoutAskingTheReader()
+    {
+        var reader = new FakeReceiptReader();
+
+        var response = await Read("not really a photo"u8.ToArray(), "kvittering.jpg", "image/jpeg", reader);
+
+        Assert.Equal(["The file is not a JPEG, PNG, WebP or GIF image."], await FileErrors(response));
+        Assert.Empty(reader.Calls);
     }
 }
