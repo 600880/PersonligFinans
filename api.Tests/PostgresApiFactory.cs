@@ -17,7 +17,8 @@ public class PostgresApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
         builder.UseSetting(
             $"ConnectionStrings:{DatabaseSetup.ConnectionStringName}",
             _postgres.GetConnectionString());
-        // Never Azure, even when the developer has configured the rule generator in user secrets.
+        // Never Azure, even when the developer has configured the rule generator and receipt reader
+        // in user secrets.
         builder.UseSetting($"{RuleGeneratorSetup.SectionName}:Endpoint", "");
     }
 

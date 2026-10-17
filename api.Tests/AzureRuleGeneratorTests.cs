@@ -1,14 +1,9 @@
-using System.ClientModel;
-using System.ClientModel.Primitives;
 using System.Diagnostics;
 using System.Net;
-using System.Text;
 using System.Text.Json.Nodes;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
-using OpenAI;
-using OpenAI.Chat;
 using PersonligFinans.Api.CategorizationRules;
 
 namespace PersonligFinans.Api.Tests;
@@ -27,57 +22,13 @@ public class AzureRuleGeneratorTests
         new("Restaurants", "Restaurant, takeaway, bakery etc."),
     ];
 
-    // Answers every request with the given response, and remembers the request bodies.
-    private sealed class FakeHandler(Func<CancellationToken, Task<HttpResponseMessage>> respond) : HttpMessageHandler
-    {
-        public List<string> RequestBodies { get; } = [];
-
-        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-        {
-            RequestBodies.Add(await request.Content!.ReadAsStringAsync(cancellationToken));
-            return await respond(cancellationToken);
-        }
-    }
-
-    private static FakeHandler Answering(HttpStatusCode status, string body) =>
-        new(_ => Task.FromResult(new HttpResponseMessage(status)
-        {
-            Content = new StringContent(body, Encoding.UTF8, "application/json"),
-        }));
-
-    // A chat completion whose message is the given content, as the model wrote it.
-    private static FakeHandler AnsweringWithContent(string content) =>
-        Answering(HttpStatusCode.OK, new JsonObject
-        {
-            ["id"] = "chatcmpl-1",
-            ["object"] = "chat.completion",
-            ["created"] = 0,
-            ["model"] = "gpt-4.1-mini",
-            ["choices"] = new JsonArray(new JsonObject
-            {
-                ["index"] = 0,
-                ["message"] = new JsonObject { ["role"] = "assistant", ["content"] = content },
-                ["finish_reason"] = "stop",
-            }),
-        }.ToJsonString());
-
-    private static AzureRuleGenerator Generator(HttpMessageHandler handler, TimeSpan? timeLimit = null)
-    {
-        var options = new OpenAIClientOptions
-        {
-            Endpoint = new Uri("https://example.invalid/openai/v1/"),
-            Transport = new HttpClientPipelineTransport(new HttpClient(handler)),
-            RetryPolicy = new ClientRetryPolicy(maxRetries: 0),
-        };
-        var chat = new ChatClient("gpt-4.1-mini", new ApiKeyCredential("test"), options);
-        return new AzureRuleGenerator(chat, NullLogger<AzureRuleGenerator>.Instance, timeLimit);
-
-    }
+    private static AzureRuleGenerator Generator(FakeChatHandler handler, TimeSpan? timeLimit = null) =>
+        new(handler.Client(), NullLogger<AzureRuleGenerator>.Instance, timeLimit);
 
     [Fact]
     public async Task Generate_ValidResponse_ReturnsAProposalForEachRow()
     {
-        var handler = AnsweringWithContent("""
+        var handler = FakeChatHandler.AnsweringWithContent("""
             {"rows": [
               {"index": 0, "keyword": "bakeriet", "category": "Restaurants"},
               {"index": 1, "keyword": "kitch n", "category": "Other"},
@@ -101,7 +52,7 @@ public class AzureRuleGeneratorTests
     [Fact]
     public async Task Generate_EntriesForUnknownRowsOrABlankKeyword_AreIgnored()
     {
-        var handler = AnsweringWithContent("""
+        var handler = FakeChatHandler.AnsweringWithContent("""
             {"rows": [
               {"index": 7, "keyword": "bakeriet", "category": "Restaurants"},
               {"index": -1, "keyword": "kitch n", "category": "Other"},
@@ -130,7 +81,7 @@ public class AzureRuleGeneratorTests
     [InlineData("")]
     public async Task Generate_MalformedOrPartialResponse_IsUnavailable(string content)
     {
-        var result = await Generator(AnsweringWithContent(content)).GenerateAsync([Bakery], Categories);
+        var result = await Generator(FakeChatHandler.AnsweringWithContent(content)).GenerateAsync([Bakery], Categories);
 
         Assert.IsType<RuleGeneration.Unavailable>(result);
     }
@@ -138,7 +89,7 @@ public class AzureRuleGeneratorTests
     [Fact]
     public async Task Generate_ResponseThatIsNotAChatCompletion_IsUnavailable()
     {
-        var result = await Generator(Answering(HttpStatusCode.OK, "<html>Bad gateway</html>"))
+        var result = await Generator(FakeChatHandler.Answering(HttpStatusCode.OK, "<html>Bad gateway</html>"))
             .GenerateAsync([Bakery], Categories);
 
         Assert.IsType<RuleGeneration.Unavailable>(result);
@@ -151,7 +102,7 @@ public class AzureRuleGeneratorTests
     [InlineData(HttpStatusCode.Forbidden)]
     public async Task Generate_ErrorStatus_IsUnavailable(HttpStatusCode status)
     {
-        var handler = Answering(status, """{"error": {"code": "error", "message": "Failed."}}""");
+        var handler = FakeChatHandler.Answering(status, """{"error": {"code": "error", "message": "Failed."}}""");
 
         var result = await Generator(handler).GenerateAsync([Bakery], Categories);
 
@@ -161,7 +112,7 @@ public class AzureRuleGeneratorTests
     [Fact]
     public async Task Generate_NetworkError_IsUnavailable()
     {
-        var handler = new FakeHandler(_ => throw new HttpRequestException("No route to host."));
+        var handler = new FakeChatHandler(_ => throw new HttpRequestException("No route to host."));
 
         var result = await Generator(handler).GenerateAsync([Bakery], Categories);
 
@@ -171,7 +122,7 @@ public class AzureRuleGeneratorTests
     [Fact]
     public async Task Generate_NoResponseWithinTheTimeLimit_IsUnavailable()
     {
-        var handler = new FakeHandler(async cancellationToken =>
+        var handler = new FakeChatHandler(async cancellationToken =>
         {
             await Task.Delay(Timeout.Infinite, cancellationToken);
             throw new UnreachableException();
@@ -185,7 +136,7 @@ public class AzureRuleGeneratorTests
     [Fact]
     public async Task Generate_MakesOneCallSendingOnlyTheDescriptionsSignsAndCategoryNamesAndDescriptions()
     {
-        var handler = AnsweringWithContent("""{"rows": []}""");
+        var handler = FakeChatHandler.AnsweringWithContent("""{"rows": []}""");
 
         await Generator(handler).GenerateAsync([Bakery, Salary], Categories);
 
@@ -215,7 +166,7 @@ public class AzureRuleGeneratorTests
     [Fact]
     public async Task Generate_RequiresAKeywordAndOneOfTheGivenCategoriesForEveryRow()
     {
-        var handler = AnsweringWithContent("""{"rows": []}""");
+        var handler = FakeChatHandler.AnsweringWithContent("""{"rows": []}""");
 
         await Generator(handler).GenerateAsync([Bakery], Categories);
 
