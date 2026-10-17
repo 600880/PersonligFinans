@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import { AddTransactionModal } from './components/AddTransactionModal'
 import { CategoriesPage } from './components/CategoriesPage'
 import { Dashboard } from './components/Dashboard'
@@ -9,6 +9,7 @@ import { TransactionsPage, type TransactionsTarget } from './components/Transact
 import { readReceipt, uploadBankStatement, type ImportedBankStatement } from './lib/api'
 import { formatNorwegianDate } from './lib/date'
 import { checkReceiptPick, RECEIPT_IMAGE_TYPES } from './lib/receiptPick'
+import { useDismiss } from './lib/useDismiss'
 
 type View = 'home' | 'transactions' | 'categories' | 'rules'
 
@@ -21,6 +22,11 @@ const NAV_ITEMS: { view: View; label: string }[] = [
   { view: 'categories', label: 'Categories' },
   { view: 'rules', label: 'Rules' },
 ]
+
+// The look of each way to add Transactions: a button of its own on a wide screen, an item in the
+// Add transactions menu on a narrow one.
+const ADD_ACTION_CLASS =
+  'rounded-lg border border-slate-300 bg-white px-5 py-2.5 text-sm font-medium text-slate-900 shadow-sm hover:bg-slate-100 max-sm:w-full max-sm:border-0 max-sm:text-left max-sm:shadow-none'
 
 function App() {
   const [view, setView] = useState<View>('home')
@@ -46,6 +52,15 @@ function App() {
   const [transactionsTarget, setTransactionsTarget] = useState<TransactionsTarget | undefined>()
   const fileInputRef = useRef<HTMLInputElement>(null)
   const receiptInputRef = useRef<HTMLInputElement>(null)
+  // On a narrow screen the pages, and the ways to add Transactions, each sit behind a menu.
+  const [isNavOpen, setIsNavOpen] = useState(false)
+  const [isAddMenuOpen, setIsAddMenuOpen] = useState(false)
+  const headerRef = useRef<HTMLElement>(null)
+  const addMenuRef = useRef<HTMLDivElement>(null)
+  const closeNav = useCallback(() => setIsNavOpen(false), [])
+  const closeAddMenu = useCallback(() => setIsAddMenuOpen(false), [])
+  useDismiss(headerRef, isNavOpen, closeNav)
+  useDismiss(addMenuRef, isAddMenuOpen, closeAddMenu)
 
   function clearHomeMessages() {
     setShowSavedMessage(false)
@@ -62,6 +77,7 @@ function App() {
     if (view === 'home' && next !== 'home') clearHomeMessages()
     if (view !== 'home' && next === 'home') setDashboardVersion((version) => version + 1)
     setTransactionsTarget(undefined)
+    setIsNavOpen(false)
     setView(next)
   }
 
@@ -162,20 +178,47 @@ function App() {
 
   return (
     <div className="min-h-screen bg-slate-50">
-      <header className="flex items-center justify-between border-b border-slate-200 bg-white px-6 py-4 max-sm:flex-wrap max-sm:gap-2 max-sm:px-4">
+      <header
+        ref={headerRef}
+        className="relative flex items-center justify-between border-b border-slate-200 bg-white px-6 py-4 max-sm:px-4"
+      >
         <h1 className="text-xl font-semibold tracking-tight text-slate-900">
           <button type="button" onClick={() => chooseView('home')}>
             PersonligFinans
           </button>
         </h1>
-        <nav className="flex gap-1">
+        <button
+          type="button"
+          aria-label="Menu"
+          aria-expanded={isNavOpen}
+          aria-controls="pages"
+          onClick={() => setIsNavOpen((open) => !open)}
+          className="rounded-lg p-1.5 text-slate-600 hover:bg-slate-100 sm:hidden"
+        >
+          {isNavOpen ? (
+            <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" className="h-6 w-6">
+              <path d="M4.28 3.22a.75.75 0 0 0-1.06 1.06L6.94 8l-3.72 3.72a.75.75 0 1 0 1.06 1.06L8 9.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L9.06 8l3.72-3.72a.75.75 0 0 0-1.06-1.06L8 6.94 4.28 3.22Z" />
+            </svg>
+          ) : (
+            <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" className="h-6 w-6">
+              <path d="M2 3.75A.75.75 0 0 1 2.75 3h10.5a.75.75 0 0 1 0 1.5H2.75A.75.75 0 0 1 2 3.75ZM2 8a.75.75 0 0 1 .75-.75h10.5a.75.75 0 0 1 0 1.5H2.75A.75.75 0 0 1 2 8Zm0 4.25a.75.75 0 0 1 .75-.75h10.5a.75.75 0 0 1 0 1.5H2.75a.75.75 0 0 1-.75-.75Z" />
+            </svg>
+          )}
+        </button>
+        {/* On a narrow screen, a panel dropped over the page from under the header while open. */}
+        <nav
+          id="pages"
+          className={`flex gap-1 max-sm:absolute max-sm:inset-x-0 max-sm:top-full max-sm:z-10 max-sm:flex-col max-sm:border-b max-sm:border-slate-200 max-sm:bg-white max-sm:p-2 max-sm:shadow-md ${
+            isNavOpen ? '' : 'max-sm:hidden'
+          }`}
+        >
           {NAV_ITEMS.map((item) => (
             <button
               key={item.view}
               type="button"
               onClick={() => chooseView(item.view)}
               aria-current={view === item.view ? 'page' : undefined}
-              className={`rounded-lg px-3 py-1.5 text-sm font-medium ${
+              className={`rounded-lg px-3 py-1.5 text-sm font-medium max-sm:py-3 max-sm:text-left max-sm:text-base ${
                 view === item.view ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'
               }`}
             >
@@ -201,62 +244,90 @@ function App() {
 
       {/* Hidden rather than unmounted while away, so the Dashboard keeps its choices. */}
       <main hidden={view !== 'home'} className="flex flex-col items-center gap-4 px-6 py-10 max-sm:px-4">
-        <div className="flex gap-3 max-sm:flex-wrap max-sm:justify-center">
+        <div ref={addMenuRef} className="relative">
+          {/* Shows the upload's progress too, since Upload transactions is hidden in the menu. The
+              menu still opens meanwhile, for the other ways to add Transactions. */}
           <button
             type="button"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={isUploading}
+            aria-expanded={isAddMenuOpen}
+            aria-controls="add-actions"
             aria-busy={isUploading}
-            className="flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-5 py-2.5 text-sm font-medium text-slate-900 shadow-sm hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
+            onClick={() => setIsAddMenuOpen((open) => !open)}
+            className="flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-5 py-2.5 text-sm font-medium text-slate-900 shadow-sm hover:bg-slate-100 sm:hidden"
           >
-            {isUploading && (
-              <span
-                aria-hidden="true"
-                className="size-4 animate-spin rounded-full border-2 border-slate-300 border-t-slate-900"
-              />
-            )}
-            {uploadProgress
-              ? `Categorizing… (${uploadProgress.finished}/${uploadProgress.picked})`
-              : 'Upload transactions'}
+            {isUploading && <Spinner />}
+            {uploadProgress ? uploadProgressLabel(uploadProgress) : 'Add transactions'}
+            <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" className="h-4 w-4 text-slate-500">
+              <path d="M4.22 6.22a.75.75 0 0 1 1.06 0L8 8.94l2.72-2.72a.75.75 0 1 1 1.06 1.06l-3.25 3.25a.75.75 0 0 1-1.06 0L4.22 7.28a.75.75 0 0 1 0-1.06Z" />
+            </svg>
           </button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="application/pdf"
-            aria-label="Bank Statement PDF"
-            multiple
-            hidden
-            onChange={(event) => {
-              void handleFilesChosen([...(event.target.files ?? [])])
-              event.target.value = ''
-            }}
-          />
-          <button
-            type="button"
-            onClick={() => setIsModalOpen(true)}
-            className="rounded-lg border border-slate-300 bg-white px-5 py-2.5 text-sm font-medium text-slate-900 shadow-sm hover:bg-slate-100"
+          {/* On a narrow screen, a menu dropped under the button above while open. */}
+          <div
+            id="add-actions"
+            role="group"
+            aria-label="Ways to add transactions"
+            className={`flex gap-3 max-sm:absolute max-sm:top-full max-sm:left-1/2 max-sm:z-10 max-sm:mt-1 max-sm:w-max max-sm:min-w-full max-sm:-translate-x-1/2 max-sm:flex-col max-sm:gap-0 max-sm:rounded-lg max-sm:border max-sm:border-slate-200 max-sm:bg-white max-sm:p-1 max-sm:shadow-md ${
+              isAddMenuOpen ? '' : 'max-sm:hidden'
+            }`}
           >
-            Add transaction
-          </button>
-          <button
-            type="button"
-            onClick={() => receiptInputRef.current?.click()}
-            className="rounded-lg border border-slate-300 bg-white px-5 py-2.5 text-sm font-medium text-slate-900 shadow-sm hover:bg-slate-100"
-          >
-            Scan receipts
-          </button>
-          <input
-            ref={receiptInputRef}
-            type="file"
-            accept={RECEIPT_IMAGE_TYPES.join(',')}
-            aria-label="Receipts"
-            multiple
-            hidden
-            onChange={(event) => {
-              handleReceiptsChosen([...(event.target.files ?? [])])
-              event.target.value = ''
-            }}
-          />
+            <button
+              type="button"
+              onClick={() => {
+                setIsAddMenuOpen(false)
+                fileInputRef.current?.click()
+              }}
+              disabled={isUploading}
+              aria-busy={isUploading}
+              className={`flex items-center gap-2 disabled:cursor-not-allowed disabled:opacity-60 ${ADD_ACTION_CLASS}`}
+            >
+              {isUploading && <Spinner />}
+              {uploadProgress ? uploadProgressLabel(uploadProgress) : 'Upload transactions'}
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="application/pdf"
+              aria-label="Bank Statement PDF"
+              multiple
+              hidden
+              onChange={(event) => {
+                void handleFilesChosen([...(event.target.files ?? [])])
+                event.target.value = ''
+              }}
+            />
+            <button
+              type="button"
+              onClick={() => {
+                setIsAddMenuOpen(false)
+                setIsModalOpen(true)
+              }}
+              className={ADD_ACTION_CLASS}
+            >
+              Add transaction
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setIsAddMenuOpen(false)
+                receiptInputRef.current?.click()
+              }}
+              className={ADD_ACTION_CLASS}
+            >
+              Scan receipts
+            </button>
+            <input
+              ref={receiptInputRef}
+              type="file"
+              accept={RECEIPT_IMAGE_TYPES.join(',')}
+              aria-label="Receipts"
+              multiple
+              hidden
+              onChange={(event) => {
+                handleReceiptsChosen([...(event.target.files ?? [])])
+                event.target.value = ''
+              }}
+            />
+          </div>
         </div>
 
         {(!hasErrors || importMessage || savedMessage) && (
@@ -293,6 +364,19 @@ function App() {
       )}
     </div>
   )
+}
+
+function Spinner() {
+  return (
+    <span
+      aria-hidden="true"
+      className="size-4 animate-spin rounded-full border-2 border-slate-300 border-t-slate-900"
+    />
+  )
+}
+
+function uploadProgressLabel({ finished, picked }: { finished: number; picked: number }) {
+  return `Categorizing… (${finished}/${picked})`
 }
 
 function scanSummary(saved: number) {

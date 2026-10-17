@@ -186,12 +186,18 @@ const importedStatement = {
   aiCategorizationUnavailable: false,
 }
 
+// The ways to add Transactions, rather than the Add transactions button that opens them as a menu on
+// a narrow screen.
+function addActions() {
+  return within(screen.getByRole('group', { name: 'Ways to add transactions' }))
+}
+
 const statementPdf = new File(['%PDF-1.7'], 'kontoutskrift.pdf', { type: 'application/pdf' })
 
 async function openModal() {
   const user = userEvent.setup()
   render(<App />)
-  await user.click(screen.getByRole('button', { name: /add transaction/i }))
+  await user.click(screen.getByRole('button', { name: 'Add transaction' }))
   await screen.findByRole('option', { name: 'Groceries' })
   return user
 }
@@ -205,7 +211,7 @@ async function fillValidForm(user: ReturnType<typeof userEvent.setup>) {
 describe('App', () => {
   it('shows the Add transaction button with no modal open', () => {
     render(<App />)
-    expect(screen.getByRole('button', { name: /add transaction/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Add transaction' })).toBeInTheDocument()
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 
@@ -299,14 +305,14 @@ describe('App', () => {
     await user.click(screen.getByRole('button', { name: /cancel/i }))
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: /add transaction/i }))
+    await user.click(screen.getByRole('button', { name: 'Add transaction' }))
     expect(screen.getByLabelText(/description/i)).toHaveValue('')
   })
 
   it('shows Upload transactions to the left of Add transaction', () => {
     render(<App />)
 
-    const buttons = within(screen.getByRole('main'))
+    const buttons = addActions()
       .getAllByRole('button')
       .map((button) => button.textContent)
     expect(buttons.slice(0, 2)).toEqual(['Upload transactions', 'Add transaction'])
@@ -358,7 +364,7 @@ describe('App', () => {
 
     await user.upload(screen.getByLabelText(/bank statement pdf/i), statementPdf)
 
-    const button = screen.getByRole('button', { name: 'Categorizing… (0/1)' })
+    const button = addActions().getByRole('button', { name: 'Categorizing… (0/1)' })
     expect(button).toBeDisabled()
     expect(button).toHaveAttribute('aria-busy', 'true')
 
@@ -382,16 +388,16 @@ describe('App', () => {
 
     await user.upload(screen.getByLabelText(/bank statement pdf/i), [julyPdf, statementPdf, septemberPdf])
 
-    const button = screen.getByRole('button', { name: 'Categorizing… (0/3)' })
+    const button = addActions().getByRole('button', { name: 'Categorizing… (0/3)' })
     expect(button).toBeDisabled()
     expect(uploaded).toEqual([julyPdf])
 
     responders[0](Response.json(importedStatement, { status: 201 }))
-    expect(await screen.findByRole('button', { name: 'Categorizing… (1/3)' })).toBeDisabled()
+    expect(await addActions().findByRole('button', { name: 'Categorizing… (1/3)' })).toBeDisabled()
     await waitFor(() => expect(uploaded).toEqual([julyPdf, statementPdf]))
 
     responders[1](Response.json(importedStatement, { status: 201 }))
-    expect(await screen.findByRole('button', { name: 'Categorizing… (2/3)' })).toBeDisabled()
+    expect(await addActions().findByRole('button', { name: 'Categorizing… (2/3)' })).toBeDisabled()
     await waitFor(() => expect(uploaded).toEqual([julyPdf, statementPdf, septemberPdf]))
 
     responders[2](Response.json(importedStatement, { status: 201 }))
@@ -430,7 +436,7 @@ describe('App', () => {
     responders[0](Response.json(importedStatement, { status: 201 }))
 
     await waitFor(() => expect(monthsRequests()).toBe(2))
-    expect(screen.getByRole('button', { name: 'Categorizing… (1/2)' })).toBeDisabled()
+    expect(addActions().getByRole('button', { name: 'Categorizing… (1/2)' })).toBeDisabled()
 
     await waitFor(() => expect(responders).toHaveLength(2))
     responders[1](Response.json(importedStatement, { status: 201 }))
@@ -499,7 +505,7 @@ describe('App', () => {
     await waitFor(() => expect(responders).toHaveLength(2))
     responders[1](Response.json({ errors: { file: ['The PDF could not be read. It may be damaged.'] } }, { status: 400 }))
 
-    expect(await screen.findByRole('button', { name: 'Categorizing… (2/3)' })).toBeDisabled()
+    expect(await addActions().findByRole('button', { name: 'Categorizing… (2/3)' })).toBeDisabled()
     await waitFor(() => expect(uploaded).toEqual([julyPdf, scanPdf, septemberPdf]))
     responders[2](Response.json({ ...importedStatement, id: 8 }, { status: 201 }))
 
@@ -702,7 +708,7 @@ describe('App', () => {
     await user.click(screen.getByRole('button', { name: /cancel/i }))
     await user.upload(screen.getByLabelText(/bank statement pdf/i), statementPdf)
 
-    await user.click(screen.getByRole('button', { name: /add transaction/i }))
+    await user.click(screen.getByRole('button', { name: 'Add transaction' }))
     await fillValidForm(user)
     await user.click(screen.getByRole('button', { name: /^save$/i }))
     expect(screen.getByRole('status')).toHaveTextContent('Transaction saved')
@@ -1794,9 +1800,126 @@ describe('Header', () => {
 
     await user.click(screen.getByRole('button', { name: 'PersonligFinans' }))
 
-    expect(screen.getByRole('button', { name: /add transaction/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Add transaction' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /upload transactions/i })).toBeInTheDocument()
     expect(currentPage()).toEqual([])
+  })
+
+  describe('menu of pages on a narrow screen', () => {
+    function menuButton() {
+      return screen.getByRole('button', { name: 'Menu' })
+    }
+
+    it('opens and closes with its button', async () => {
+      const user = userEvent.setup()
+      render(<App />)
+      expect(menuButton()).toHaveAttribute('aria-expanded', 'false')
+      expect(menuButton()).toHaveAttribute('aria-controls', screen.getByRole('navigation').id)
+
+      await user.click(menuButton())
+      expect(menuButton()).toHaveAttribute('aria-expanded', 'true')
+
+      await user.click(menuButton())
+      expect(menuButton()).toHaveAttribute('aria-expanded', 'false')
+    })
+
+    it('closes once a page is chosen', async () => {
+      const user = userEvent.setup()
+      render(<App />)
+
+      await user.click(menuButton())
+      await user.click(screen.getByRole('button', { name: 'Rules' }))
+
+      expect(menuButton()).toHaveAttribute('aria-expanded', 'false')
+      expect(currentPage()).toEqual(['Rules'])
+    })
+
+    it('closes when the app name is clicked', async () => {
+      const user = userEvent.setup()
+      render(<App />)
+
+      await user.click(menuButton())
+      await user.click(screen.getByRole('button', { name: 'PersonligFinans' }))
+
+      expect(menuButton()).toHaveAttribute('aria-expanded', 'false')
+    })
+
+    it('closes on Escape, or on a press outside it', async () => {
+      const user = userEvent.setup()
+      render(<App />)
+
+      await user.click(menuButton())
+      await user.keyboard('{Escape}')
+      expect(menuButton()).toHaveAttribute('aria-expanded', 'false')
+
+      await user.click(menuButton())
+      await user.click(screen.getByRole('main'))
+      expect(menuButton()).toHaveAttribute('aria-expanded', 'false')
+    })
+  })
+})
+
+describe('Add transactions menu on a narrow screen', () => {
+  function menuButton() {
+    return screen.getByRole('button', { name: 'Add transactions' })
+  }
+
+  it('opens and closes the ways to add Transactions with its button', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+    expect(menuButton()).toHaveAttribute('aria-controls', screen.getByRole('group', { name: 'Ways to add transactions' }).id)
+
+    await user.click(menuButton())
+    expect(menuButton()).toHaveAttribute('aria-expanded', 'true')
+
+    await user.click(menuButton())
+    expect(menuButton()).toHaveAttribute('aria-expanded', 'false')
+  })
+
+  it('closes once a way is chosen', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(menuButton())
+    await user.click(addActions().getByRole('button', { name: 'Add transaction' }))
+
+    expect(menuButton()).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+  })
+
+  it('closes on Escape, or on a press outside it', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(menuButton())
+    await user.keyboard('{Escape}')
+    expect(menuButton()).toHaveAttribute('aria-expanded', 'false')
+
+    await user.click(menuButton())
+    await user.click(screen.getByRole('banner'))
+    expect(menuButton()).toHaveAttribute('aria-expanded', 'false')
+  })
+
+  it("shows an upload's progress, and still opens on the other ways while Upload transactions waits", async () => {
+    let respond: (response: Response) => void = () => {}
+    handleUpload = () => new Promise((resolve) => (respond = resolve))
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.upload(screen.getByLabelText(/bank statement pdf/i), statementPdf)
+
+    // The Upload transactions button in the menu shows the same progress, but doesn't open anything.
+    const button = screen.getByRole('button', { name: 'Categorizing… (0/1)', expanded: false })
+    expect(button).toBeEnabled()
+    expect(button).toHaveAttribute('aria-busy', 'true')
+    await user.click(button)
+    expect(button).toHaveAttribute('aria-expanded', 'true')
+    expect(addActions().getByRole('button', { name: 'Categorizing… (0/1)' })).toBeDisabled()
+    expect(addActions().getByRole('button', { name: 'Add transaction' })).toBeEnabled()
+    expect(addActions().getByRole('button', { name: 'Scan receipts' })).toBeEnabled()
+
+    respond(Response.json(importedStatement, { status: 201 }))
+    expect(await screen.findByRole('button', { name: 'Add transactions' })).toHaveAttribute('aria-busy', 'false')
   })
 })
 
@@ -2509,7 +2632,7 @@ describe('Dashboard', () => {
   it('sits below the upload and Add transaction buttons', async () => {
     render(<App />)
 
-    const addTransaction = screen.getByRole('button', { name: /add transaction/i })
+    const addTransaction = screen.getByRole('button', { name: 'Add transaction' })
     expect(addTransaction.compareDocumentPosition(dashboard())).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
     await waitFor(() => expect(centreTotal()).toBe('Total 0,00 kr'))
   })
@@ -3605,7 +3728,7 @@ describe('Dashboard', () => {
         await user.selectOptions(within(trend()).getByLabelText('Granularity'), 'Quarter')
         await waitFor(() => expect(trendTable()[0]).toEqual(['', 'Q4 2025', 'Q3 2026', 'Change']))
         const requestsBefore = requestedMonthlySpending().length
-        await user.click(screen.getByRole('button', { name: /add transaction/i }))
+        await user.click(screen.getByRole('button', { name: 'Add transaction' }))
         await screen.findByRole('option', { name: 'Groceries' })
         await fillValidForm(user)
 
@@ -3693,7 +3816,7 @@ describe('Dashboard', () => {
         render(<App />)
         await chooseView(user)
         const requestsBefore = requestedMonthlySpending().length
-        await user.click(screen.getByRole('button', { name: /add transaction/i }))
+        await user.click(screen.getByRole('button', { name: 'Add transaction' }))
         await screen.findByRole('option', { name: 'Groceries' })
         await fillValidForm(user)
         handleMonthlySpending = (from, to) =>
@@ -4385,7 +4508,7 @@ describe('Scan receipts', () => {
   it('sits right after Add transaction, with a picker for several JPEG, PNG, WebP or GIF images', () => {
     render(<App />)
 
-    const buttons = within(screen.getByRole('main'))
+    const buttons = addActions()
       .getAllByRole('button')
       .map((button) => button.textContent)
     expect(buttons).toEqual(['Upload transactions', 'Add transaction', 'Scan receipts'])
