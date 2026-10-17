@@ -16,6 +16,18 @@ _Avoid_: Kontoutskrift, file, CSV, export
 One pick of one or more Bank Statements to import together. Each Bank Statement in it is imported or rejected on its own.
 _Avoid_: Batch, import, file upload
 
+**Receipt**:
+A photo of the slip from one purchase, read by the LLM to suggest a manually-entered Transaction that the user confirms or edits before it is saved; it becomes one Transaction with one Category, or is skipped. It is never kept: once its Transaction is saved or it is skipped, it is gone. Meant for purchases that never reach an uploaded Bank Statement, such as cash or another bank's card.
+_Avoid_: Kvittering, slip, receipt image
+
+**Receipt scan**:
+One pick of one or more Receipts, worked through one at a time. Leaving partway keeps the Transactions already saved and discards the remaining Receipts.
+_Avoid_: Receipt upload, receipt import, Upload
+
+**Possible duplicate**:
+An existing Transaction, imported or manually-entered, with exactly the same Amount and a posted date within three days of one being entered by hand, shown so the user can avoid recording the same purchase twice. It only warns: saving is never blocked, and nothing is remembered once the Transaction is saved.
+_Avoid_: Duplicate, conflict, match
+
 **Amount**:
 The signed value of a Transaction in NOK: negative when money is spent, positive when money is received. All Transactions share one currency.
 _Avoid_: Balance change, sum, value
