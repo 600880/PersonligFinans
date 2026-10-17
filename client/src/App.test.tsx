@@ -309,7 +309,7 @@ describe('App', () => {
     const buttons = within(screen.getByRole('main'))
       .getAllByRole('button')
       .map((button) => button.textContent)
-    expect(buttons).toEqual(['Upload transactions', 'Add transaction'])
+    expect(buttons.slice(0, 2)).toEqual(['Upload transactions', 'Add transaction'])
   })
 
   it('uploads the chosen PDF and shows how many transactions were imported and categorized', async () => {
@@ -4306,5 +4306,327 @@ describe('Dashboard', () => {
         expect(chosenFilters()).toEqual(['2026', 'March', category])
       })
     })
+  })
+})
+
+describe('Scan receipts', () => {
+  const unavailable = { outcome: 'unavailable', date: null, description: null, amount: null, categoryId: null }
+
+  // The file of each read-a-Receipt request, in the order they were sent.
+  let readRequests: (FormDataEntryValue | null)[]
+  let handleReadReceipt: (body: FormData) => Response | Promise<Response>
+  // The preview URLs released so far. Each is named after its Receipt's file.
+  let releasedUrls: string[]
+
+  beforeEach(() => {
+    readRequests = []
+    handleReadReceipt = () => Response.json(unavailable)
+    releasedUrls = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url === '/api/receipts/read' && init?.method === 'POST') {
+          const body = init.body as FormData
+          readRequests.push(body.get('file'))
+          return handleReadReceipt(body)
+        }
+        return fetchMock(url, init)
+      }),
+    )
+    // jsdom has no object URLs.
+    vi.stubGlobal(
+      'URL',
+      Object.assign(class extends URL {}, {
+        createObjectURL: (file: Blob) => `blob:${(file as File).name}`,
+        revokeObjectURL: (url: string) => {
+          releasedUrls.push(url)
+        },
+      }),
+    )
+  })
+
+  function receipt(name: string, type = 'image/jpeg', size = 1024) {
+    return new File([new Uint8Array(size)], name, { type })
+  }
+
+  const kiwi = receipt('kiwi.jpg')
+  const rema = receipt('rema.png', 'image/png')
+  const narvesen = receipt('narvesen.webp', 'image/webp')
+
+  // The picker's accept list is ignored, as a browser's "All files" choice does, so that
+  // wrong-type files can be picked too.
+  async function scan(files: File[]) {
+    const user = userEvent.setup({ applyAccept: false })
+    render(<App />)
+    await user.upload(screen.getByLabelText(/^receipts$/i), files)
+    return user
+  }
+
+  async function scanUntilFormIsReady(files: File[]) {
+    const user = await scan(files)
+    await within(screen.getByRole('dialog')).findByRole('option', { name: 'Groceries' })
+    return user
+  }
+
+  async function formIsReady(name: string) {
+    await within(await screen.findByRole('dialog', { name })).findByRole('option', { name: 'Groceries' })
+  }
+
+  function monthsRequests() {
+    return fetchMock.mock.calls.filter(([url]) => url === '/api/transactions/months').length
+  }
+
+  it('sits right after Add transaction, with a picker for several JPEG, PNG, WebP or GIF images', () => {
+    render(<App />)
+
+    const buttons = within(screen.getByRole('main'))
+      .getAllByRole('button')
+      .map((button) => button.textContent)
+    expect(buttons).toEqual(['Upload transactions', 'Add transaction', 'Scan receipts'])
+    const picker = screen.getByLabelText(/^receipts$/i)
+    expect(picker).toHaveAttribute('accept', 'image/jpeg,image/png,image/webp,image/gif')
+    expect(picker).toHaveAttribute('multiple')
+  })
+
+  it("opens on Receipt 1 of n with its image beside an empty form with today's date", async () => {
+    await scanUntilFormIsReady([kiwi, rema, narvesen])
+
+    const dialog = screen.getByRole('dialog', { name: 'Receipt 1 of 3' })
+    expect(within(dialog).getByRole('img', { name: 'Receipt' })).toHaveAttribute('src', 'blob:kiwi.jpg')
+    expect(within(dialog).getByLabelText(/date/i)).toHaveValue(todayIsoDate())
+    expect(within(dialog).getByLabelText(/description/i)).toHaveValue('')
+    expect(within(dialog).getByLabelText(/^in$/i)).toHaveValue(null)
+    expect(within(dialog).getByLabelText(/^out$/i)).toHaveValue(null)
+    expect(within(dialog).getByLabelText(/^note$/i)).toHaveValue('')
+    expect(within(dialog).getByLabelText(/category/i)).toHaveValue('')
+  })
+
+  it('sends every Receipt to be read at once, one request each, before any has been answered', async () => {
+    handleReadReceipt = () => new Promise(() => {})
+
+    await scan([kiwi, rema, narvesen])
+
+    await waitFor(() => expect(readRequests).toEqual([kiwi, rema, narvesen]))
+    expect(screen.getByRole('dialog', { name: 'Receipt 1 of 3' })).toBeInTheDocument()
+  })
+
+  it('saves the entered values as a manually-entered Transaction and moves on to the next Receipt', async () => {
+    const posted: unknown[] = []
+    handlePost = (body) => {
+      posted.push(body)
+      return Response.json({ id: 1 }, { status: 201 })
+    }
+    const user = await scanUntilFormIsReady([kiwi, rema])
+    await fillValidForm(user)
+    await user.type(screen.getByLabelText(/^note$/i), 'Kontant')
+
+    await user.click(screen.getByRole('button', { name: /^save$/i }))
+
+    expect(posted).toEqual([
+      { date: todayIsoDate(), description: 'Rema 1000', amount: -249.9, note: 'Kontant', categoryId: 1 },
+    ])
+    const dialog = await screen.findByRole('dialog', { name: 'Receipt 2 of 2' })
+    expect(within(dialog).getByRole('img', { name: 'Receipt' })).toHaveAttribute('src', 'blob:rema.png')
+    expect(within(dialog).getByLabelText(/description/i)).toHaveValue('')
+  })
+
+  it('skips a Receipt without saving it', async () => {
+    const posted: unknown[] = []
+    handlePost = (body) => {
+      posted.push(body)
+      return Response.json({ id: 1 }, { status: 201 })
+    }
+    const user = await scanUntilFormIsReady([kiwi, rema])
+    await user.type(screen.getByLabelText(/description/i), 'Kiwi')
+
+    await user.click(screen.getByRole('button', { name: 'Skip' }))
+
+    expect(screen.getByRole('dialog', { name: 'Receipt 2 of 2' })).toBeInTheDocument()
+    expect(screen.getByLabelText(/description/i)).toHaveValue('')
+    expect(posted).toEqual([])
+  })
+
+  it('has no Back', async () => {
+    const user = await scanUntilFormIsReady([kiwi, rema])
+    await user.click(screen.getByRole('button', { name: 'Skip' }))
+
+    expect(within(screen.getByRole('dialog')).queryByRole('button', { name: /back/i })).not.toBeInTheDocument()
+  })
+
+  it('shows the field errors of a refused Save and stays on the Receipt with the input kept', async () => {
+    handlePost = () => Response.json({ errors: { description: ['Description is required.'] } }, { status: 400 })
+    const user = await scanUntilFormIsReady([kiwi, rema])
+    await fillValidForm(user)
+
+    await user.click(screen.getByRole('button', { name: /^save$/i }))
+
+    const dialog = screen.getByRole('dialog', { name: 'Receipt 1 of 2' })
+    expect(within(dialog).getByText('Description is required.')).toBeInTheDocument()
+    expect(within(dialog).getByLabelText(/^out$/i)).toHaveValue(249.9)
+    expect(within(dialog).getByRole('img', { name: 'Receipt' })).toHaveAttribute('src', 'blob:kiwi.jpg')
+  })
+
+  it('closes after the last Receipt, reloads the Dashboard and says how many Transactions were saved', async () => {
+    const user = await scanUntilFormIsReady([kiwi, rema, narvesen])
+    const before = monthsRequests()
+    await fillValidForm(user)
+    await user.click(screen.getByRole('button', { name: /^save$/i }))
+    await formIsReady('Receipt 2 of 3')
+    await user.click(screen.getByRole('button', { name: 'Skip' }))
+    await formIsReady('Receipt 3 of 3')
+    await fillValidForm(user)
+
+    await user.click(screen.getByRole('button', { name: /^save$/i }))
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('2 transactions saved')
+    await waitFor(() => expect(monthsRequests()).toBeGreaterThan(before))
+  })
+
+  it('says one transaction in the singular', async () => {
+    const user = await scanUntilFormIsReady([kiwi])
+    await fillValidForm(user)
+
+    await user.click(screen.getByRole('button', { name: /^save$/i }))
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent(/^1 transaction saved$/)
+  })
+
+  it('says none were saved, and leaves the Dashboard as it was, when every Receipt was skipped', async () => {
+    const user = await scanUntilFormIsReady([kiwi, rema])
+    const before = monthsRequests()
+
+    await user.click(screen.getByRole('button', { name: 'Skip' }))
+    await user.click(screen.getByRole('button', { name: 'Skip' }))
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('No transactions saved')
+    expect(monthsRequests()).toBe(before)
+  })
+
+  it('does not move on again when a Save finishes after its Receipt was skipped, but counts it', async () => {
+    let respond: (response: Response) => void = () => {}
+    handlePost = () => new Promise<Response>((resolve) => (respond = resolve)) as unknown as Response
+    const user = await scanUntilFormIsReady([kiwi, rema, narvesen])
+    await fillValidForm(user)
+    await user.click(screen.getByRole('button', { name: /^save$/i }))
+
+    await user.click(screen.getByRole('button', { name: 'Skip' }))
+    expect(screen.getByRole('dialog', { name: 'Receipt 2 of 3' })).toBeInTheDocument()
+    await act(async () => respond(Response.json({ id: 1 }, { status: 201 })))
+
+    expect(screen.getByRole('dialog', { name: 'Receipt 2 of 3' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Skip' }))
+    await user.click(screen.getByRole('button', { name: 'Skip' }))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('1 transaction saved')
+  })
+
+  it('counts a Save that finishes after the last Receipt was skipped', async () => {
+    let respond: (response: Response) => void = () => {}
+    handlePost = () => new Promise<Response>((resolve) => (respond = resolve)) as unknown as Response
+    const user = await scanUntilFormIsReady([kiwi])
+    await fillValidForm(user)
+    await user.click(screen.getByRole('button', { name: /^save$/i }))
+    await user.click(screen.getByRole('button', { name: 'Skip' }))
+    expect(screen.getByRole('status')).toHaveTextContent('No transactions saved')
+    const before = monthsRequests()
+
+    await act(async () => respond(Response.json({ id: 1 }, { status: 201 })))
+
+    expect(screen.getByRole('status')).toHaveTextContent('1 transaction saved')
+    await waitFor(() => expect(monthsRequests()).toBeGreaterThan(before))
+  })
+
+  it('leaves a later scan alone when a Save from an earlier one finishes after it was skipped', async () => {
+    let respond: (response: Response) => void = () => {}
+    handlePost = () => new Promise<Response>((resolve) => (respond = resolve)) as unknown as Response
+    const user = await scanUntilFormIsReady([kiwi])
+    await fillValidForm(user)
+    await user.click(screen.getByRole('button', { name: /^save$/i }))
+    await user.click(screen.getByRole('button', { name: 'Skip' }))
+    handlePost = () => Response.json({ id: 2 }, { status: 201 })
+    await user.upload(screen.getByLabelText(/^receipts$/i), [rema, narvesen])
+    await formIsReady('Receipt 1 of 2')
+
+    await act(async () => respond(Response.json({ id: 1 }, { status: 201 })))
+
+    expect(screen.getByRole('dialog', { name: 'Receipt 1 of 2' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Skip' }))
+    await user.click(screen.getByRole('button', { name: 'Skip' }))
+    expect(screen.getByRole('status')).toHaveTextContent('No transactions saved')
+  })
+
+  it('releases each preview once its Receipt is saved or skipped', async () => {
+    const user = await scanUntilFormIsReady([kiwi, rema])
+    await fillValidForm(user)
+    await user.click(screen.getByRole('button', { name: /^save$/i }))
+    await screen.findByRole('dialog', { name: 'Receipt 2 of 2' })
+    expect(releasedUrls).toEqual(['blob:kiwi.jpg'])
+
+    await user.click(screen.getByRole('button', { name: 'Skip' }))
+
+    expect(releasedUrls).toEqual(['blob:kiwi.jpg', 'blob:rema.png'])
+  })
+
+  it('rejects a pick of more than 10 files with only a message', async () => {
+    const files = Array.from({ length: 11 }, (_, i) => receipt(`${i}.jpg`))
+
+    await scan(files)
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Pick at most 10 receipts')
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(readRequests).toEqual([])
+  })
+
+  it('leaves out a wrong-type and an over-10 MB file, naming each and why, and scans the rest', async () => {
+    const pdf = receipt('faktura.pdf', 'application/pdf')
+    const huge = receipt('stor.jpg', 'image/jpeg', 10 * 1024 * 1024 + 1)
+
+    await scan([pdf, kiwi, huge, rema])
+
+    const alert = screen.getByRole('alert')
+    expect([...alert.children].map((line) => line.textContent)).toEqual([
+      'faktura.pdf: The file is not a JPEG, PNG, WebP or GIF image.',
+      'stor.jpg: The file is larger than 10 MB.',
+    ])
+    expect(screen.getByRole('dialog', { name: 'Receipt 1 of 2' })).toBeInTheDocument()
+    await waitFor(() => expect(readRequests).toEqual([kiwi, rema]))
+  })
+
+  it('shows only the message when every file is left out', async () => {
+    await scan([receipt('notes.txt', 'text/plain')])
+
+    expect(screen.getByRole('alert')).toHaveTextContent('notes.txt: The file is not a JPEG, PNG, WebP or GIF image.')
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(readRequests).toEqual([])
+  })
+
+  it("still gives the form for a Receipt the server rejects or can't be reached for", async () => {
+    let call = 0
+    handleReadReceipt = () => {
+      if (call++ === 0) {
+        return Response.json({ errors: { file: ['The file is not a JPEG, PNG, WebP or GIF image.'] } }, { status: 400 })
+      }
+      throw new TypeError('Failed to fetch')
+    }
+    const user = await scanUntilFormIsReady([kiwi, rema])
+    await waitFor(() => expect(readRequests).toHaveLength(2))
+
+    await fillValidForm(user)
+    await user.click(screen.getByRole('button', { name: /^save$/i }))
+
+    await formIsReady('Receipt 2 of 2')
+    expect(screen.getByLabelText(/date/i)).toHaveValue(todayIsoDate())
+  })
+
+  it('scans the same Receipts again when they are picked again', async () => {
+    const user = await scanUntilFormIsReady([kiwi])
+    await user.click(screen.getByRole('button', { name: 'Skip' }))
+
+    await user.upload(screen.getByLabelText(/^receipts$/i), [kiwi])
+
+    expect(screen.getByRole('dialog', { name: 'Receipt 1 of 1' })).toBeInTheDocument()
   })
 })

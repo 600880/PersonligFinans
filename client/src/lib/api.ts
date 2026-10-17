@@ -357,6 +357,43 @@ export async function uploadBankStatement(file: File, uploadId: string): Promise
   return { ok: false, message: `Upload failed (${response.status}).` }
 }
 
+// read: the receipt reader read the Receipt. unreadable: it couldn't. unavailable: no receipt reader
+// is configured.
+export type ReceiptOutcome = 'read' | 'unreadable' | 'unavailable'
+
+// What a manually-entered Transaction from one Receipt should start from. amount is signed: negative
+// for a purchase, positive for a refund. Every field is null unless the outcome is read.
+export interface ReceiptSuggestion {
+  outcome: ReceiptOutcome
+  date: string | null
+  description: string | null
+  amount: number | null
+  categoryId: number | null
+}
+
+const UNREADABLE: ReceiptSuggestion = {
+  outcome: 'unreadable',
+  date: null,
+  description: null,
+  amount: null,
+  categoryId: null,
+}
+
+// Asks the server to read one Receipt's image. Never rejects: a Receipt the server refuses, or that
+// can't be sent, is treated as unreadable.
+export async function readReceipt(file: File): Promise<ReceiptSuggestion> {
+  const body = new FormData()
+  body.append('file', file)
+
+  try {
+    const response = await fetch('/api/receipts/read', { method: 'POST', body })
+    if (!response.ok) return UNREADABLE
+    return (await response.json()) as ReceiptSuggestion
+  } catch {
+    return UNREADABLE
+  }
+}
+
 // aiGenerated: created by an LLM during import rather than by hand. Only records where the rule
 // came from; the rule otherwise behaves like any other.
 // isNew: added by the most recent Upload that imported a Bank Statement; editing keeps it.

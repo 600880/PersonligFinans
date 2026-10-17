@@ -2,6 +2,7 @@ using PersonligFinans.Api.BankStatements;
 using PersonligFinans.Api.Categories;
 using PersonligFinans.Api.CategorizationRules;
 using PersonligFinans.Api.Data;
+using PersonligFinans.Api.Receipts;
 using PersonligFinans.Api.Spending;
 using PersonligFinans.Api.Transactions;
 
@@ -26,6 +27,7 @@ app.MapTransactionEndpoints();
 app.MapCategoryEndpoints();
 app.MapBankStatementEndpoints();
 app.MapCategorizationRuleEndpoints();
+app.MapReceiptEndpoints();
 app.MapSpendingEndpoints();
 app.MapFallback("/api/{**path}", () => Results.NotFound());
 app.MapFallbackToFile("index.html");

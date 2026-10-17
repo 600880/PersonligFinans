@@ -3,15 +3,17 @@ import { AddTransactionModal } from './components/AddTransactionModal'
 import { CategoriesPage } from './components/CategoriesPage'
 import { Dashboard } from './components/Dashboard'
 import { ErrorMessage, StatusMessage } from './components/Messages'
+import { ReceiptScanModal, type Receipt } from './components/ReceiptScanModal'
 import { RulesPage } from './components/RulesPage'
 import { TransactionsPage, type TransactionsTarget } from './components/TransactionsPage'
-import { uploadBankStatement, type ImportedBankStatement } from './lib/api'
+import { readReceipt, uploadBankStatement, type ImportedBankStatement } from './lib/api'
 import { formatNorwegianDate } from './lib/date'
+import { checkReceiptPick, RECEIPT_IMAGE_TYPES } from './lib/receiptPick'
 
 type View = 'home' | 'transactions' | 'categories' | 'rules'
 
 // A picked PDF the server rejected, named by its filename since it may not be a readable Bank
-// Statement, with the reason the server gave.
+// Statement, with the reason the server gave; or a picked file left out of a Receipt scan, with why.
 type Rejection = { filename: string; message: string }
 
 const NAV_ITEMS: { view: View; label: string }[] = [
@@ -29,17 +31,28 @@ function App() {
   const isUploading = uploadProgress !== null
   const [importMessage, setImportMessage] = useState<string | null>(null)
   const [rejections, setRejections] = useState<Rejection[]>([])
+  // The Receipt scan under way; null when not scanning.
+  const [scan, setScan] = useState<{ id: string; receipts: Receipt[] } | null>(null)
+  // How many Transactions the latest Receipt scan has saved, said once it has finished. A Save
+  // that finishes late, after its Receipt was skipped, still counts towards its own scan.
+  const [scanSaved, setScanSaved] = useState<{ scanId: string; count: number } | null>(null)
+  const [showScanMessage, setShowScanMessage] = useState(false)
+  // Why a whole pick of Receipts was rejected.
+  const [receiptPickError, setReceiptPickError] = useState<string | null>(null)
   // Bumped after new Transactions are saved, and on coming back to home, so the Dashboard reloads in
   // place.
   const [dashboardVersion, setDashboardVersion] = useState(0)
   // Where the Transactions page opens when reached from the Dashboard; undefined from the header.
   const [transactionsTarget, setTransactionsTarget] = useState<TransactionsTarget | undefined>()
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const receiptInputRef = useRef<HTMLInputElement>(null)
 
   function clearHomeMessages() {
     setShowSavedMessage(false)
+    setShowScanMessage(false)
     setImportMessage(null)
     setRejections([])
+    setReceiptPickError(null)
   }
 
   // Leaving home clears its messages. An upload that finishes while away sets them again, so they
@@ -89,12 +102,62 @@ function App() {
       }
       // Replaces a Transaction saved during the upload, so the result is never hidden.
       setShowSavedMessage(false)
+      setShowScanMessage(false)
       setImportMessage(imported.length > 0 ? importSummary(imported) : null)
       setRejections(rejected)
     } finally {
       setUploadProgress(null)
     }
   }
+
+  // Starts a Receipt scan of the picked images that can be read, after leaving out and naming the
+  // rest. Every Receipt is sent to be read at once, before the window opens on the first. Done here
+  // rather than when the window mounts, so each is read once.
+  function handleReceiptsChosen(files: File[]) {
+    if (files.length === 0) return
+    clearHomeMessages()
+
+    const pick = checkReceiptPick(files)
+    if (!pick.ok) {
+      setReceiptPickError(pick.message)
+      return
+    }
+    setRejections(pick.leftOut)
+    if (pick.receipts.length === 0) return
+
+    const id = crypto.randomUUID()
+    setScan({
+      id,
+      receipts: pick.receipts.map((file) => ({
+        file,
+        previewUrl: URL.createObjectURL(file),
+        suggestion: readReceipt(file),
+      })),
+    })
+    setScanSaved({ scanId: id, count: 0 })
+  }
+
+  // Reloads the Dashboard after each Transaction saved from a Receipt, as after Add transaction.
+  function handleReceiptSaved(scanId: string) {
+    setScanSaved((saved) => (saved?.scanId === scanId ? { scanId, count: saved.count + 1 } : saved))
+    setDashboardVersion((version) => version + 1)
+  }
+
+  // Closes the window and says how many Transactions the scan saved, keeping the names of any files
+  // left out of the pick on screen.
+  function handleScanFinished() {
+    setScan(null)
+    setShowSavedMessage(false)
+    setImportMessage(null)
+    setShowScanMessage(true)
+  }
+
+  const savedMessage = showSavedMessage
+    ? 'Transaction saved'
+    : showScanMessage && scanSaved
+      ? scanSummary(scanSaved.count)
+      : null
+  const hasErrors = receiptPickError !== null || rejections.length > 0
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -174,13 +237,33 @@ function App() {
           >
             Add transaction
           </button>
+          <button
+            type="button"
+            onClick={() => receiptInputRef.current?.click()}
+            className="rounded-lg border border-slate-300 bg-white px-5 py-2.5 text-sm font-medium text-slate-900 shadow-sm hover:bg-slate-100"
+          >
+            Scan receipts
+          </button>
+          <input
+            ref={receiptInputRef}
+            type="file"
+            accept={RECEIPT_IMAGE_TYPES.join(',')}
+            aria-label="Receipts"
+            multiple
+            hidden
+            onChange={(event) => {
+              handleReceiptsChosen([...(event.target.files ?? [])])
+              event.target.value = ''
+            }}
+          />
         </div>
 
-        {(rejections.length === 0 || importMessage || showSavedMessage) && (
-          <StatusMessage message={showSavedMessage ? 'Transaction saved' : importMessage} />
+        {(!hasErrors || importMessage || savedMessage) && (
+          <StatusMessage message={savedMessage ?? importMessage} />
         )}
-        {rejections.length > 0 && (
+        {hasErrors && (
           <ErrorMessage>
+            {receiptPickError && <p>{receiptPickError}</p>}
             {rejections.map((rejection, index) => (
               <p key={index}>
                 {rejection.filename}: {rejection.message}
@@ -198,8 +281,22 @@ function App() {
           onSaved={handleSaved}
         />
       )}
+
+      {scan && (
+        <ReceiptScanModal
+          key={scan.id}
+          receipts={scan.receipts}
+          onSaved={() => handleReceiptSaved(scan.id)}
+          onFinished={handleScanFinished}
+        />
+      )}
     </div>
   )
+}
+
+function scanSummary(saved: number) {
+  if (saved === 0) return 'No transactions saved'
+  return `${saved} transaction${saved === 1 ? '' : 's'} saved`
 }
 
 // One imported Bank Statement is described by its period; several by their sums.
