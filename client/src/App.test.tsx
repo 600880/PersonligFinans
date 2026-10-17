@@ -1088,14 +1088,17 @@ describe('Categories page', () => {
       return screen.getByRole('row', { name: new RegExp(`^${name}`) })
     }
 
-    it('offers delete only on Categories that are not Built-in', async () => {
+    it('offers delete only on Categories that are not Built-in, showing it disabled on the rest', async () => {
       categoriesServed = [categories[0], health, categories[1]]
       await openCategoriesPage()
       await listedRows()
 
-      expect(within(categoryRow('Health')).getByRole('button', { name: 'Delete' })).toBeInTheDocument()
-      expect(within(categoryRow('Groceries')).queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument()
-      expect(within(categoryRow('Other')).queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument()
+      expect(within(categoryRow('Health')).getByRole('button', { name: 'Delete' })).toBeEnabled()
+      for (const builtIn of ['Groceries', 'Other']) {
+        const deleteButton = within(categoryRow(builtIn)).getByRole('button', { name: 'Delete' })
+        expect(deleteButton).toBeDisabled()
+        expect(deleteButton).toHaveAttribute('title', "Built-in Categories can't be deleted")
+      }
     })
 
     it('asks for confirmation, then deletes the Category and removes its row', async () => {

@@ -57,7 +57,8 @@ function isInUse(category: Category) {
 }
 
 // Every Category in the order the API lists them, Built-in ones first, with what uses it, and a form to
-// add one. Each can be edited inline, and one that isn't Built-in can be deleted after a confirmation.
+// add one. Each can be edited inline, and one that isn't Built-in can be deleted after a confirmation;
+// a Built-in one shows Delete disabled.
 // Deleting one in use asks for a choice: a replacement Category, which its Transactions and rules
 // move to, or to delete its rules, leaving its Transactions to the remaining rules, or Uncategorized.
 export function CategoriesPage() {
@@ -406,19 +407,16 @@ export function CategoriesPage() {
                       <button type="button" onClick={() => startEdit(category)} className={smallButtonClass}>
                         Edit
                       </button>
-                      {/* Kept as wide as Delete even when empty, so Edit lines up on every row. */}
-                      <span className="inline-block w-16 text-left">
-                        {!category.builtIn && (
-                          <button
-                            type="button"
-                            disabled={isSaving}
-                            onClick={() => startDelete(category)}
-                            className={smallButtonClass}
-                          >
-                            Delete
-                          </button>
-                        )}
-                      </span>
+                      {/* A Built-in Category's Delete is shown disabled, so every row offers the same actions. */}
+                      <button
+                        type="button"
+                        title={category.builtIn ? "Built-in Categories can't be deleted" : undefined}
+                        disabled={category.builtIn || isSaving}
+                        onClick={() => startDelete(category)}
+                        className={smallButtonClass}
+                      >
+                        Delete
+                      </button>
                     </>
                   )}
                 </td>
