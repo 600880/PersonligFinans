@@ -221,8 +221,8 @@ export function CategoriesPage() {
     <section className="w-full max-w-2xl">
       <h2 className="text-lg font-semibold text-slate-900">Categories</h2>
 
-      <form className="mt-4 flex items-start gap-3" onSubmit={handleAdd}>
-        <div className="flex w-40 flex-col gap-1">
+      <form className="mt-4 flex items-start gap-3 max-sm:flex-col max-sm:items-stretch" onSubmit={handleAdd}>
+        <div className="flex w-40 flex-col gap-1 max-sm:w-auto">
           <label className="flex flex-col gap-1 text-sm font-medium text-slate-700">
             Name
             <input
@@ -253,7 +253,7 @@ export function CategoriesPage() {
         <button
           type="submit"
           disabled={isSaving}
-          className="mt-6 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+          className="mt-6 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-300 max-sm:mt-0 max-sm:self-start"
         >
           Add category
         </button>
@@ -265,166 +265,170 @@ export function CategoriesPage() {
         <StatusMessage message={statusMessage} className="mt-3" />
       )}
 
-      <table className="mt-2 w-full text-left text-sm">
-        <thead className="text-slate-500">
-          <tr>
-            <th className="py-2 font-medium">Name</th>
-            <th className="py-2 font-medium">Description</th>
-            <th className="py-2 pl-1.25 text-right font-medium">Transactions</th>
-            <th className="py-2 pl-1.25 text-right font-medium">Rules</th>
-            <th className="py-2 pl-4">
-              <span className="sr-only">Actions</span>
-            </th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-slate-200 text-slate-900">
-          {categories.map((category) =>
-            edit?.id === category.id ? (
-              <tr key={category.id} className="align-top">
-                <td className="py-2 pr-3">
-                  {category.builtIn ? (
-                    <div className="py-2 whitespace-nowrap">
-                      {category.name}
-                      <BuiltInBadge />
-                    </div>
-                  ) : (
+      {/* On a phone the table scrolls sideways on its own, laid out no narrower than a small screen.
+          Relative, so the hidden column label scrolls with it rather than widening the page. */}
+      <div className="mt-2 max-sm:relative max-sm:overflow-x-auto">
+        <table className="w-full text-left text-sm max-sm:min-w-xl">
+          <thead className="text-slate-500">
+            <tr>
+              <th className="py-2 font-medium">Name</th>
+              <th className="py-2 font-medium">Description</th>
+              <th className="py-2 pl-1.25 text-right font-medium">Transactions</th>
+              <th className="py-2 pl-1.25 text-right font-medium">Rules</th>
+              <th className="py-2 pl-4">
+                <span className="sr-only">Actions</span>
+              </th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-200 text-slate-900">
+            {categories.map((category) =>
+              edit?.id === category.id ? (
+                <tr key={category.id} className="align-top">
+                  <td className="py-2 pr-3">
+                    {category.builtIn ? (
+                      <div className="py-2 whitespace-nowrap">
+                        {category.name}
+                        <BuiltInBadge />
+                      </div>
+                    ) : (
+                      <div className="flex flex-col gap-1">
+                        <input
+                          aria-label="Name"
+                          value={edit.name}
+                          onChange={(event) => setEdit({ ...edit, name: event.target.value })}
+                          aria-describedby={`category-${category.id}-name-error`}
+                          className={inputClass}
+                        />
+                        <span id={`category-${category.id}-name-error`} className="text-xs text-red-600">
+                          {edit.fieldErrors.name}
+                        </span>
+                      </div>
+                    )}
+                  </td>
+                  <td className="py-2 pr-3">
                     <div className="flex flex-col gap-1">
                       <input
-                        aria-label="Name"
-                        value={edit.name}
-                        onChange={(event) => setEdit({ ...edit, name: event.target.value })}
-                        aria-describedby={`category-${category.id}-name-error`}
+                        aria-label="Description"
+                        value={edit.description}
+                        onChange={(event) => setEdit({ ...edit, description: event.target.value })}
+                        aria-describedby={`category-${category.id}-description-error`}
                         className={inputClass}
                       />
-                      <span id={`category-${category.id}-name-error`} className="text-xs text-red-600">
-                        {edit.fieldErrors.name}
+                      <span id={`category-${category.id}-description-error`} className="text-xs text-red-600">
+                        {edit.fieldErrors.description}
                       </span>
                     </div>
-                  )}
-                </td>
-                <td className="py-2 pr-3">
-                  <div className="flex flex-col gap-1">
-                    <input
-                      aria-label="Description"
-                      value={edit.description}
-                      onChange={(event) => setEdit({ ...edit, description: event.target.value })}
-                      aria-describedby={`category-${category.id}-description-error`}
-                      className={inputClass}
-                    />
-                    <span id={`category-${category.id}-description-error`} className="text-xs text-red-600">
-                      {edit.fieldErrors.description}
-                    </span>
-                  </div>
-                </td>
-                <td className="py-2 pl-1.25 text-right tabular-nums">{category.transactionCount}</td>
-                <td className="py-2 pl-1.25 text-right tabular-nums">{category.ruleCount}</td>
-                <td className="py-2 pl-4 text-right whitespace-nowrap">
-                  <button
-                    type="button"
-                    disabled={isSaving}
-                    onClick={() => handleSave(edit)}
-                    className={smallButtonClass}
-                  >
-                    Save
-                  </button>
-                  <button type="button" onClick={cancelEdit} className={smallButtonClass}>
-                    Cancel
-                  </button>
-                </td>
-              </tr>
-            ) : (
-              <tr key={category.id} className="align-top">
-                <td className="py-2 pr-3 whitespace-nowrap">
-                  {category.name}
-                  {category.builtIn && <BuiltInBadge />}
-                </td>
-                <td className="py-2 pr-3 text-slate-600">{category.description}</td>
-                <td className="py-2 pl-1.25 text-right tabular-nums">{category.transactionCount}</td>
-                <td className="py-2 pl-1.25 text-right tabular-nums">{category.ruleCount}</td>
-                <td className="py-2 pl-4 text-right whitespace-nowrap">
-                  {confirmingDeleteId === category.id ? (
-                    <>
-                      {isInUse(category) ? (
-                        <fieldset className="mr-1 inline-flex flex-col items-start gap-1 text-left whitespace-normal text-slate-700">
-                          <legend className="mb-1">Delete {category.name}?</legend>
-                          <div className="flex flex-wrap items-center gap-1">
+                  </td>
+                  <td className="py-2 pl-1.25 text-right tabular-nums">{category.transactionCount}</td>
+                  <td className="py-2 pl-1.25 text-right tabular-nums">{category.ruleCount}</td>
+                  <td className="py-2 pl-4 text-right whitespace-nowrap">
+                    <button
+                      type="button"
+                      disabled={isSaving}
+                      onClick={() => handleSave(edit)}
+                      className={smallButtonClass}
+                    >
+                      Save
+                    </button>
+                    <button type="button" onClick={cancelEdit} className={smallButtonClass}>
+                      Cancel
+                    </button>
+                  </td>
+                </tr>
+              ) : (
+                <tr key={category.id} className="align-top">
+                  <td className="py-2 pr-3 whitespace-nowrap">
+                    {category.name}
+                    {category.builtIn && <BuiltInBadge />}
+                  </td>
+                  <td className="py-2 pr-3 text-slate-600">{category.description}</td>
+                  <td className="py-2 pl-1.25 text-right tabular-nums">{category.transactionCount}</td>
+                  <td className="py-2 pl-1.25 text-right tabular-nums">{category.ruleCount}</td>
+                  <td className="py-2 pl-4 text-right whitespace-nowrap">
+                    {confirmingDeleteId === category.id ? (
+                      <>
+                        {isInUse(category) ? (
+                          <fieldset className="mr-1 inline-flex flex-col items-start gap-1 text-left whitespace-normal text-slate-700">
+                            <legend className="mb-1">Delete {category.name}?</legend>
+                            <div className="flex flex-wrap items-center gap-1">
+                              <label className="flex items-center gap-1">
+                                <input
+                                  type="radio"
+                                  name={`delete-${category.id}`}
+                                  checked={deleteMode === 'moveToReplacement'}
+                                  onChange={() => setDeleteMode('moveToReplacement')}
+                                />
+                                Move its transactions and rules to
+                              </label>
+                              {/* Choosing a replacement also chooses to move. */}
+                              <select
+                                aria-label="Move its transactions and rules to"
+                                value={replacementId}
+                                onChange={(event) => {
+                                  setReplacementId(event.target.value)
+                                  setDeleteMode('moveToReplacement')
+                                }}
+                                className="rounded-lg border border-slate-300 px-2 py-1"
+                              >
+                                <option value="">Choose a category</option>
+                                {categories
+                                  .filter((c) => c.id !== category.id)
+                                  .map((c) => (
+                                    <option key={c.id} value={c.id}>
+                                      {c.name}
+                                    </option>
+                                  ))}
+                              </select>
+                            </div>
                             <label className="flex items-center gap-1">
                               <input
                                 type="radio"
                                 name={`delete-${category.id}`}
-                                checked={deleteMode === 'moveToReplacement'}
-                                onChange={() => setDeleteMode('moveToReplacement')}
+                                checked={deleteMode === 'deleteRules'}
+                                onChange={() => setDeleteMode('deleteRules')}
                               />
-                              Move its transactions and rules to
+                              Delete its rules and leave its transactions Uncategorized unless another rule matches them
                             </label>
-                            {/* Choosing a replacement also chooses to move. */}
-                            <select
-                              aria-label="Move its transactions and rules to"
-                              value={replacementId}
-                              onChange={(event) => {
-                                setReplacementId(event.target.value)
-                                setDeleteMode('moveToReplacement')
-                              }}
-                              className="rounded-lg border border-slate-300 px-2 py-1"
-                            >
-                              <option value="">Choose a category</option>
-                              {categories
-                                .filter((c) => c.id !== category.id)
-                                .map((c) => (
-                                  <option key={c.id} value={c.id}>
-                                    {c.name}
-                                  </option>
-                                ))}
-                            </select>
-                          </div>
-                          <label className="flex items-center gap-1">
-                            <input
-                              type="radio"
-                              name={`delete-${category.id}`}
-                              checked={deleteMode === 'deleteRules'}
-                              onChange={() => setDeleteMode('deleteRules')}
-                            />
-                            Delete its rules and leave its transactions Uncategorized unless another rule matches them
-                          </label>
-                        </fieldset>
-                      ) : (
-                        <span className="mr-1 text-slate-700">Delete {category.name}?</span>
-                      )}
-                      <button
-                        type="button"
-                        disabled={isSaving || deleteChoice(category) === null}
-                        onClick={() => handleDelete(category)}
-                        className={smallButtonClass}
-                      >
-                        Confirm delete
-                      </button>
-                      <button type="button" onClick={() => setConfirmingDeleteId(null)} className={smallButtonClass}>
-                        Cancel
-                      </button>
-                    </>
-                  ) : (
-                    <>
-                      <button type="button" onClick={() => startEdit(category)} className={smallButtonClass}>
-                        Edit
-                      </button>
-                      {/* A Built-in Category's Delete is shown disabled, so every row offers the same actions. */}
-                      <button
-                        type="button"
-                        title={category.builtIn ? "Built-in Categories can't be deleted" : undefined}
-                        disabled={category.builtIn || isSaving}
-                        onClick={() => startDelete(category)}
-                        className={smallButtonClass}
-                      >
-                        Delete
-                      </button>
-                    </>
-                  )}
-                </td>
-              </tr>
-            ),
-          )}
-        </tbody>
-      </table>
+                          </fieldset>
+                        ) : (
+                          <span className="mr-1 text-slate-700">Delete {category.name}?</span>
+                        )}
+                        <button
+                          type="button"
+                          disabled={isSaving || deleteChoice(category) === null}
+                          onClick={() => handleDelete(category)}
+                          className={smallButtonClass}
+                        >
+                          Confirm delete
+                        </button>
+                        <button type="button" onClick={() => setConfirmingDeleteId(null)} className={smallButtonClass}>
+                          Cancel
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <button type="button" onClick={() => startEdit(category)} className={smallButtonClass}>
+                          Edit
+                        </button>
+                        {/* A Built-in Category's Delete is shown disabled, so every row offers the same actions. */}
+                        <button
+                          type="button"
+                          title={category.builtIn ? "Built-in Categories can't be deleted" : undefined}
+                          disabled={category.builtIn || isSaving}
+                          onClick={() => startDelete(category)}
+                          className={smallButtonClass}
+                        >
+                          Delete
+                        </button>
+                      </>
+                    )}
+                  </td>
+                </tr>
+              ),
+            )}
+          </tbody>
+        </table>
+      </div>
     </section>
   )
 }

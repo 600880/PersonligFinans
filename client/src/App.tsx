@@ -162,7 +162,7 @@ function App() {
 
   return (
     <div className="min-h-screen bg-slate-50">
-      <header className="flex items-center justify-between border-b border-slate-200 bg-white px-6 py-4">
+      <header className="flex items-center justify-between border-b border-slate-200 bg-white px-6 py-4 max-sm:flex-wrap max-sm:gap-2 max-sm:px-4">
         <h1 className="text-xl font-semibold tracking-tight text-slate-900">
           <button type="button" onClick={() => chooseView('home')}>
             PersonligFinans
@@ -186,22 +186,22 @@ function App() {
       </header>
 
       {view === 'transactions' ? (
-        <main className="flex flex-col items-center px-6 py-10">
+        <main className="flex flex-col items-center px-6 py-10 max-sm:px-4">
           <TransactionsPage target={transactionsTarget} />
         </main>
       ) : view === 'categories' ? (
-        <main className="flex flex-col items-center px-6 py-10">
+        <main className="flex flex-col items-center px-6 py-10 max-sm:px-4">
           <CategoriesPage />
         </main>
       ) : view === 'rules' ? (
-        <main className="flex flex-col items-center px-6 py-10">
+        <main className="flex flex-col items-center px-6 py-10 max-sm:px-4">
           <RulesPage />
         </main>
       ) : null}
 
       {/* Hidden rather than unmounted while away, so the Dashboard keeps its choices. */}
-      <main hidden={view !== 'home'} className="flex flex-col items-center gap-4 px-6 py-10">
-        <div className="flex gap-3">
+      <main hidden={view !== 'home'} className="flex flex-col items-center gap-4 px-6 py-10 max-sm:px-4">
+        <div className="flex gap-3 max-sm:flex-wrap max-sm:justify-center">
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}

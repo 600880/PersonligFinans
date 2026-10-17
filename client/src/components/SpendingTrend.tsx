@@ -302,47 +302,50 @@ export function SpendingTrend({
                 ))}
               </LineChart>
 
-              <table className="mt-4 w-full text-sm">
-                <thead className="text-slate-500">
-                  <tr>
-                    <th />
-                    <th className="py-2 pr-3 text-right font-medium">{first.label}</th>
-                    <th className="py-2 pr-3 text-right font-medium">{last.label}</th>
-                    <th className="py-2 text-right font-medium">Change</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-200 text-slate-900">
-                  {rows.map((row) => (
-                    <tr key={row.key}>
-                      <td className="py-2 pr-3">
-                        <label className="flex w-fit items-center gap-2">
-                          <input
-                            type="checkbox"
-                            checked={switchedOn.has(row.key)}
-                            onChange={(event) => switchRow(row.key, event.target.checked)}
-                            className="size-4 rounded border-slate-300"
-                          />
-                          <span
-                            aria-hidden="true"
-                            className="size-3 shrink-0 rounded-sm"
-                            style={{ backgroundColor: row.colour }}
-                          />
-                          {row.name}
-                        </label>
-                      </td>
-                      <td className="py-2 pr-3 text-right whitespace-nowrap tabular-nums">
-                        {formatAmount(first.values[row.key])}
-                      </td>
-                      <td className="py-2 pr-3 text-right whitespace-nowrap tabular-nums">
-                        {formatAmount(last.values[row.key])}
-                      </td>
-                      <td className="py-2 text-right whitespace-nowrap text-slate-600 tabular-nums">
-                        {formatChange(first.values[row.key], last.values[row.key])}
-                      </td>
+              {/* On a phone the table scrolls sideways on its own, so the page never runs wider than the screen. */}
+              <div className="mt-4 max-sm:overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="text-slate-500">
+                    <tr>
+                      <th />
+                      <th className="py-2 pr-3 text-right font-medium">{first.label}</th>
+                      <th className="py-2 pr-3 text-right font-medium">{last.label}</th>
+                      <th className="py-2 text-right font-medium">Change</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200 text-slate-900">
+                    {rows.map((row) => (
+                      <tr key={row.key}>
+                        <td className="py-2 pr-3">
+                          <label className="flex w-fit items-center gap-2">
+                            <input
+                              type="checkbox"
+                              checked={switchedOn.has(row.key)}
+                              onChange={(event) => switchRow(row.key, event.target.checked)}
+                              className="size-4 rounded border-slate-300"
+                            />
+                            <span
+                              aria-hidden="true"
+                              className="size-3 shrink-0 rounded-sm"
+                              style={{ backgroundColor: row.colour }}
+                            />
+                            {row.name}
+                          </label>
+                        </td>
+                        <td className="py-2 pr-3 text-right whitespace-nowrap tabular-nums">
+                          {formatAmount(first.values[row.key])}
+                        </td>
+                        <td className="py-2 pr-3 text-right whitespace-nowrap tabular-nums">
+                          {formatAmount(last.values[row.key])}
+                        </td>
+                        <td className="py-2 text-right whitespace-nowrap text-slate-600 tabular-nums">
+                          {formatChange(first.values[row.key], last.values[row.key])}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </>
           )}
         </>

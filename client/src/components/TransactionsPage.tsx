@@ -335,8 +335,10 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
       )}
 
       {shownTransactions && shownTransactions.length > 0 && (
-        <table className="mt-4 w-full text-left text-sm">
-          <thead className="text-slate-500">
+        // On a phone each row is laid out as a card instead, its column headers hidden, so the table
+        // never runs wider than the screen.
+        <table className="mt-4 w-full text-left text-sm max-sm:block">
+          <thead className="text-slate-500 max-sm:hidden">
             <tr>
               <th className="py-2 font-medium">Date</th>
               <th className="py-2 font-medium">Description</th>
@@ -350,13 +352,17 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
               </th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-200 text-slate-900">
+          <tbody className="divide-y divide-slate-200 text-slate-900 max-sm:block">
             {shownTransactions.map((transaction) => (
               <Fragment key={transaction.id}>
-                <tr>
-                  <td className="py-2 pr-3 whitespace-nowrap">{formatNorwegianDate(transaction.date)}</td>
-                  <td className="py-2 pr-3">{transaction.description}</td>
-                  <td className="py-2 pr-3">
+                <tr className="max-sm:grid max-sm:grid-cols-[1fr_auto_auto] max-sm:items-center max-sm:gap-1 max-sm:py-3">
+                  <td className="py-2 pr-3 whitespace-nowrap max-sm:col-start-1 max-sm:row-start-1 max-sm:p-0">
+                    {formatNorwegianDate(transaction.date)}
+                  </td>
+                  <td className="py-2 pr-3 max-sm:col-span-3 max-sm:row-start-2 max-sm:p-0 max-sm:break-words">
+                    {transaction.description}
+                  </td>
+                  <td className="py-2 pr-3 max-sm:col-start-1 max-sm:row-start-3 max-sm:p-0">
                     <select
                       aria-label={`Category for ${transaction.description}`}
                       value={transaction.categoryId ?? ''}
@@ -390,10 +396,10 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
                       </span>
                     )}
                   </td>
-                  <td className="py-2 text-right whitespace-nowrap tabular-nums">
+                  <td className="py-2 text-right whitespace-nowrap tabular-nums max-sm:col-span-2 max-sm:col-start-2 max-sm:row-start-1 max-sm:p-0">
                     {formatAmount(transaction.amount)}
                   </td>
-                  <td className="py-2 pl-1 text-right">
+                  <td className="py-2 pl-4 text-right max-sm:col-start-2 max-sm:row-start-3 max-sm:p-0">
                     <button
                       type="button"
                       aria-label={`${transaction.note ? 'Edit' : 'Add'} note for ${transaction.description}`}
@@ -406,7 +412,7 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
                       </svg>
                     </button>
                   </td>
-                  <td className="py-2 pl-1 text-right">
+                  <td className="py-2 pl-1 text-right max-sm:col-start-3 max-sm:row-start-3 max-sm:p-0">
                     <button
                       type="button"
                       aria-label={`Delete ${transaction.description}`}
@@ -422,8 +428,8 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
                   </td>
                 </tr>
                 {editingNoteId === transaction.id && (
-                  <tr>
-                    <td colSpan={6} className="pb-3">
+                  <tr className="max-sm:block">
+                    <td colSpan={6} className="pb-3 max-sm:block max-sm:pt-1">
                       <div className="flex flex-wrap items-end gap-2 rounded-lg bg-slate-50 px-3 py-2">
                         <label className="flex flex-1 flex-col gap-1 text-sm font-medium text-slate-700">
                           Note
@@ -459,8 +465,8 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
                   </tr>
                 )}
                 {confirmingDeleteId === transaction.id && (
-                  <tr>
-                    <td colSpan={6} className="pb-3">
+                  <tr className="max-sm:block">
+                    <td colSpan={6} className="pb-3 max-sm:block max-sm:pt-1">
                       <div className="flex flex-wrap items-center justify-end gap-2 rounded-lg bg-red-50 px-3 py-2">
                         <span className="mr-auto text-red-800">
                           Delete "{transaction.description}" ({formatAmount(transaction.amount)} on{' '}

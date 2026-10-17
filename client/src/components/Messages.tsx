@@ -26,7 +26,7 @@ export function StatusMessage({ message, className = '' }: { message: string | n
 // moves the page.
 export function ErrorMessage({ children, className = '' }: { children: ReactNode; className?: string }) {
   return (
-    <div role="alert" className={`w-fit rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-sm text-red-700 ${className}`}>
+    <div role="alert" className={`w-fit rounded-lg border max-sm:break-words border-red-100 bg-red-50 px-3 py-2 text-sm text-red-700 ${className}`}>
       {children}
     </div>
   )
