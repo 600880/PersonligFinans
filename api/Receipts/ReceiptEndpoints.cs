@@ -119,15 +119,17 @@ public static class ReceiptEndpoints
         return description == "" ? null : description;
     }
 
-    // The signed Amount of what was read: negative for a purchase, positive for a refund. Null
-    // unless a positive total was read in NOK, so a foreign total is never mistaken for one in NOK.
-    // A Receipt with no currency printed is in NOK.
+    // The signed Amount of what was read: negative for a purchase, positive for a refund, rounded to
+    // whole øre away from zero, whichever reader read it. Null unless a total that is positive once
+    // rounded was read in NOK, so a foreign total is never mistaken for one in NOK. A Receipt with no
+    // currency printed is in NOK.
     private static decimal? AmountOf(ReceiptReading.Read read)
     {
         var currencyCode = string.IsNullOrWhiteSpace(read.CurrencyCode) ? "NOK" : read.CurrencyCode.Trim();
-        if (read.Total is not > 0 || !string.Equals(currencyCode, "NOK", StringComparison.OrdinalIgnoreCase))
+        decimal? total = read.Total is { } t ? Math.Round(t, 2, MidpointRounding.AwayFromZero) : null;
+        if (total is not > 0 || !string.Equals(currencyCode, "NOK", StringComparison.OrdinalIgnoreCase))
             return null;
-        return read.IsRefund ? read.Total : -read.Total;
+        return read.IsRefund ? total : -total;
     }
 
     private static IResult FileProblem(string message) =>

@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -274,6 +275,27 @@ public class ReceiptEndpointsTests
         Assert.Equal(
             new ReceiptSuggestion(ReceiptOutcome.Read, new DateOnly(2026, 7, 3), $"{_token} Café de Paris", null, RestaurantsId),
             suggestion);
+    }
+
+    [Theory]
+    [InlineData("12.345", false, "-12.35")]
+    [InlineData("12.344", false, "-12.34")]
+    [InlineData("12.345", true, "12.35")]
+    public async Task Post_ReadReceiptWithATotalOfMoreThanTwoDecimals_SuggestsItsAmountRoundedAwayFromZero(
+        string total, bool isRefund, string amount)
+    {
+        var suggestion = await SuggestionFrom(ReaderReading(
+            merchantName: $"{_token} Sport", total: decimal.Parse(total, CultureInfo.InvariantCulture), isRefund: isRefund));
+
+        Assert.Equal(decimal.Parse(amount, CultureInfo.InvariantCulture), suggestion.Amount);
+    }
+
+    [Fact]
+    public async Task Post_ReadReceiptWithATotalThatRoundsToZero_SuggestsNoAmount()
+    {
+        var suggestion = await SuggestionFrom(ReaderReading(merchantName: $"{_token} Sport", total: 0.004m));
+
+        Assert.Null(suggestion.Amount);
     }
 
     [Theory]
