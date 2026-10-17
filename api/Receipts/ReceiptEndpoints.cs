@@ -62,7 +62,7 @@ public static class ReceiptEndpoints
         }
 
         if (file is null || file.Length == 0)
-            return FileProblem("Choose a Receipt image to read.");
+            return FileProblem("Choose a Receipt to read.");
         if (file.Length > MaxFileBytes)
             return FileProblem("The file is larger than 10 MB.");
 

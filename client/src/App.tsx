@@ -248,7 +248,7 @@ function App() {
             ref={receiptInputRef}
             type="file"
             accept={RECEIPT_IMAGE_TYPES.join(',')}
-            aria-label="Receipt images"
+            aria-label="Receipts"
             multiple
             hidden
             onChange={(event) => {

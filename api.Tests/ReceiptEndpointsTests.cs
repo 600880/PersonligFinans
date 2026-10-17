@@ -50,27 +50,20 @@ public class ReceiptEndpointsTests
         return (await db.Transactions.CountAsync(), await db.CategorizationRules.CountAsync());
     }
 
-    public static TheoryData<string, string> Images => new()
+    public static TheoryData<byte[], string, string> Images => new()
     {
-        { "jpeg", "image/jpeg" },
-        { "png", "image/png" },
-        { "webp", "image/webp" },
-        { "gif", "image/gif" },
-    };
-
-    private static byte[] ImageOfType(string type) => type switch
-    {
-        "jpeg" => Jpeg,
-        "png" => Png,
-        "webp" => WebP,
-        _ => Gif,
+        { Jpeg, "kvittering.jpg", "image/jpeg" },
+        { Png, "kvittering.png", "image/png" },
+        { WebP, "kvittering.webp", "image/webp" },
+        { Gif, "kvittering.gif", "image/gif" },
     };
 
     [Theory]
     [MemberData(nameof(Images))]
-    public async Task Post_Image_WithoutAReceiptReader_AnswersUnavailableWithEveryFieldNull(string type, string contentType)
+    public async Task Post_Image_WithoutAReceiptReader_AnswersUnavailableWithEveryFieldNull(
+        byte[] image, string fileName, string contentType)
     {
-        var response = await Read(ImageOfType(type), $"kvittering.{type}", contentType);
+        var response = await Read(image, fileName, contentType);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         using var suggestion = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
@@ -140,7 +133,7 @@ public class ReceiptEndpointsTests
 
         var response = await _client.PostAsync("/api/receipts/read", form);
 
-        Assert.Equal(["Choose a Receipt image to read."], await FileErrors(response));
+        Assert.Equal(["Choose a Receipt to read."], await FileErrors(response));
     }
 
     [Fact]
@@ -148,6 +141,6 @@ public class ReceiptEndpointsTests
     {
         var response = await _client.PostAsJsonAsync("/api/receipts/read", new { file = "kvittering.jpg" });
 
-        Assert.Equal(["Choose a Receipt image to read."], await FileErrors(response));
+        Assert.Equal(["Choose a Receipt to read."], await FileErrors(response));
     }
 }

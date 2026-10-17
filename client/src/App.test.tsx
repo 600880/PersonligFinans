@@ -4173,7 +4173,7 @@ describe('Scan receipts', () => {
   async function scan(files: File[]) {
     const user = userEvent.setup({ applyAccept: false })
     render(<App />)
-    await user.upload(screen.getByLabelText(/receipt images/i), files)
+    await user.upload(screen.getByLabelText(/^receipts$/i), files)
     return user
   }
 
@@ -4198,7 +4198,7 @@ describe('Scan receipts', () => {
       .getAllByRole('button')
       .map((button) => button.textContent)
     expect(buttons).toEqual(['Upload transactions', 'Add transaction', 'Scan receipts'])
-    const picker = screen.getByLabelText(/receipt images/i)
+    const picker = screen.getByLabelText(/^receipts$/i)
     expect(picker).toHaveAttribute('accept', 'image/jpeg,image/png,image/webp,image/gif')
     expect(picker).toHaveAttribute('multiple')
   })
@@ -4362,7 +4362,7 @@ describe('Scan receipts', () => {
     await user.click(screen.getByRole('button', { name: /^save$/i }))
     await user.click(screen.getByRole('button', { name: 'Skip' }))
     handlePost = () => Response.json({ id: 2 }, { status: 201 })
-    await user.upload(screen.getByLabelText(/receipt images/i), [rema, narvesen])
+    await user.upload(screen.getByLabelText(/^receipts$/i), [rema, narvesen])
     await formIsReady('Receipt 1 of 2')
 
     await act(async () => respond(Response.json({ id: 1 }, { status: 201 })))
@@ -4440,7 +4440,7 @@ describe('Scan receipts', () => {
     const user = await scanUntilFormIsReady([kiwi])
     await user.click(screen.getByRole('button', { name: 'Skip' }))
 
-    await user.upload(screen.getByLabelText(/receipt images/i), [kiwi])
+    await user.upload(screen.getByLabelText(/^receipts$/i), [kiwi])
 
     expect(screen.getByRole('dialog', { name: 'Receipt 1 of 1' })).toBeInTheDocument()
   })
