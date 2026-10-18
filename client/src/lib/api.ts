@@ -18,6 +18,22 @@ async function apiFetch(input: string, init?: RequestInit): Promise<Response> {
   return response
 }
 
+// The problem a request was refused with: the first message for each field of a validation problem,
+// keyed on the field, and the detail of any other problem. A body that isn't a problem gives neither.
+async function readProblem<Request = object>(
+  response: Response,
+): Promise<{ fieldErrors: Partial<Record<keyof Request, string>>; detail: string | null }> {
+  const problem = (await response.json().catch(() => null)) as {
+    detail?: string
+    errors?: Record<string, string[]>
+  } | null
+  const fieldErrors: Partial<Record<keyof Request, string>> = {}
+  for (const [field, messages] of Object.entries(problem?.errors ?? {})) {
+    fieldErrors[field as keyof Request] = messages[0]
+  }
+  return { fieldErrors, detail: problem?.detail ?? null }
+}
+
 // The signed-in User, by the email they registered with.
 export interface User {
   email: string
@@ -71,16 +87,9 @@ async function signIn(url: string, credentials: Credentials): Promise<SignInResu
   // 400 is a validation problem keyed on the fields. 401 is a wrong email or password, and 429 a
   // locked email: problems whose detail says which.
   if (response.status === 400 || response.status === 401 || response.status === 429) {
-    const problem = (await response.json().catch(() => null)) as {
-      detail?: string
-      errors?: Record<string, string[]>
-    } | null
-    const fieldErrors: CredentialFieldErrors = {}
-    for (const [field, messages] of Object.entries(problem?.errors ?? {})) {
-      fieldErrors[field as keyof CredentialFieldErrors] = messages[0]
-    }
+    const { fieldErrors, detail } = await readProblem<Credentials>(response)
     if (Object.keys(fieldErrors).length > 0) return { ok: false, fieldErrors, message: null }
-    if (problem?.detail) return { ok: false, fieldErrors: {}, message: problem.detail }
+    if (detail) return { ok: false, fieldErrors: {}, message: detail }
   }
 
   return { ok: false, fieldErrors: {}, message: `Signing in failed (${response.status}).` }
@@ -160,10 +169,8 @@ export async function deleteCategory(
   if (response.status === 404) return { ok: true, alreadyDeleted: true, transactionsChanged: 0 }
 
   if (response.status === 400) {
-    const problem = (await response.json().catch(() => null)) as {
-      errors?: Record<string, string[]>
-    } | null
-    const message = Object.values(problem?.errors ?? {})[0]?.[0]
+    const { fieldErrors } = await readProblem<Record<string, unknown>>(response)
+    const message = Object.values(fieldErrors)[0]
     if (message) return { ok: false, message }
   }
 
@@ -209,13 +216,7 @@ async function saveCategory(
   if (response.ok) return { ok: true, category: (await response.json()) as Category }
 
   if (response.status === 400) {
-    const problem = (await response.json().catch(() => null)) as {
-      errors?: Record<string, string[]>
-    } | null
-    const fieldErrors: CategoryFieldErrors = {}
-    for (const [field, messages] of Object.entries(problem?.errors ?? {})) {
-      fieldErrors[field as keyof CategoryFieldErrors] = messages[0]
-    }
+    const { fieldErrors } = await readProblem<CategoryRequest>(response)
     if (Object.keys(fieldErrors).length > 0) return { ok: false, fieldErrors, message: null }
   }
 
@@ -355,8 +356,8 @@ export async function deleteTransaction(id: number): Promise<DeleteTransactionRe
 
   // 409 is a problem whose detail says why the Transaction can't be deleted.
   if (response.status === 409) {
-    const problem = (await response.json().catch(() => null)) as { detail?: string } | null
-    if (problem?.detail) return { ok: false, message: problem.detail }
+    const { detail } = await readProblem(response)
+    if (detail) return { ok: false, message: detail }
   }
 
   return { ok: false, message: `Deleting failed (${response.status}).` }
@@ -396,13 +397,7 @@ export async function createTransaction(
   if (response.ok) return { ok: true }
 
   if (response.status === 400) {
-    const problem = (await response.json().catch(() => null)) as {
-      errors?: Record<string, string[]>
-    } | null
-    const fieldErrors: FieldErrors = {}
-    for (const [field, messages] of Object.entries(problem?.errors ?? {})) {
-      fieldErrors[field as keyof FieldErrors] = messages[0]
-    }
+    const { fieldErrors } = await readProblem<CreateTransactionRequest>(response)
     if (Object.keys(fieldErrors).length > 0) return { ok: false, fieldErrors, message: null }
   }
 
@@ -440,11 +435,8 @@ export async function uploadBankStatement(file: File, uploadId: string): Promise
 
   // 400 is a validation problem keyed on "file"; 409 is a problem whose detail explains the conflict.
   if (response.status === 400 || response.status === 409) {
-    const problem = (await response.json().catch(() => null)) as {
-      detail?: string
-      errors?: { file?: string[] }
-    } | null
-    const message = problem?.errors?.file?.[0] ?? problem?.detail
+    const { fieldErrors, detail } = await readProblem<{ file: File }>(response)
+    const message = fieldErrors.file ?? detail
     if (message) return { ok: false, message }
   }
 
@@ -571,13 +563,7 @@ async function saveRule(
   }
 
   if (response.status === 400) {
-    const problem = (await response.json().catch(() => null)) as {
-      errors?: Record<string, string[]>
-    } | null
-    const fieldErrors: RuleFieldErrors = {}
-    for (const [field, messages] of Object.entries(problem?.errors ?? {})) {
-      fieldErrors[field as keyof RuleFieldErrors] = messages[0]
-    }
+    const { fieldErrors } = await readProblem<CategorizationRuleRequest>(response)
     if (Object.keys(fieldErrors).length > 0) return { ok: false, fieldErrors, message: null }
   }
 
