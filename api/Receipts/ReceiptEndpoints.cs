@@ -102,7 +102,8 @@ public static class ReceiptEndpoints
 
     // The Category of the rule matching the Description, chosen as the import chooses one, so a
     // Receipt gets the Category its merchant's imported Transactions get. Only without one does the
-    // reader's Category count, found by its name, which is unique ignoring case.
+    // reader's Category count, found by its name, which is unique among the User's Categories
+    // ignoring case.
     private static int? CategoryIdOf(
         string? description, ReceiptReading.Read read, List<CategorizationRule> rules, List<Category> categories) =>
         (description is null ? null : Categorizer.ChooseRule(description, rules)?.CategoryId)

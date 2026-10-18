@@ -43,6 +43,7 @@ public static class CategorizationRuleEndpoints
 
         var rule = new CategorizationRule
         {
+            UserId = db.CurrentUserId,
             Keyword = keyword,
             CategoryId = request.CategoryId!.Value,
             CreatedAt = DateTimeOffset.UtcNow,
@@ -148,7 +149,8 @@ public static class CategorizationRuleEndpoints
             ["keyword"] = [AlreadyExists(await FindByKeyword(db, keyword, editedRuleId: null) ?? keyword)],
         });
 
-    // Keywords are unique ignoring case, so this finds the keyword as it was originally typed.
+    // Keywords are unique among the User's rules ignoring case, so this finds the keyword as it was
+    // originally typed.
     private static Task<string?> FindByKeyword(AppDbContext db, string keyword, int? editedRuleId) =>
         db.CategorizationRules
             .Where(r => r.Id != editedRuleId && r.Keyword.ToLower() == keyword.ToLower())

@@ -4,7 +4,7 @@ namespace PersonligFinans.Api.Categories;
 // no Category uses yet, so it can be told apart from the others; once all are used, the fallback.
 public static class CategoryColours
 {
-    // The first 15 are the seeded Categories' colours, in id order.
+    // The first 15 are the seeded Categories' colours, in the order they are seeded.
     public static readonly string[] Palette =
     [
         "#2a78d6",

@@ -46,7 +46,7 @@ public static class CategoryEndpoints
                     db.Transactions.Count(t => t.CategoryId == c.Id),
                     db.CategorizationRules.Count(r => r.CategoryId == c.Id)))
                 .ToListAsync())
-            .OrderBy(c => c.BuiltIn ? Array.IndexOf(SeedCategories.BuiltInOrder, c.Name) : SeedCategories.BuiltInOrder.Length)
+            .OrderBy(c => c.BuiltIn ? Array.IndexOf(Seeds.BuiltInOrder, c.Name) : Seeds.BuiltInOrder.Length)
             .ThenBy(c => c.Name, ByNorwegianName)
             .ToList());
 
@@ -64,6 +64,7 @@ public static class CategoryEndpoints
 
         var category = new Category
         {
+            UserId = db.CurrentUserId,
             Name = name,
             Description = description,
             Colour = CategoryColours.Next(await db.Categories.Select(c => c.Colour).ToListAsync()),
@@ -217,7 +218,8 @@ public static class CategoryEndpoints
             ["name"] = [AlreadyExists(await FindByName(db, name, editedCategoryId: null) ?? name)],
         });
 
-    // Names are unique ignoring case, so this finds the name as it was originally typed.
+    // Names are unique among the User's Categories ignoring case, so this finds the name as it was
+    // originally typed.
     private static Task<string?> FindByName(AppDbContext db, string name, int? editedCategoryId) =>
         db.Categories
             .Where(c => c.Id != editedCategoryId && c.Name.ToLower() == name.ToLower())

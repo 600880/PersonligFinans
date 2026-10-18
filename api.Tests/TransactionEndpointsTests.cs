@@ -17,13 +17,9 @@ namespace PersonligFinans.Api.Tests;
 public class TransactionEndpointsTests : IAsyncLifetime
 {
     private readonly PostgresApiFactory _factory;
+    private readonly string _email = SignedInClient.UniqueEmail();
     private HttpClient _client = null!;
     private SeededCategories _seeded = null!;
-
-    // The tests share one database, so the listing tests use years no other test uses and put a
-    // token of their own in each description. The correction tests also put it in each rule's
-    // keyword, so their rules match only their own Transactions.
-    private readonly string _token = "t" + Guid.NewGuid().ToString("N")[..8];
 
     public TransactionEndpointsTests(PostgresApiFactory factory)
     {
@@ -32,7 +28,7 @@ public class TransactionEndpointsTests : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        _client = await _factory.CreateSignedInClientAsync();
+        _client = await _factory.CreateSignedInClientAsync(_email);
         _seeded = await SeededCategories.Of(_client);
     }
 
@@ -57,11 +53,7 @@ public class TransactionEndpointsTests : IAsyncLifetime
     {
         var categories = (await _client.GetFromJsonAsync<List<CategoryResponse>>("/api/categories"))!;
 
-        // Other tests add Categories of their own, so only the seeded ones are checked.
-        Assert.Contains(categories, c => c.Name == "Groceries");
-        Assert.Contains(categories, c => c.Name == "Other");
-        Assert.Contains(categories, c => c.Name == "Clothing");
-        Assert.Contains(categories, c => c.Name == "Electronics");
+        Assert.Equal(Seeds.Categories.Select(c => c.Name).Order(), categories.Select(c => c.Name).Order());
     }
 
     [Fact]
@@ -74,8 +66,8 @@ public class TransactionEndpointsTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         var created = await response.Content.ReadFromJsonAsync<TransactionResponse>();
 
-        using var scope = _factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        await using var user = await UserDatabase.OfAsync(_factory, _email);
+        var db = user.Db;
         var stored = await db.Transactions.SingleAsync(t => t.Id == created!.Id);
         Assert.Equal(new DateOnly(2026, 9, 24), stored.PostedDate);
         Assert.Equal("Invoice 42 paid", stored.Description);
@@ -156,7 +148,7 @@ public class TransactionEndpointsTests : IAsyncLifetime
     {
         await using var api = _factory.WithWebHostBuilder(builder =>
             builder.ConfigureTestServices(services => services.AddSingleton(ruleGenerator)));
-        using var client = await api.CreateSignedInClientAsync();
+        using var client = await api.CreateClientSignedInAsAsync(_email);
         await ImportStatement(client, period, rows);
     }
 
@@ -178,19 +170,15 @@ public class TransactionEndpointsTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
     }
 
-    private async Task<List<TransactionResponse>> OwnTransactionsOf(int year, int month)
-    {
-        var transactions = await _client.GetFromJsonAsync<List<TransactionResponse>>(
-            $"/api/transactions?year={year}&month={month}");
-        return transactions!.Where(t => t.Description.StartsWith(_token)).ToList();
-    }
+    private async Task<List<TransactionResponse>> TransactionsOf(int year, int month) =>
+        (await _client.GetFromJsonAsync<List<TransactionResponse>>($"/api/transactions?year={year}&month={month}"))!;
 
     [Fact]
     public async Task Get_Months_ListsEachMonthWithTransactionsOnceNewestFirst()
     {
-        await AddManualTransaction("2041-03-05", $"{_token} manual");
-        await AddManualTransaction("2041-03-20", $"{_token} manual again");
-        await ImportStatement("01.05.2041 - 31.05.2041", ("0405", $"{_token} imported"));
+        await AddManualTransaction("2041-03-05", "manual");
+        await AddManualTransaction("2041-03-20", "manual again");
+        await ImportStatement("01.05.2041 - 31.05.2041", ("0405", "imported"));
 
         var months = (await _client.GetFromJsonAsync<List<TransactionMonthResponse>>("/api/transactions/months"))!;
 
@@ -204,24 +192,24 @@ public class TransactionEndpointsTests : IAsyncLifetime
     [Fact]
     public async Task Get_Month_ListsImportedAndManualTransactionsOfThatMonthNewestFirst()
     {
-        await AddManualTransaction("2042-01-31", $"{_token} day before");
-        await AddManualTransaction("2042-02-01", $"{_token} first day");
-        await AddManualTransaction("2042-02-14", $"{_token} manual mid");
-        await AddManualTransaction("2042-03-01", $"{_token} day after");
+        await AddManualTransaction("2042-01-31", "day before");
+        await AddManualTransaction("2042-02-01", "first day");
+        await AddManualTransaction("2042-02-14", "manual mid");
+        await AddManualTransaction("2042-03-01", "day after");
         // Imported after the manual one on the same date, so it has the higher id.
         await ImportStatement(
             "01.02.2042 - 28.02.2042",
-            ("1402", $"{_token} imported mid"),
-            ("2802", $"{_token} last day"));
+            ("1402", "imported mid"),
+            ("2802", "last day"));
 
-        var transactions = await OwnTransactionsOf(2042, 2);
+        var transactions = await TransactionsOf(2042, 2);
 
         Assert.Equal(
             [
-                (new DateOnly(2042, 2, 28), $"{_token} last day", -10m, (int?)null),
-                (new DateOnly(2042, 2, 14), $"{_token} imported mid", -10m, null),
-                (new DateOnly(2042, 2, 14), $"{_token} manual mid", -249.90m, _seeded.Other),
-                (new DateOnly(2042, 2, 1), $"{_token} first day", -249.90m, _seeded.Other),
+                (new DateOnly(2042, 2, 28), "last day", -10m, (int?)null),
+                (new DateOnly(2042, 2, 14), "imported mid", -10m, null),
+                (new DateOnly(2042, 2, 14), "manual mid", -249.90m, _seeded.Other),
+                (new DateOnly(2042, 2, 1), "first day", -249.90m, _seeded.Other),
             ],
             transactions.Select(t => (t.Date, t.Description, t.Amount, t.CategoryId)));
     }
@@ -238,17 +226,17 @@ public class TransactionEndpointsTests : IAsyncLifetime
     [Fact]
     public async Task Get_YearWithoutMonth_ListsTheWholeYearsTransactionsNewestFirst()
     {
-        await AddManualTransaction("2045-12-31", $"{_token} last day");
-        await AddManualTransaction("2044-12-31", $"{_token} day before");
-        await AddManualTransaction("2045-06-15", $"{_token} mid");
-        await AddManualTransaction("2045-01-01", $"{_token} first day");
-        await AddManualTransaction("2046-01-01", $"{_token} day after");
+        await AddManualTransaction("2045-12-31", "last day");
+        await AddManualTransaction("2044-12-31", "day before");
+        await AddManualTransaction("2045-06-15", "mid");
+        await AddManualTransaction("2045-01-01", "first day");
+        await AddManualTransaction("2046-01-01", "day after");
 
         var transactions = await _client.GetFromJsonAsync<List<TransactionResponse>>("/api/transactions?year=2045");
 
         Assert.Equal(
-            [$"{_token} last day", $"{_token} mid", $"{_token} first day"],
-            transactions!.Where(t => t.Description.StartsWith(_token)).Select(t => t.Description));
+            ["last day", "mid", "first day"],
+            transactions!.Select(t => t.Description));
     }
 
     [Theory]
@@ -268,18 +256,17 @@ public class TransactionEndpointsTests : IAsyncLifetime
         Assert.Contains(field, problem!.Errors.Keys);
     }
 
-    // The correction tests import into a month no other test uses.
     private const string CorrectionPeriod = "01.01.2044 - 31.01.2044";
 
     private Task ImportForCorrection(params string[] descriptions) =>
-        ImportStatement(CorrectionPeriod, descriptions.Select(d => ("1501", $"{_token} {d}")).ToArray());
+        ImportStatement(CorrectionPeriod, descriptions.Select(d => ("1501", d)).ToArray());
 
     private Task ImportForCorrection(IRuleGenerator ruleGenerator, params string[] descriptions) =>
-        ImportStatement(ruleGenerator, CorrectionPeriod, descriptions.Select(d => ("1501", $"{_token} {d}")).ToArray());
+        ImportStatement(ruleGenerator, CorrectionPeriod, descriptions.Select(d => ("1501", d)).ToArray());
 
     // This test's Transaction with the given description, as the month's list shows it.
     private async Task<TransactionResponse> Own(string description) =>
-        (await OwnTransactionsOf(2044, 1)).Single(t => t.Description == $"{_token} {description}");
+        (await TransactionsOf(2044, 1)).Single(t => t.Description == description);
 
     private Task<HttpResponseMessage> ChangeCategory(int transactionId, int? categoryId) =>
         _client.PutAsJsonAsync($"/api/transactions/{transactionId}/category", new { categoryId });
@@ -319,7 +306,7 @@ public class TransactionEndpointsTests : IAsyncLifetime
         await ImportForCorrection("Kafé Nord", "Kafé Sør");
         await CategoryChanged((await Own("Kafé Nord")).Id, _seeded.Restaurants);
 
-        await AddRule($"{_token} kafé", _seeded.Groceries);
+        await AddRule("kafé", _seeded.Groceries);
 
         Assert.Equal(_seeded.Restaurants, (await Own("Kafé Nord")).CategoryId);
         Assert.Equal(_seeded.Groceries, (await Own("Kafé Sør")).CategoryId);
@@ -328,12 +315,12 @@ public class TransactionEndpointsTests : IAsyncLifetime
     [Fact]
     public async Task Put_Category_CorrectedImportedTransactionKeepsItWhenTheRuleThatCategorizedItIsEdited()
     {
-        var ruleId = await AddRule($"{_token} kafé", _seeded.Groceries);
+        var ruleId = await AddRule("kafé", _seeded.Groceries);
         await ImportForCorrection("Kafé Nord", "Kafé Sør");
         await CategoryChanged((await Own("Kafé Nord")).Id, _seeded.Restaurants);
 
         var response = await _client.PutAsJsonAsync(
-            $"/api/categorization-rules/{ruleId}", new { keyword = $"{_token} kafé", categoryId = _seeded.Shopping });
+            $"/api/categorization-rules/{ruleId}", new { keyword = "kafé", categoryId = _seeded.Shopping });
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal(_seeded.Restaurants, (await Own("Kafé Nord")).CategoryId);
@@ -343,7 +330,7 @@ public class TransactionEndpointsTests : IAsyncLifetime
     [Fact]
     public async Task Put_Category_CorrectedImportedTransactionKeepsItWhenTheRuleThatCategorizedItIsDeleted()
     {
-        var ruleId = await AddRule($"{_token} kafé", _seeded.Groceries);
+        var ruleId = await AddRule("kafé", _seeded.Groceries);
         await ImportForCorrection("Kafé Nord", "Kafé Sør");
         await CategoryChanged((await Own("Kafé Nord")).Id, _seeded.Restaurants);
 
@@ -359,11 +346,11 @@ public class TransactionEndpointsTests : IAsyncLifetime
     {
         await ImportForCorrection("Kafé Nord");
         await CategoryChanged((await Own("Kafé Nord")).Id, _seeded.Shopping);
-        var generator = new FakeRuleGenerator().Proposing($"{_token} Kafé Sør", $"{_token} kafé", "Restaurants");
+        var generator = new FakeRuleGenerator().Proposing("Kafé Sør", "kafé", "Restaurants");
 
         await ImportForCorrection(generator, "Kafé Sør");
 
-        var rule = Assert.Single(await Rules(), r => r.Keyword == $"{_token} kafé");
+        var rule = Assert.Single(await Rules(), r => r.Keyword == "kafé");
         Assert.True(rule.AiGenerated);
         Assert.Equal(_seeded.Restaurants, (await Own("Kafé Sør")).CategoryId);
         Assert.Equal(_seeded.Shopping, (await Own("Kafé Nord")).CategoryId);
@@ -372,7 +359,7 @@ public class TransactionEndpointsTests : IAsyncLifetime
     [Fact]
     public async Task Put_Category_CreatesNoRuleAndLeavesTheRulesUnchanged()
     {
-        await AddRule($"{_token} kafé", _seeded.Groceries);
+        await AddRule("kafé", _seeded.Groceries);
         await ImportForCorrection("Kafé Nord", "Frisør");
         var before = await Rules();
 
@@ -385,16 +372,16 @@ public class TransactionEndpointsTests : IAsyncLifetime
     [Fact]
     public async Task Put_Category_OfTransactionCategorizedByAnAiGeneratedRule_ChangesItAndLeavesTheRuleUnchanged()
     {
-        var generator = new FakeRuleGenerator().Proposing($"{_token} Kafé", $"{_token} kafé", "Restaurants");
+        var generator = new FakeRuleGenerator().Proposing("Kafé", "kafé", "Restaurants");
         await ImportForCorrection(generator, "Kafé");
-        var rule = Assert.Single(await Rules(), r => r.Keyword == $"{_token} kafé");
+        var rule = Assert.Single(await Rules(), r => r.Keyword == "kafé");
         Assert.True(rule.AiGenerated);
         Assert.Equal(_seeded.Restaurants, (await Own("Kafé")).CategoryId);
 
         await CategoryChanged((await Own("Kafé")).Id, _seeded.Groceries);
 
         Assert.Equal(_seeded.Groceries, (await Own("Kafé")).CategoryId);
-        Assert.Equal(rule, Assert.Single(await Rules(), r => r.Keyword == $"{_token} kafé"));
+        Assert.Equal(rule, Assert.Single(await Rules(), r => r.Keyword == "kafé"));
     }
 
     [Fact]
@@ -402,7 +389,7 @@ public class TransactionEndpointsTests : IAsyncLifetime
     {
         var response = await _client.PostAsJsonAsync(
             "/api/transactions",
-            ValidRequest with { Date = "2044-01-20", Description = $"{_token} Lunsj", Note = "INV-7" });
+            ValidRequest with { Date = "2044-01-20", Description = "Lunsj", Note = "INV-7" });
         var manual = (await response.Content.ReadFromJsonAsync<TransactionResponse>())!;
 
         await CategoryChanged(manual.Id, _seeded.Groceries);
@@ -436,7 +423,7 @@ public class TransactionEndpointsTests : IAsyncLifetime
     [Fact]
     public async Task Get_Month_ShowsATransactionCategorizedByARuleAsNotLocked()
     {
-        await AddRule($"{_token} kafé", _seeded.Restaurants);
+        await AddRule("kafé", _seeded.Restaurants);
         await ImportForCorrection("Kafé");
 
         var categorized = await Own("Kafé");
@@ -448,7 +435,7 @@ public class TransactionEndpointsTests : IAsyncLifetime
     public async Task Post_ManuallyEnteredTransaction_IsLocked()
     {
         var response = await _client.PostAsJsonAsync(
-            "/api/transactions", ValidRequest with { Date = "2044-01-20", Description = $"{_token} Lunsj" });
+            "/api/transactions", ValidRequest with { Date = "2044-01-20", Description = "Lunsj" });
 
         var created = (await response.Content.ReadFromJsonAsync<TransactionResponse>())!;
         Assert.True(created.Locked);
@@ -458,7 +445,7 @@ public class TransactionEndpointsTests : IAsyncLifetime
     [Fact]
     public async Task Put_Category_OfTransactionCategorizedByARule_LocksIt()
     {
-        await AddRule($"{_token} kafé", _seeded.Restaurants);
+        await AddRule("kafé", _seeded.Restaurants);
         await ImportForCorrection("Kafé");
 
         var changed = await CategoryChanged((await Own("Kafé")).Id, _seeded.Groceries);
@@ -493,7 +480,7 @@ public class TransactionEndpointsTests : IAsyncLifetime
     [Fact]
     public async Task Get_Month_ShowsWhichTransactionsWereImported()
     {
-        await AddManualTransaction("2044-01-10", $"{_token} manual");
+        await AddManualTransaction("2044-01-10", "manual");
         await ImportForCorrection("imported");
 
         Assert.False((await Own("manual")).Imported);
@@ -503,12 +490,12 @@ public class TransactionEndpointsTests : IAsyncLifetime
     [Fact]
     public async Task Delete_ManualTransaction_RemovesIt()
     {
-        await AddManualTransaction("2044-01-10", $"{_token} manual");
+        await AddManualTransaction("2044-01-10", "manual");
 
         var response = await _client.DeleteAsync($"/api/transactions/{(await Own("manual")).Id}");
 
         Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
-        Assert.Empty(await OwnTransactionsOf(2044, 1));
+        Assert.Empty(await TransactionsOf(2044, 1));
     }
 
     [Fact]
@@ -538,7 +525,7 @@ public class TransactionEndpointsTests : IAsyncLifetime
     public async Task Put_Note_OnManualTransaction_SetsItAndReturnsUpdatedTransaction()
     {
         var response = await _client.PostAsJsonAsync(
-            "/api/transactions", ValidRequest with { Date = "2044-01-20", Description = $"{_token} Kvittering" });
+            "/api/transactions", ValidRequest with { Date = "2044-01-20", Description = "Kvittering" });
         var manual = (await response.Content.ReadFromJsonAsync<TransactionResponse>())!;
 
         var noteResponse = await ChangeNote(manual.Id, "Reimbursed by work");
@@ -565,7 +552,7 @@ public class TransactionEndpointsTests : IAsyncLifetime
     public async Task Put_Note_BlankOrNull_ClearsIt()
     {
         var response = await _client.PostAsJsonAsync(
-            "/api/transactions", ValidRequest with { Date = "2044-01-20", Description = $"{_token} Med notat", Note = "Old note" });
+            "/api/transactions", ValidRequest with { Date = "2044-01-20", Description = "Med notat", Note = "Old note" });
         var transaction = (await response.Content.ReadFromJsonAsync<TransactionResponse>())!;
 
         await ChangeNote(transaction.Id, "   ");
@@ -577,7 +564,7 @@ public class TransactionEndpointsTests : IAsyncLifetime
     public async Task Put_Note_ThatIsTooLong_IsRejected()
     {
         var response = await _client.PostAsJsonAsync(
-            "/api/transactions", ValidRequest with { Date = "2044-01-20", Description = $"{_token} Notat for langt" });
+            "/api/transactions", ValidRequest with { Date = "2044-01-20", Description = "Notat for langt" });
         var transaction = (await response.Content.ReadFromJsonAsync<TransactionResponse>())!;
 
         var noteResponse = await ChangeNote(transaction.Id, new string('x', 257));
@@ -595,31 +582,26 @@ public class TransactionEndpointsTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.NotFound, noteResponse.StatusCode);
     }
 
-    // The Possible duplicate tests use dates in 2047, which no other test uses, and only look at
-    // their own Transactions, except for the one asking about an Amount no test enters.
-    private async Task<List<PossibleDuplicateResponse>> OwnPossibleDuplicates(string date, string amount)
-    {
-        var duplicates = await _client.GetFromJsonAsync<List<PossibleDuplicateResponse>>(
-            $"/api/transactions/possible-duplicates?date={date}&amount={amount}");
-        return duplicates!.Where(d => d.Description.StartsWith(_token)).ToList();
-    }
+    private async Task<List<PossibleDuplicateResponse>> PossibleDuplicates(string date, string amount) =>
+        (await _client.GetFromJsonAsync<List<PossibleDuplicateResponse>>(
+            $"/api/transactions/possible-duplicates?date={date}&amount={amount}"))!;
 
     [Fact]
     public async Task Get_PossibleDuplicates_AreThoseUpToThreeDaysEitherWayOrderedByDate()
     {
-        await AddManualTransaction("2047-03-06", $"{_token} four days after");
-        await AddManualTransaction("2047-03-05", $"{_token} three days after");
-        await AddManualTransaction("2047-03-02", $"{_token} same day");
-        await AddManualTransaction("2047-02-27", $"{_token} three days before");
-        await AddManualTransaction("2047-02-26", $"{_token} four days before");
+        await AddManualTransaction("2047-03-06", "four days after");
+        await AddManualTransaction("2047-03-05", "three days after");
+        await AddManualTransaction("2047-03-02", "same day");
+        await AddManualTransaction("2047-02-27", "three days before");
+        await AddManualTransaction("2047-02-26", "four days before");
 
-        var duplicates = await OwnPossibleDuplicates("2047-03-02", "-249.90");
+        var duplicates = await PossibleDuplicates("2047-03-02", "-249.90");
 
         Assert.Equal(
             [
-                (new DateOnly(2047, 2, 27), $"{_token} three days before", -249.90m),
-                (new DateOnly(2047, 3, 2), $"{_token} same day", -249.90m),
-                (new DateOnly(2047, 3, 5), $"{_token} three days after", -249.90m),
+                (new DateOnly(2047, 2, 27), "three days before", -249.90m),
+                (new DateOnly(2047, 3, 2), "same day", -249.90m),
+                (new DateOnly(2047, 3, 5), "three days after", -249.90m),
             ],
             duplicates.Select(d => (d.Date, d.Description, d.Amount)));
         Assert.All(duplicates, d => Assert.True(d.Id > 0));
@@ -629,27 +611,27 @@ public class TransactionEndpointsTests : IAsyncLifetime
     public async Task Get_PossibleDuplicates_IncludeImportedAndManuallyEnteredTransactions()
     {
         // Each imported row is a purchase of 10,00.
-        await ImportStatement("01.05.2047 - 31.05.2047", ("0905", $"{_token} imported"));
+        await ImportStatement("01.05.2047 - 31.05.2047", ("0905", "imported"));
         await _client.PostAsJsonAsync(
-            "/api/transactions", ValidRequest with { Date = "2047-05-11", Description = $"{_token} manual", Amount = -10m });
+            "/api/transactions", ValidRequest with { Date = "2047-05-11", Description = "manual", Amount = -10m });
 
-        var duplicates = await OwnPossibleDuplicates("2047-05-10", "-10");
+        var duplicates = await PossibleDuplicates("2047-05-10", "-10");
 
-        Assert.Equal([$"{_token} imported", $"{_token} manual"], duplicates.Select(d => d.Description));
+        Assert.Equal(["imported", "manual"], duplicates.Select(d => d.Description));
     }
 
     [Fact]
     public async Task Get_PossibleDuplicates_RequiresTheExactSignedAmount()
     {
-        await AddManualTransaction("2047-07-15", $"{_token} spent");
+        await AddManualTransaction("2047-07-15", "spent");
         await _client.PostAsJsonAsync(
-            "/api/transactions", ValidRequest with { Date = "2047-07-15", Description = $"{_token} received", Amount = 249.90m });
+            "/api/transactions", ValidRequest with { Date = "2047-07-15", Description = "received", Amount = 249.90m });
         await _client.PostAsJsonAsync(
-            "/api/transactions", ValidRequest with { Date = "2047-07-15", Description = $"{_token} a cent more", Amount = -249.91m });
+            "/api/transactions", ValidRequest with { Date = "2047-07-15", Description = "a cent more", Amount = -249.91m });
 
-        var duplicates = await OwnPossibleDuplicates("2047-07-15", "-249.9");
+        var duplicates = await PossibleDuplicates("2047-07-15", "-249.9");
 
-        Assert.Equal([$"{_token} spent"], duplicates.Select(d => d.Description));
+        Assert.Equal(["spent"], duplicates.Select(d => d.Description));
     }
 
     [Fact]

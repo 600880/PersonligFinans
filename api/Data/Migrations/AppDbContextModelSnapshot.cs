@@ -226,12 +226,16 @@ namespace PersonligFinans.Api.Data.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("upload_id");
 
+                    b.Property<string>("UserId")
+                        .HasColumnType("text")
+                        .HasColumnName("user_id");
+
                     b.HasKey("Id")
                         .HasName("pk_bank_statements");
 
-                    b.HasIndex("AccountNumber", "PeriodStart", "PeriodEnd")
+                    b.HasIndex("UserId", "AccountNumber", "PeriodStart", "PeriodEnd")
                         .IsUnique()
-                        .HasDatabaseName("ix_bank_statements_account_number_period_start_period_end");
+                        .HasDatabaseName("ix_bank_statements_user_id_account_number_period_start_period_");
 
                     b.ToTable("bank_statements", (string)null);
                 });
@@ -267,11 +271,18 @@ namespace PersonligFinans.Api.Data.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("upload_id");
 
+                    b.Property<string>("UserId")
+                        .HasColumnType("text")
+                        .HasColumnName("user_id");
+
                     b.HasKey("Id")
                         .HasName("pk_categorization_rules");
 
                     b.HasIndex("CategoryId")
                         .HasDatabaseName("ix_categorization_rules_category_id");
+
+                    b.HasIndex("UserId")
+                        .HasDatabaseName("ix_categorization_rules_user_id");
 
                     b.ToTable("categorization_rules", (string)null);
                 });
@@ -307,132 +318,17 @@ namespace PersonligFinans.Api.Data.Migrations
                         .HasColumnType("character varying(50)")
                         .HasColumnName("name");
 
+                    b.Property<string>("UserId")
+                        .HasColumnType("text")
+                        .HasColumnName("user_id");
+
                     b.HasKey("Id")
                         .HasName("pk_categories");
 
-                    b.ToTable("categories", (string)null);
+                    b.HasIndex("UserId")
+                        .HasDatabaseName("ix_categories_user_id");
 
-                    b.HasData(
-                        new
-                        {
-                            Id = 1,
-                            BuiltIn = true,
-                            Colour = "#2a78d6",
-                            Description = "All groceries.",
-                            Name = "Groceries"
-                        },
-                        new
-                        {
-                            Id = 2,
-                            BuiltIn = false,
-                            Colour = "#eb6834",
-                            Description = "Restaurant, takeaway, bakery etc.",
-                            Name = "Restaurants"
-                        },
-                        new
-                        {
-                            Id = 3,
-                            BuiltIn = true,
-                            Colour = "#1baf7a",
-                            Description = "All transport.",
-                            Name = "Transport"
-                        },
-                        new
-                        {
-                            Id = 4,
-                            BuiltIn = true,
-                            Colour = "#eda100",
-                            Description = "Mortgage, common costs and insurance.",
-                            Name = "Housing"
-                        },
-                        new
-                        {
-                            Id = 5,
-                            BuiltIn = false,
-                            Colour = "#e87ba4",
-                            Description = "Electricity, water, phone, internet etc.",
-                            Name = "Utilities"
-                        },
-                        new
-                        {
-                            Id = 6,
-                            BuiltIn = false,
-                            Colour = "#008300",
-                            Description = "All subscriptions.",
-                            Name = "Subscriptions"
-                        },
-                        new
-                        {
-                            Id = 7,
-                            BuiltIn = false,
-                            Colour = "#4a3aa7",
-                            Description = "Pharmacy etc.",
-                            Name = "Health"
-                        },
-                        new
-                        {
-                            Id = 8,
-                            BuiltIn = false,
-                            Colour = "#e34948",
-                            Description = "All shopping.",
-                            Name = "Shopping"
-                        },
-                        new
-                        {
-                            Id = 9,
-                            BuiltIn = false,
-                            Colour = "#104281",
-                            Description = "Movies, video games etc.",
-                            Name = "Entertainment"
-                        },
-                        new
-                        {
-                            Id = 10,
-                            BuiltIn = false,
-                            Colour = "#86b6ef",
-                            Description = "All travel.",
-                            Name = "Travel"
-                        },
-                        new
-                        {
-                            Id = 11,
-                            BuiltIn = true,
-                            Colour = "#8a5a1c",
-                            Description = "All income.",
-                            Name = "Income"
-                        },
-                        new
-                        {
-                            Id = 12,
-                            BuiltIn = true,
-                            Colour = "#0f766e",
-                            Description = "All private transfers.",
-                            Name = "Transfers"
-                        },
-                        new
-                        {
-                            Id = 13,
-                            BuiltIn = true,
-                            Colour = "#9085e9",
-                            Description = "Costs that don't belong in any other category.",
-                            Name = "Other"
-                        },
-                        new
-                        {
-                            Id = 14,
-                            BuiltIn = true,
-                            Colour = "#b8336a",
-                            Description = "All clothing.",
-                            Name = "Clothing"
-                        },
-                        new
-                        {
-                            Id = 15,
-                            BuiltIn = false,
-                            Colour = "#6b8e23",
-                            Description = "All electronics.",
-                            Name = "Electronics"
-                        });
+                    b.ToTable("categories", (string)null);
                 });
 
             modelBuilder.Entity("PersonligFinans.Api.Data.Transaction", b =>
@@ -476,6 +372,10 @@ namespace PersonligFinans.Api.Data.Migrations
                         .HasColumnType("date")
                         .HasColumnName("posted_date");
 
+                    b.Property<string>("UserId")
+                        .HasColumnType("text")
+                        .HasColumnName("user_id");
+
                     b.HasKey("Id")
                         .HasName("pk_transactions");
 
@@ -487,6 +387,9 @@ namespace PersonligFinans.Api.Data.Migrations
 
                     b.HasIndex("CategoryId")
                         .HasDatabaseName("ix_transactions_category_id");
+
+                    b.HasIndex("UserId")
+                        .HasDatabaseName("ix_transactions_user_id");
 
                     b.ToTable("transactions", null, t =>
                         {
@@ -524,6 +427,15 @@ namespace PersonligFinans.Api.Data.Migrations
                         .HasConstraintName("fk_asp_net_user_tokens_asp_net_users_user_id");
                 });
 
+            modelBuilder.Entity("PersonligFinans.Api.Data.BankStatement", b =>
+                {
+                    b.HasOne("Microsoft.AspNetCore.Identity.IdentityUser", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_bank_statements_asp_net_users_user_id");
+                });
+
             modelBuilder.Entity("PersonligFinans.Api.Data.CategorizationRule", b =>
                 {
                     b.HasOne("PersonligFinans.Api.Data.Category", "Category")
@@ -533,7 +445,22 @@ namespace PersonligFinans.Api.Data.Migrations
                         .IsRequired()
                         .HasConstraintName("fk_categorization_rules_categories_category_id");
 
+                    b.HasOne("Microsoft.AspNetCore.Identity.IdentityUser", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_categorization_rules_asp_net_users_user_id");
+
                     b.Navigation("Category");
+                });
+
+            modelBuilder.Entity("PersonligFinans.Api.Data.Category", b =>
+                {
+                    b.HasOne("Microsoft.AspNetCore.Identity.IdentityUser", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_categories_asp_net_users_user_id");
                 });
 
             modelBuilder.Entity("PersonligFinans.Api.Data.Transaction", b =>
@@ -555,6 +482,12 @@ namespace PersonligFinans.Api.Data.Migrations
                         .HasForeignKey("CategoryId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .HasConstraintName("fk_transactions_categories_category_id");
+
+                    b.HasOne("Microsoft.AspNetCore.Identity.IdentityUser", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_transactions_asp_net_users_user_id");
 
                     b.Navigation("BankStatement");
 

@@ -15,13 +15,14 @@ public class AntiforgeryTests
         _factory = factory;
     }
 
-    // The two multipart endpoints, each with a form it accepts: a one-row Bank Statement, and a JPEG
-    // Receipt, which is answered Unavailable since the tests configure no receipt reader.
-    public static TheoryData<string> Uploads => ["bank statement", "receipt"];
+    // The two multipart forms, each with a file its endpoint accepts: a one-row Bank Statement to
+    // upload, and a JPEG Receipt to read, answered Unavailable since the tests configure no receipt
+    // reader.
+    public static TheoryData<string> Forms => ["bank statement", "receipt"];
 
-    private static async Task<HttpResponseMessage> Upload(HttpClient client, string upload)
+    private static async Task<HttpResponseMessage> PostForm(HttpClient client, string form)
     {
-        if (upload == "bank statement")
+        if (form == "bank statement")
         {
             var digits = Random.Shared.NextInt64(0, 100_000_000_000).ToString("D11");
             var pdf = StatementPdf.Create(
@@ -61,50 +62,50 @@ public class AntiforgeryTests
     }
 
     [Theory]
-    [MemberData(nameof(Uploads))]
-    public async Task Upload_WithTheSignedInUsersToken_IsAccepted(string upload)
+    [MemberData(nameof(Forms))]
+    public async Task Form_WithTheSignedInUsersToken_IsAccepted(string form)
     {
         var client = await _factory.CreateSignedInClientAsync();
         UseToken(client, await TokenFor(client));
 
-        var response = await Upload(client, upload);
+        var response = await PostForm(client, form);
 
         Assert.True(response.IsSuccessStatusCode, $"Expected success, got {response.StatusCode}.");
     }
 
     [Theory]
-    [MemberData(nameof(Uploads))]
-    public async Task Upload_WithoutAToken_IsRefused(string upload)
+    [MemberData(nameof(Forms))]
+    public async Task Form_WithoutAToken_IsRefused(string form)
     {
         var client = await _factory.CreateSignedInClientAsync();
         UseToken(client, null);
 
-        var response = await Upload(client, upload);
+        var response = await PostForm(client, form);
 
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
     }
 
     [Theory]
-    [MemberData(nameof(Uploads))]
-    public async Task Upload_WithAMalformedToken_IsRefused(string upload)
+    [MemberData(nameof(Forms))]
+    public async Task Form_WithAMalformedToken_IsRefused(string form)
     {
         var client = await _factory.CreateSignedInClientAsync();
         UseToken(client, "not-a-token");
 
-        var response = await Upload(client, upload);
+        var response = await PostForm(client, form);
 
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
     }
 
     [Theory]
-    [MemberData(nameof(Uploads))]
-    public async Task Upload_WithAnotherUsersToken_IsRefused(string upload)
+    [MemberData(nameof(Forms))]
+    public async Task Form_WithAnotherUsersToken_IsRefused(string form)
     {
         var client = await _factory.CreateSignedInClientAsync();
         var other = await _factory.CreateSignedInClientAsync();
         UseToken(client, await TokenFor(other));
 
-        var response = await Upload(client, upload);
+        var response = await PostForm(client, form);
 
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
     }
@@ -112,8 +113,8 @@ public class AntiforgeryTests
     // A token is bound to whoever was signed in when it was given, so the client fetches one after
     // signing in.
     [Theory]
-    [MemberData(nameof(Uploads))]
-    public async Task Upload_WithATokenGivenBeforeSigningIn_IsRefused(string upload)
+    [MemberData(nameof(Forms))]
+    public async Task Form_WithATokenGivenBeforeSigningIn_IsRefused(string form)
     {
         var client = _factory.CreateClient();
         var token = await TokenFor(client);
@@ -122,17 +123,17 @@ public class AntiforgeryTests
         Assert.Equal(HttpStatusCode.OK, registered.StatusCode);
         UseToken(client, token);
 
-        var response = await Upload(client, upload);
+        var response = await PostForm(client, form);
 
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
     }
 
     [Fact]
-    public async Task Upload_SignedOut_Returns401_EvenWithoutAToken()
+    public async Task Form_SignedOut_Returns401_EvenWithoutAToken()
     {
         var client = _factory.CreateClient();
 
-        var response = await Upload(client, "bank statement");
+        var response = await PostForm(client, "bank statement");
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }

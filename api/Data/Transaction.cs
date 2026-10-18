@@ -3,6 +3,9 @@ namespace PersonligFinans.Api.Data;
 public class Transaction
 {
     public int Id { get; set; }
+
+    // The User it belongs to. Null only for a row from before Users, which belongs to nobody.
+    public string? UserId { get; set; }
     public DateOnly PostedDate { get; set; }
     public required string Description { get; set; }
 

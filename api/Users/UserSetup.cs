@@ -71,6 +71,10 @@ public static class UserSetup
             };
         });
 
+        // Who the database context works for.
+        services.AddHttpContextAccessor();
+        services.AddScoped<CurrentUser>();
+
         services.AddAuthorizationBuilder()
             .SetFallbackPolicy(new AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build());
 

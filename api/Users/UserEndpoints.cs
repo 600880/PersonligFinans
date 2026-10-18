@@ -2,6 +2,7 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
+using PersonligFinans.Api.Data;
 
 namespace PersonligFinans.Api.Users;
 
@@ -32,9 +33,13 @@ public static class UserEndpoints
         api.MapPost("/log-out", LogOut).AllowAnonymous();
     }
 
-    // Creates a User whose user name is their email, and signs it in.
+    // Creates a User whose user name is their email, with copies of the seeds of their own, and signs
+    // it in.
     private static async Task<IResult> Register(
-        CredentialsRequest request, UserManager<IdentityUser> userManager, SignInManager<IdentityUser> signInManager)
+        CredentialsRequest request,
+        UserManager<IdentityUser> userManager,
+        SignInManager<IdentityUser> signInManager,
+        AppDbContext db)
     {
         var (email, password, errors) = ValidateRequired(request);
         if (errors.Count > 0)
@@ -57,6 +62,9 @@ public static class UserEndpoints
         if (identityErrors.Count > 0)
             return Results.ValidationProblem(FieldErrors(identityErrors));
 
+        // Identity's store saves through the same context, so the User and their seeds are created
+        // together or not at all.
+        await using var transaction = await db.Database.BeginTransactionAsync();
         IdentityResult result;
         try
         {
@@ -69,6 +77,10 @@ public static class UserEndpoints
         }
         if (!result.Succeeded)
             return Results.ValidationProblem(FieldErrors(result.Errors));
+
+        Seeds.AddTo(db, user.Id);
+        await db.SaveChangesAsync();
+        await transaction.CommitAsync();
 
         await signInManager.SignInAsync(user, isPersistent: true);
         return Results.Ok(new UserResponse(email));

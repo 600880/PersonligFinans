@@ -12,11 +12,9 @@ namespace PersonligFinans.Api.Tests;
 public class SpendingEndpointsTests : IAsyncLifetime
 {
     private readonly PostgresApiFactory _factory;
+    private readonly string _email = SignedInClient.UniqueEmail();
     private HttpClient _client = null!;
     private SeededCategories _seeded = null!;
-
-    // Spending adds up every Transaction of a month, so each test uses a year no other test uses.
-    private readonly string _token = "t" + Guid.NewGuid().ToString("N")[..8];
 
     public SpendingEndpointsTests(PostgresApiFactory factory)
     {
@@ -25,7 +23,7 @@ public class SpendingEndpointsTests : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        _client = await _factory.CreateSignedInClientAsync();
+        _client = await _factory.CreateSignedInClientAsync(_email);
         _seeded = await SeededCategories.Of(_client);
     }
 
@@ -35,7 +33,7 @@ public class SpendingEndpointsTests : IAsyncLifetime
     {
         var response = await _client.PostAsJsonAsync(
             "/api/transactions",
-            new { date, description = $"{_token} manual", amount, reference = (string?)null, categoryId });
+            new { date, description = "manual", amount, reference = (string?)null, categoryId });
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
     }
 
@@ -56,7 +54,7 @@ public class SpendingEndpointsTests : IAsyncLifetime
             period,
             openingBalance: Format(1000m),
             rows: rows.Select(r => new StatementPdfRow(
-                $"{_token} imported",
+                "imported",
                 r.BookedDate,
                 r.Amount < 0 ? Format(-r.Amount) : null,
                 r.Amount < 0 ? null : Format(r.Amount),

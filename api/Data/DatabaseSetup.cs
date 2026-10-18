@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using PersonligFinans.Api.CategorizationRules;
+using PersonligFinans.Api.Users;
 
 namespace PersonligFinans.Api.Data;
 
@@ -30,9 +31,22 @@ public static class DatabaseSetup
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         await db.Database.MigrateAsync();
 
-        // A migration may change the rules, for example by seeding them, whether applied here or by
-        // hand. Re-matching is idempotent and cheap, so do it on every startup to keep the imported
-        // Transactions already stored in line with the rules.
-        await Categorizer.SaveRuleChangeAsync(db);
+        // A migration may change the rules, whether applied here or by hand. Re-matching is
+        // idempotent and cheap, so do it on every startup to keep the imported Transactions already
+        // stored in line with the rules: each User's against that User's own rules, as that User.
+        // Only Users with imported Transactions have any to re-match. Rows with no owner are left
+        // alone.
+        var userIds = await db.Transactions
+            .IgnoreQueryFilters()
+            .Where(t => t.UserId != null && t.BankStatementId != null)
+            .Select(t => t.UserId!)
+            .Distinct()
+            .ToListAsync();
+        foreach (var userId in userIds)
+        {
+            using var userScope = app.Services.CreateScope();
+            userScope.ServiceProvider.GetRequiredService<CurrentUser>().ActAs(userId);
+            await Categorizer.SaveRuleChangeAsync(userScope.ServiceProvider.GetRequiredService<AppDbContext>());
+        }
     }
 }

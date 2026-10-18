@@ -3,6 +3,9 @@ namespace PersonligFinans.Api.Data;
 public class BankStatement
 {
     public int Id { get; set; }
+
+    // The User it belongs to. Null only for a row from before Users, which belongs to nobody.
+    public string? UserId { get; set; }
     public required string AccountNumber { get; set; }
     public DateOnly PeriodStart { get; set; }
     public DateOnly PeriodEnd { get; set; }

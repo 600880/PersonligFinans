@@ -21,10 +21,11 @@ async function apiFetch(input: string, init?: RequestInit): Promise<Response> {
   return response
 }
 
-// The header the uploads send the antiforgery token in.
+// The header the multipart forms (a Bank Statement's Upload and reading a Receipt) send the
+// antiforgery token in.
 const ANTIFORGERY_HEADER = 'X-CSRF-TOKEN'
 
-// The antiforgery token the uploads send, fetched at the first upload after signing in, since the
+// The antiforgery token the multipart forms send, fetched at the first one after signing in, since the
 // server binds it to the signed-in User. null until then, and again whenever who is signed in may
 // have changed.
 let antiforgeryToken: Promise<string> | null = null
@@ -39,7 +40,7 @@ function currentAntiforgeryToken(): Promise<string> {
     if (!response.ok) throw new Error(`Loading the antiforgery token failed (${response.status})`)
     return ((await response.json()) as { token: string }).token
   })().catch((error: unknown) => {
-    // A failed fetch is tried again at the next upload rather than kept.
+    // A failed fetch is tried again at the next form rather than kept.
     forgetAntiforgeryToken()
     throw error
   })
