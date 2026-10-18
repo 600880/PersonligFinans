@@ -22,7 +22,8 @@ public class TransactionEndpointsTests : IAsyncLifetime
     private int _otherCategoryId;
 
     private readonly PostgresApiFactory _factory;
-    private readonly HttpClient _client;
+    // Signed in as a User of its own, registered for each test.
+    private HttpClient _client = null!;
 
     // The tests share one database, so the listing tests use years no other test uses and put a
     // token of their own in each description. The correction tests also put it in each rule's
@@ -32,11 +33,11 @@ public class TransactionEndpointsTests : IAsyncLifetime
     public TransactionEndpointsTests(PostgresApiFactory factory)
     {
         _factory = factory;
-        _client = factory.CreateClient();
     }
 
     public async Task InitializeAsync()
     {
+        _client = await _factory.CreateSignedInClientAsync();
         var seeded = await _client.SeededCategoryIdsByName();
         _groceriesCategoryId = seeded["Groceries"];
         _restaurantsCategoryId = seeded["Restaurants"];
@@ -164,7 +165,7 @@ public class TransactionEndpointsTests : IAsyncLifetime
     {
         await using var api = _factory.WithWebHostBuilder(builder =>
             builder.ConfigureTestServices(services => services.AddSingleton(ruleGenerator)));
-        using var client = api.CreateClient();
+        using var client = await api.CreateSignedInClientAsync();
         await ImportStatement(client, period, rows);
     }
 

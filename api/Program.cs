@@ -5,11 +5,13 @@ using PersonligFinans.Api.Data;
 using PersonligFinans.Api.Receipts;
 using PersonligFinans.Api.Spending;
 using PersonligFinans.Api.Transactions;
+using PersonligFinans.Api.Users;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddDatabase(builder.Configuration);
 builder.Services.AddRuleGenerator(builder.Configuration);
+builder.Services.AddUsers();
 
 var app = builder.Build();
 
@@ -22,7 +24,13 @@ app.UseHttpsRedirection();
 app.UseDefaultFiles();
 app.UseStaticFiles();
 
-app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
+// After the static files, so the client's files are served to anyone and the landing page can load.
+// Every endpoint then requires signing in unless it allows anonymous access.
+app.UseAuthentication();
+app.UseAuthorization();
+
+app.MapGet("/health", () => Results.Ok(new { status = "ok" })).AllowAnonymous();
+app.MapUserEndpoints();
 app.MapTransactionEndpoints();
 app.MapCategoryEndpoints();
 app.MapBankStatementEndpoints();
@@ -30,7 +38,7 @@ app.MapCategorizationRuleEndpoints();
 app.MapReceiptEndpoints();
 app.MapSpendingEndpoints();
 app.MapFallback("/api/{**path}", () => Results.NotFound());
-app.MapFallbackToFile("index.html");
+app.MapFallbackToFile("index.html").AllowAnonymous();
 
 app.Run();
 

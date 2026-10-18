@@ -20,7 +20,8 @@ namespace PersonligFinans.Api.Tests;
 public class BankStatementEndpointsTests : IAsyncLifetime
 {
     private readonly PostgresApiFactory _factory;
-    private readonly HttpClient _client;
+    // Signed in as a User of its own, registered for each test.
+    private HttpClient _client = null!;
 
     private int _groceriesId;
     private int _restaurantsId;
@@ -36,11 +37,11 @@ public class BankStatementEndpointsTests : IAsyncLifetime
     public BankStatementEndpointsTests(PostgresApiFactory factory)
     {
         _factory = factory;
-        _client = factory.CreateClient();
     }
 
     public async Task InitializeAsync()
     {
+        _client = await _factory.CreateSignedInClientAsync();
         var seeded = await _client.SeededCategoryIdsByName();
         _groceriesId = seeded["Groceries"];
         _restaurantsId = seeded["Restaurants"];
@@ -61,7 +62,7 @@ public class BankStatementEndpointsTests : IAsyncLifetime
     {
         await using var api = _factory.WithWebHostBuilder(builder =>
             builder.ConfigureTestServices(services => services.AddSingleton(ruleGenerator)));
-        using var client = api.CreateClient();
+        using var client = await api.CreateSignedInClientAsync();
         return await Upload(pdf, client, uploadId);
     }
 

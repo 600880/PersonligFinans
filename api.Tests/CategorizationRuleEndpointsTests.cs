@@ -13,7 +13,8 @@ namespace PersonligFinans.Api.Tests;
 public class CategorizationRuleEndpointsTests : IAsyncLifetime
 {
     private readonly PostgresApiFactory _factory;
-    private readonly HttpClient _client;
+    // Signed in as a User of its own, registered for each test.
+    private HttpClient _client = null!;
 
     // The tests share one database, so each test's keywords and descriptions contain a token of
     // its own; otherwise one test's rules would re-match another test's Transactions.
@@ -31,11 +32,11 @@ public class CategorizationRuleEndpointsTests : IAsyncLifetime
     public CategorizationRuleEndpointsTests(PostgresApiFactory factory)
     {
         _factory = factory;
-        _client = factory.CreateClient();
     }
 
     public async Task InitializeAsync()
     {
+        _client = await _factory.CreateSignedInClientAsync();
         var seeded = await _client.SeededCategoryIdsByName();
         _groceriesId = seeded["Groceries"];
         _restaurantsId = seeded["Restaurants"];

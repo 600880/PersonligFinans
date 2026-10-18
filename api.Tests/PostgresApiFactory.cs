@@ -11,6 +11,13 @@ public class PostgresApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
 {
     private readonly PostgreSqlContainer _postgres = new PostgreSqlBuilder("postgres:17-alpine").Build();
 
+    // The sign-in cookie is Secure, so the test clients' cookie containers only send it back over
+    // HTTPS. Factories made with WithWebHostBuilder copy these options.
+    public PostgresApiFactory()
+    {
+        ClientOptions.BaseAddress = new Uri("https://localhost");
+    }
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment("Development");

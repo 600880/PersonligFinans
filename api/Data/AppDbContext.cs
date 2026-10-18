@@ -1,8 +1,12 @@
+using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 
 namespace PersonligFinans.Api.Data;
 
-public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(options)
+// Also holds Identity's Users, their claims, logins and tokens. A user-only context, since the app
+// has no roles.
+public class AppDbContext(DbContextOptions<AppDbContext> options) : IdentityUserContext<IdentityUser>(options)
 {
     public const int DescriptionMaxLength = 200;
     public const int NoteMaxLength = 256;
@@ -19,6 +23,14 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        base.OnModelCreating(modelBuilder);
+
+        // Identity names its tables itself, which the snake_case naming convention leaves alone.
+        modelBuilder.Entity<IdentityUser>().ToTable("asp_net_users");
+        modelBuilder.Entity<IdentityUserClaim<string>>().ToTable("asp_net_user_claims");
+        modelBuilder.Entity<IdentityUserLogin<string>>().ToTable("asp_net_user_logins");
+        modelBuilder.Entity<IdentityUserToken<string>>().ToTable("asp_net_user_tokens");
+
         // Names are unique ignoring case, through an index on lower(name) that the migration
         // creates by hand, since EF Core can't model an expression index.
         modelBuilder.Entity<Category>(category =>

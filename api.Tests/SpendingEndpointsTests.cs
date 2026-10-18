@@ -17,18 +17,22 @@ public class SpendingEndpointsTests : IAsyncLifetime
     private int _incomeCategoryId;
     private int _transfersCategoryId;
 
-    private readonly HttpClient _client;
+    // Signed in as a User of its own, registered for each test.
+    private HttpClient _client = null!;
 
     // Spending adds up every Transaction of a month, so each test uses a year no other test uses.
     private readonly string _token = "t" + Guid.NewGuid().ToString("N")[..8];
 
+    private readonly PostgresApiFactory _factory;
+
     public SpendingEndpointsTests(PostgresApiFactory factory)
     {
-        _client = factory.CreateClient();
+        _factory = factory;
     }
 
     public async Task InitializeAsync()
     {
+        _client = await _factory.CreateSignedInClientAsync();
         var seeded = await _client.SeededCategoryIdsByName();
         _groceriesCategoryId = seeded["Groceries"];
         _restaurantsCategoryId = seeded["Restaurants"];

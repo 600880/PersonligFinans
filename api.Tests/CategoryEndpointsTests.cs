@@ -15,7 +15,8 @@ namespace PersonligFinans.Api.Tests;
 public class CategoryEndpointsTests : IAsyncLifetime
 {
     private readonly PostgresApiFactory _factory;
-    private readonly HttpClient _client;
+    // Signed in as a User of its own, registered for each test.
+    private HttpClient _client = null!;
 
     // The tests share one database, so each test's keywords, descriptions and Category names
     // contain a token of its own.
@@ -29,11 +30,11 @@ public class CategoryEndpointsTests : IAsyncLifetime
     public CategoryEndpointsTests(PostgresApiFactory factory)
     {
         _factory = factory;
-        _client = factory.CreateClient();
     }
 
     public async Task InitializeAsync()
     {
+        _client = await _factory.CreateSignedInClientAsync();
         var seeded = await _client.SeededCategoryIdsByName();
         _groceriesId = seeded["Groceries"];
         _travelId = seeded["Travel"];
