@@ -2,7 +2,28 @@ import { useState, type FormEvent } from 'react'
 import { logIn, register, type CredentialsFieldErrors, type User } from '../lib/api'
 import { Field, inputClassName } from './TransactionForm'
 
-type Mode = 'logIn' | 'register'
+// Everything that differs between logging in and registering. The form's heading and its submit
+// button both say label, and the other Mode is offered after switchPrompt.
+const MODES = {
+  logIn: {
+    label: 'Log in',
+    submittingLabel: 'Logging in…',
+    passwordAutoComplete: 'current-password',
+    switchPrompt: 'New here? ',
+    other: 'register',
+    submit: logIn,
+  },
+  register: {
+    label: 'Register',
+    submittingLabel: 'Registering…',
+    passwordAutoComplete: 'new-password',
+    switchPrompt: 'Already registered? ',
+    other: 'logIn',
+    submit: register,
+  },
+} as const
+
+type Mode = keyof typeof MODES
 
 interface LandingPageProps {
   onSignedIn: (user: User) => void
@@ -17,13 +38,10 @@ export function LandingPage({ onSignedIn }: LandingPageProps) {
   const [fieldErrors, setFieldErrors] = useState<CredentialsFieldErrors>({})
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const isLogIn = mode === 'logIn'
-  const submitLabel = isLogIn
-    ? isSubmitting ? 'Logging in…' : 'Log in'
-    : isSubmitting ? 'Registering…' : 'Register'
+  const current = MODES[mode]
 
   function switchMode() {
-    setMode(isLogIn ? 'register' : 'logIn')
+    setMode(current.other)
     setFieldErrors({})
     setErrorMessage(null)
   }
@@ -33,7 +51,7 @@ export function LandingPage({ onSignedIn }: LandingPageProps) {
     setIsSubmitting(true)
     setFieldErrors({})
     setErrorMessage(null)
-    const result = await (isLogIn ? logIn : register)({ email, password })
+    const result = await current.submit({ email, password })
     if (result.ok) {
       onSignedIn(result.user)
       return
@@ -59,7 +77,7 @@ export function LandingPage({ onSignedIn }: LandingPageProps) {
           className="w-full max-w-sm rounded-xl border border-slate-200 bg-white p-6 shadow-sm max-sm:p-4"
         >
           <h2 id="credentials-heading" className="text-lg font-semibold text-slate-900">
-            {isLogIn ? 'Log in' : 'Register'}
+            {current.label}
           </h2>
 
           {errorMessage && (
@@ -82,7 +100,7 @@ export function LandingPage({ onSignedIn }: LandingPageProps) {
             <Field label="Password" error={fieldErrors.password}>
               <input
                 type="password"
-                autoComplete={isLogIn ? 'current-password' : 'new-password'}
+                autoComplete={current.passwordAutoComplete}
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
                 className={inputClassName}
@@ -93,14 +111,14 @@ export function LandingPage({ onSignedIn }: LandingPageProps) {
               disabled={isSubmitting}
               className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-300"
             >
-              {submitLabel}
+              {isSubmitting ? current.submittingLabel : current.label}
             </button>
           </form>
 
           <p className="mt-4 text-center text-sm text-slate-600">
-            {isLogIn ? 'New here? ' : 'Already registered? '}
+            {current.switchPrompt}
             <button type="button" onClick={switchMode} className="font-medium text-slate-900 underline">
-              {isLogIn ? 'Register' : 'Log in'}
+              {MODES[current.other].label}
             </button>
           </p>
         </section>
