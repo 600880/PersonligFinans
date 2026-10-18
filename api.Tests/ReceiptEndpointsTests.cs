@@ -14,13 +14,13 @@ using PersonligFinans.Api.Receipts;
 namespace PersonligFinans.Api.Tests;
 
 [Collection(ApiCollection.Name)]
-public class ReceiptEndpointsTests
+public class ReceiptEndpointsTests : IAsyncLifetime
 {
     private readonly PostgresApiFactory _factory;
     private readonly HttpClient _client;
 
-    private const int GroceriesId = 1;
-    private const int RestaurantsId = 2;
+    private int _groceriesId;
+    private int _restaurantsId;
 
     // The tests share one database, so the tests that add rules put a token of their own in each
     // keyword and merchant name.
@@ -31,6 +31,15 @@ public class ReceiptEndpointsTests
         _factory = factory;
         _client = factory.CreateClient();
     }
+
+    public async Task InitializeAsync()
+    {
+        var seeded = await _client.SeededCategoryIdsByName();
+        _groceriesId = seeded["Groceries"];
+        _restaurantsId = seeded["Restaurants"];
+    }
+
+    public Task DisposeAsync() => Task.CompletedTask;
 
     // The leading bytes of each accepted image type, followed by a little filler. The endpoint only
     // looks at how a file starts, so these stand in for real photos of Receipts.
@@ -196,7 +205,7 @@ public class ReceiptEndpointsTests
     [Fact]
     public async Task Post_ReadReceipt_SuggestsItsDateDescriptionAndAmountWithTheCategoryOfAMatchingRule()
     {
-        await AddRule($"{_token} kafé", RestaurantsId);
+        await AddRule($"{_token} kafé", _restaurantsId);
 
         var suggestion = await SuggestionFrom(ReaderReading(
             purchaseDate: new DateOnly(2026, 10, 12),
@@ -205,7 +214,7 @@ public class ReceiptEndpointsTests
             categoryName: "Groceries"));
 
         Assert.Equal(
-            new ReceiptSuggestion(ReceiptOutcome.Read, new DateOnly(2026, 10, 12), $"{_token} Kafé Sentrum", -249.90m, RestaurantsId),
+            new ReceiptSuggestion(ReceiptOutcome.Read, new DateOnly(2026, 10, 12), $"{_token} Kafé Sentrum", -249.90m, _restaurantsId),
             suggestion);
     }
 
@@ -214,7 +223,7 @@ public class ReceiptEndpointsTests
     {
         var suggestion = await SuggestionFrom(ReaderReading(merchantName: $"{_token} Torghandel", total: 89m, categoryName: "Groceries"));
 
-        Assert.Equal(GroceriesId, suggestion.CategoryId);
+        Assert.Equal(_groceriesId, suggestion.CategoryId);
     }
 
     [Fact]
@@ -222,7 +231,7 @@ public class ReceiptEndpointsTests
     {
         var suggestion = await SuggestionFrom(ReaderReading(merchantName: $"{_token} Torghandel", total: 89m, categoryName: "groceries"));
 
-        Assert.Equal(GroceriesId, suggestion.CategoryId);
+        Assert.Equal(_groceriesId, suggestion.CategoryId);
     }
 
     [Fact]
@@ -239,7 +248,7 @@ public class ReceiptEndpointsTests
         var suggestion = await SuggestionFrom(ReaderReading(total: 89m, categoryName: "Groceries"));
 
         Assert.Null(suggestion.Description);
-        Assert.Equal(GroceriesId, suggestion.CategoryId);
+        Assert.Equal(_groceriesId, suggestion.CategoryId);
     }
 
     [Fact]
@@ -273,7 +282,7 @@ public class ReceiptEndpointsTests
             categoryName: "Restaurants"));
 
         Assert.Equal(
-            new ReceiptSuggestion(ReceiptOutcome.Read, new DateOnly(2026, 7, 3), $"{_token} Café de Paris", null, RestaurantsId),
+            new ReceiptSuggestion(ReceiptOutcome.Read, new DateOnly(2026, 7, 3), $"{_token} Café de Paris", null, _restaurantsId),
             suggestion);
     }
 
@@ -326,11 +335,11 @@ public class ReceiptEndpointsTests
     [Fact]
     public async Task Post_ReadReceiptWithAPaymentChannel_SuggestsTheCategoryOfTheRuleMatchingTheMerchant()
     {
-        await AddRule($"{_token} kiosk", RestaurantsId);
+        await AddRule($"{_token} kiosk", _restaurantsId);
 
         var suggestion = await SuggestionFrom(ReaderReading(merchantName: $"Vipps*{_token} Kiosk", total: 35m, categoryName: "Other"));
 
-        Assert.Equal(RestaurantsId, suggestion.CategoryId);
+        Assert.Equal(_restaurantsId, suggestion.CategoryId);
     }
 
     [Fact]
@@ -397,7 +406,7 @@ public class ReceiptEndpointsTests
     [Fact]
     public async Task Post_ReadReceipt_LeavesTransactionsAndCategorizationRulesUnchanged()
     {
-        await AddRule($"{_token} kafé", RestaurantsId);
+        await AddRule($"{_token} kafé", _restaurantsId);
         var before = await Stored();
 
         await SuggestionFrom(ReaderReading(merchantName: $"{_token} Kafé", total: 249.90m, categoryName: "Groceries"));

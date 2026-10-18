@@ -10,17 +10,8 @@ using PersonligFinans.Api.Transactions;
 namespace PersonligFinans.Api.Tests;
 
 [Collection(ApiCollection.Name)]
-public class CategorizationRuleEndpointsTests
+public class CategorizationRuleEndpointsTests : IAsyncLifetime
 {
-    private const int GroceriesId = 1;
-    private const int RestaurantsId = 2;
-    private const int ShoppingId = 8;
-    private const int TravelId = 10;
-    private const int TransfersId = 12;
-    private const int OtherId = 13;
-    private const int ClothingId = 14;
-    private const int ElectronicsId = 15;
-
     private readonly PostgresApiFactory _factory;
     private readonly HttpClient _client;
 
@@ -28,11 +19,35 @@ public class CategorizationRuleEndpointsTests
     // its own; otherwise one test's rules would re-match another test's Transactions.
     private readonly string _token = "t" + Guid.NewGuid().ToString("N")[..8];
 
+    private int _groceriesId;
+    private int _restaurantsId;
+    private int _shoppingId;
+    private int _travelId;
+    private int _transfersId;
+    private int _otherId;
+    private int _clothingId;
+    private int _electronicsId;
+
     public CategorizationRuleEndpointsTests(PostgresApiFactory factory)
     {
         _factory = factory;
         _client = factory.CreateClient();
     }
+
+    public async Task InitializeAsync()
+    {
+        var seeded = await _client.SeededCategoryIdsByName();
+        _groceriesId = seeded["Groceries"];
+        _restaurantsId = seeded["Restaurants"];
+        _shoppingId = seeded["Shopping"];
+        _travelId = seeded["Travel"];
+        _transfersId = seeded["Transfers"];
+        _otherId = seeded["Other"];
+        _clothingId = seeded["Clothing"];
+        _electronicsId = seeded["Electronics"];
+    }
+
+    public Task DisposeAsync() => Task.CompletedTask;
 
     private async Task<HttpResponseMessage> AddRule(string keyword, int? categoryId) =>
         await _client.PostAsJsonAsync("/api/categorization-rules", new { keyword, categoryId });
@@ -40,23 +55,23 @@ public class CategorizationRuleEndpointsTests
     [Fact]
     public async Task Post_ValidRule_IsCreatedAndListed()
     {
-        var response = await AddRule($"{_token} butikk", GroceriesId);
+        var response = await AddRule($"{_token} butikk", _groceriesId);
 
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         var created = await response.Content.ReadFromJsonAsync<SavedCategorizationRuleResponse>();
         Assert.Equal($"{_token} butikk", created!.Keyword);
-        Assert.Equal(GroceriesId, created.CategoryId);
+        Assert.Equal(_groceriesId, created.CategoryId);
         Assert.Equal(0, created.TransactionsChanged);
 
         var rules = await _client.GetFromJsonAsync<List<CategorizationRuleResponse>>("/api/categorization-rules");
-        Assert.Contains(new CategorizationRuleResponse(created.Id, $"{_token} butikk", GroceriesId, AiGenerated: false, IsNew: false), rules!);
+        Assert.Contains(new CategorizationRuleResponse(created.Id, $"{_token} butikk", _groceriesId, AiGenerated: false, IsNew: false), rules!);
     }
 
     [Fact]
     public async Task Get_ListsRulesSortedByKeyword()
     {
-        await AddRule($"{_token} b", GroceriesId);
-        await AddRule($"{_token} a", GroceriesId);
+        await AddRule($"{_token} b", _groceriesId);
+        await AddRule($"{_token} a", _groceriesId);
 
         var rules = await _client.GetFromJsonAsync<List<CategorizationRuleResponse>>("/api/categorization-rules");
 
@@ -71,9 +86,9 @@ public class CategorizationRuleEndpointsTests
         var rules = await _client.GetFromJsonAsync<List<CategorizationRuleResponse>>("/api/categorization-rules");
 
         var categoryByKeyword = rules!.ToDictionary(r => r.Keyword, r => r.CategoryId);
-        Assert.Equal(GroceriesId, categoryByKeyword["rema"]);
-        Assert.Equal(TransfersId, categoryByKeyword["overføring mellom egne kontoer"]);
-        Assert.Equal(TravelId, categoryByKeyword["widerøe"]);
+        Assert.Equal(_groceriesId, categoryByKeyword["rema"]);
+        Assert.Equal(_transfersId, categoryByKeyword["overføring mellom egne kontoer"]);
+        Assert.Equal(_travelId, categoryByKeyword["widerøe"]);
     }
 
     [Fact]
@@ -84,11 +99,11 @@ public class CategorizationRuleEndpointsTests
         var categoryByKeyword = rules!.ToDictionary(r => r.Keyword, r => r.CategoryId);
         Assert.All(
             ["zalando", "cubus", "dressmann", "lindex", "bik bok", "carlings", "kappahl", "h&m"],
-            keyword => Assert.Equal(ClothingId, categoryByKeyword[keyword]));
+            keyword => Assert.Equal(_clothingId, categoryByKeyword[keyword]));
         Assert.All(
             ["elkjøp", "komplett", "proshop", "netonnet"],
-            keyword => Assert.Equal(ElectronicsId, categoryByKeyword[keyword]));
-        Assert.Equal(ShoppingId, categoryByKeyword["xxl"]);
+            keyword => Assert.Equal(_electronicsId, categoryByKeyword[keyword]));
+        Assert.Equal(_shoppingId, categoryByKeyword["xxl"]);
         Assert.False(rules!.Single(r => r.Keyword == "cubus").AiGenerated);
     }
 
@@ -135,34 +150,34 @@ public class CategorizationRuleEndpointsTests
     {
         var ids = await Imported($"{_token} Butikk Sentrum", $"Kafé {_token} Butikk", $"{_token} Annet");
 
-        var changed = await TransactionsChangedByAdding($"{_token} butikk", GroceriesId);
+        var changed = await TransactionsChangedByAdding($"{_token} butikk", _groceriesId);
 
         Assert.Equal(2, changed);
-        Assert.Equal([GroceriesId, GroceriesId, null], await CategoriesOf(ids));
+        Assert.Equal([_groceriesId, _groceriesId, null], await CategoriesOf(ids));
     }
 
     [Fact]
     public async Task Post_LongerRule_TakesOverTransactionsFromShorterRule()
     {
         var ids = await Imported($"{_token} Butikk Kafé", $"{_token} Butikk");
-        await TransactionsChangedByAdding($"{_token} butikk", GroceriesId);
+        await TransactionsChangedByAdding($"{_token} butikk", _groceriesId);
 
-        var changed = await TransactionsChangedByAdding($"{_token} butikk kafé", RestaurantsId);
+        var changed = await TransactionsChangedByAdding($"{_token} butikk kafé", _restaurantsId);
 
         Assert.Equal(1, changed);
-        Assert.Equal([RestaurantsId, GroceriesId], await CategoriesOf(ids));
+        Assert.Equal([_restaurantsId, _groceriesId], await CategoriesOf(ids));
     }
 
     [Fact]
     public async Task Post_EquallyLongKeywords_OldestRuleWins()
     {
         var ids = await Imported($"{_token} aaaa {_token} bbbb");
-        await TransactionsChangedByAdding($"{_token} bbbb", GroceriesId);
+        await TransactionsChangedByAdding($"{_token} bbbb", _groceriesId);
 
-        var changed = await TransactionsChangedByAdding($"{_token} aaaa", RestaurantsId);
+        var changed = await TransactionsChangedByAdding($"{_token} aaaa", _restaurantsId);
 
         Assert.Equal(0, changed);
-        Assert.Equal([GroceriesId], await CategoriesOf(ids));
+        Assert.Equal([_groceriesId], await CategoriesOf(ids));
     }
 
     [Fact]
@@ -170,9 +185,9 @@ public class CategorizationRuleEndpointsTests
     {
         var ids = await Imported($"{_token.ToUpperInvariant()} ØLSTUE BRYGGEN");
 
-        await TransactionsChangedByAdding($"{_token} ølstue", RestaurantsId);
+        await TransactionsChangedByAdding($"{_token} ølstue", _restaurantsId);
 
-        Assert.Equal([RestaurantsId], await CategoriesOf(ids));
+        Assert.Equal([_restaurantsId], await CategoriesOf(ids));
     }
 
     [Fact]
@@ -183,14 +198,14 @@ public class CategorizationRuleEndpointsTests
             date = "2026-08-03",
             description = $"{_token} Butikk",
             amount = -100m,
-            categoryId = OtherId,
+            categoryId = _otherId,
         });
         var manual = await response.Content.ReadFromJsonAsync<TransactionResponse>();
 
-        var changed = await TransactionsChangedByAdding($"{_token} butikk", GroceriesId);
+        var changed = await TransactionsChangedByAdding($"{_token} butikk", _groceriesId);
 
         Assert.Equal(0, changed);
-        Assert.Equal([OtherId], await CategoriesOf(manual!.Id));
+        Assert.Equal([_otherId], await CategoriesOf(manual!.Id));
     }
 
     private async Task<Dictionary<string, string[]>> AddRuleExpectingValidationErrors(string? keyword, int? categoryId)
@@ -213,7 +228,7 @@ public class CategorizationRuleEndpointsTests
     [Fact]
     public async Task Post_NoKeyword_IsRejected()
     {
-        var errors = await AddRuleExpectingValidationErrors(null, GroceriesId);
+        var errors = await AddRuleExpectingValidationErrors(null, _groceriesId);
 
         Assert.Equal(["keyword"], errors.Keys);
         Assert.Equal(["Keyword is required."], errors["keyword"]);
@@ -231,7 +246,7 @@ public class CategorizationRuleEndpointsTests
     [Fact]
     public async Task Post_KeywordShorterThanTwoCharactersAfterTrimming_IsRejected()
     {
-        var errors = await AddRuleExpectingValidationErrors(" x ", GroceriesId);
+        var errors = await AddRuleExpectingValidationErrors(" x ", _groceriesId);
 
         Assert.Equal(["Keyword must be at least 2 characters."], errors["keyword"]);
     }
@@ -239,7 +254,7 @@ public class CategorizationRuleEndpointsTests
     [Fact]
     public async Task Post_KeywordLongerThanOneHundredCharacters_IsRejected()
     {
-        var errors = await AddRuleExpectingValidationErrors(new string('x', 101), GroceriesId);
+        var errors = await AddRuleExpectingValidationErrors(new string('x', 101), _groceriesId);
 
         Assert.Equal(["Keyword must be at most 100 characters."], errors["keyword"]);
     }
@@ -247,9 +262,9 @@ public class CategorizationRuleEndpointsTests
     [Fact]
     public async Task Post_KeywordThatExistsIgnoringCase_IsRejected()
     {
-        Assert.Equal(HttpStatusCode.Created, (await AddRule($"{_token} kafé", GroceriesId)).StatusCode);
+        Assert.Equal(HttpStatusCode.Created, (await AddRule($"{_token} kafé", _groceriesId)).StatusCode);
 
-        var errors = await AddRuleExpectingValidationErrors($"  {_token.ToUpperInvariant()} KAFÉ ", GroceriesId);
+        var errors = await AddRuleExpectingValidationErrors($"  {_token.ToUpperInvariant()} KAFÉ ", _groceriesId);
 
         Assert.Equal([$"A rule for '{_token} kafé' already exists."], errors["keyword"]);
     }
@@ -283,50 +298,50 @@ public class CategorizationRuleEndpointsTests
     public async Task Put_CategoryChange_MovesTheRulesTransactions()
     {
         var ids = await Imported($"{_token} Butikk Sentrum", $"{_token} Butikk Nord", $"{_token} Annet");
-        var ruleId = await AddedRuleId($"{_token} butikk", GroceriesId);
+        var ruleId = await AddedRuleId($"{_token} butikk", _groceriesId);
 
-        var edited = await EditedRule(ruleId, $"{_token} butikk", RestaurantsId);
+        var edited = await EditedRule(ruleId, $"{_token} butikk", _restaurantsId);
 
-        Assert.Equal(new SavedCategorizationRuleResponse(ruleId, $"{_token} butikk", RestaurantsId, AiGenerated: false, IsNew: false, 2), edited);
-        Assert.Equal([RestaurantsId, RestaurantsId, null], await CategoriesOf(ids));
+        Assert.Equal(new SavedCategorizationRuleResponse(ruleId, $"{_token} butikk", _restaurantsId, AiGenerated: false, IsNew: false, 2), edited);
+        Assert.Equal([_restaurantsId, _restaurantsId, null], await CategoriesOf(ids));
         var rules = await _client.GetFromJsonAsync<List<CategorizationRuleResponse>>("/api/categorization-rules");
-        Assert.Contains(new CategorizationRuleResponse(ruleId, $"{_token} butikk", RestaurantsId, AiGenerated: false, IsNew: false), rules!);
+        Assert.Contains(new CategorizationRuleResponse(ruleId, $"{_token} butikk", _restaurantsId, AiGenerated: false, IsNew: false), rules!);
     }
 
     [Fact]
     public async Task Put_KeywordChange_ReleasesTransactionsAndPicksUpNewOnes()
     {
         var ids = await Imported($"{_token} Butikk {_token} Sentrum", $"{_token} Butikk Nord", $"{_token} Bakeri");
-        await AddedRuleId($"{_token} sent", OtherId);
-        var ruleId = await AddedRuleId($"{_token} butikk", GroceriesId);
+        await AddedRuleId($"{_token} sent", _otherId);
+        var ruleId = await AddedRuleId($"{_token} butikk", _groceriesId);
 
-        var edited = await EditedRule(ruleId, $"{_token} bakeri", GroceriesId);
+        var edited = await EditedRule(ruleId, $"{_token} bakeri", _groceriesId);
 
         Assert.Equal(3, edited.TransactionsChanged);
-        Assert.Equal([OtherId, null, GroceriesId], await CategoriesOf(ids));
+        Assert.Equal([_otherId, null, _groceriesId], await CategoriesOf(ids));
     }
 
     [Fact]
     public async Task Put_OnlyTheKeywordsCase_IsAllowedAndChangesNoTransactions()
     {
         var ids = await Imported($"{_token} Butikk Sentrum");
-        var ruleId = await AddedRuleId($"{_token} butikk", GroceriesId);
+        var ruleId = await AddedRuleId($"{_token} butikk", _groceriesId);
 
-        var edited = await EditedRule(ruleId, $" {_token.ToUpperInvariant()} BUTIKK ", GroceriesId);
+        var edited = await EditedRule(ruleId, $" {_token.ToUpperInvariant()} BUTIKK ", _groceriesId);
 
         Assert.Equal(
-            new SavedCategorizationRuleResponse(ruleId, $"{_token.ToUpperInvariant()} BUTIKK", GroceriesId, AiGenerated: false, IsNew: false, 0),
+            new SavedCategorizationRuleResponse(ruleId, $"{_token.ToUpperInvariant()} BUTIKK", _groceriesId, AiGenerated: false, IsNew: false, 0),
             edited);
-        Assert.Equal([GroceriesId], await CategoriesOf(ids));
+        Assert.Equal([_groceriesId], await CategoriesOf(ids));
     }
 
     [Fact]
     public async Task Put_KeywordOfAnotherRule_IsRejected()
     {
-        await AddedRuleId($"{_token} kafé", RestaurantsId);
-        var ruleId = await AddedRuleId($"{_token} butikk", GroceriesId);
+        await AddedRuleId($"{_token} kafé", _restaurantsId);
+        var ruleId = await AddedRuleId($"{_token} butikk", _groceriesId);
 
-        var response = await EditRule(ruleId, $"{_token.ToUpperInvariant()} KAFÉ", GroceriesId);
+        var response = await EditRule(ruleId, $"{_token.ToUpperInvariant()} KAFÉ", _groceriesId);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         var problem = await response.Content.ReadFromJsonAsync<ValidationProblemDetails>();
@@ -336,7 +351,7 @@ public class CategorizationRuleEndpointsTests
     [Fact]
     public async Task Put_InvalidRequest_IsRejectedWithErrorPerField()
     {
-        var ruleId = await AddedRuleId($"{_token} butikk", GroceriesId);
+        var ruleId = await AddedRuleId($"{_token} butikk", _groceriesId);
 
         var response = await EditRule(ruleId, " x ", 9999);
 
@@ -349,7 +364,7 @@ public class CategorizationRuleEndpointsTests
     [Fact]
     public async Task Put_UnknownRule_ReturnsNotFound()
     {
-        var response = await EditRule(int.MaxValue, $"{_token} butikk", GroceriesId);
+        var response = await EditRule(int.MaxValue, $"{_token} butikk", _groceriesId);
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
@@ -367,14 +382,14 @@ public class CategorizationRuleEndpointsTests
     [Fact]
     public async Task Get_AiGeneratedRule_IsReportedAsAiGenerated()
     {
-        var aiRuleId = await AddedRuleId($"{_token} kafé", RestaurantsId);
-        var handAddedRuleId = await AddedRuleId($"{_token} butikk", GroceriesId);
+        var aiRuleId = await AddedRuleId($"{_token} kafé", _restaurantsId);
+        var handAddedRuleId = await AddedRuleId($"{_token} butikk", _groceriesId);
         await MarkAiGenerated(aiRuleId);
 
         var rules = await _client.GetFromJsonAsync<List<CategorizationRuleResponse>>("/api/categorization-rules");
 
-        Assert.Contains(new CategorizationRuleResponse(aiRuleId, $"{_token} kafé", RestaurantsId, AiGenerated: true, IsNew: false), rules!);
-        Assert.Contains(new CategorizationRuleResponse(handAddedRuleId, $"{_token} butikk", GroceriesId, AiGenerated: false, IsNew: false), rules!);
+        Assert.Contains(new CategorizationRuleResponse(aiRuleId, $"{_token} kafé", _restaurantsId, AiGenerated: true, IsNew: false), rules!);
+        Assert.Contains(new CategorizationRuleResponse(handAddedRuleId, $"{_token} butikk", _groceriesId, AiGenerated: false, IsNew: false), rules!);
     }
 
     [Fact]
@@ -390,7 +405,7 @@ public class CategorizationRuleEndpointsTests
     {
         var response = await _client.PostAsJsonAsync(
             "/api/categorization-rules",
-            new { keyword = $"{_token} butikk", categoryId = GroceriesId, aiGenerated = true });
+            new { keyword = $"{_token} butikk", categoryId = _groceriesId, aiGenerated = true });
 
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         var created = await response.Content.ReadFromJsonAsync<SavedCategorizationRuleResponse>();
@@ -402,37 +417,37 @@ public class CategorizationRuleEndpointsTests
     [Fact]
     public async Task Put_AiGeneratedRule_LosesTheMarkWhenItsKeywordAndCategoryChange()
     {
-        var ruleId = await AddedRuleId($"{_token} kafé", RestaurantsId);
+        var ruleId = await AddedRuleId($"{_token} kafé", _restaurantsId);
         await MarkAiGenerated(ruleId);
 
-        var edited = await EditedRule(ruleId, $"{_token} bakeri", GroceriesId);
+        var edited = await EditedRule(ruleId, $"{_token} bakeri", _groceriesId);
 
         Assert.False(edited.AiGenerated);
         var rules = await _client.GetFromJsonAsync<List<CategorizationRuleResponse>>("/api/categorization-rules");
-        Assert.Contains(new CategorizationRuleResponse(ruleId, $"{_token} bakeri", GroceriesId, AiGenerated: false, IsNew: false), rules!);
+        Assert.Contains(new CategorizationRuleResponse(ruleId, $"{_token} bakeri", _groceriesId, AiGenerated: false, IsNew: false), rules!);
     }
 
     [Fact]
     public async Task Put_AiGeneratedRuleSavedUnchanged_LosesTheMark()
     {
-        var ruleId = await AddedRuleId($"{_token} kafé", RestaurantsId);
+        var ruleId = await AddedRuleId($"{_token} kafé", _restaurantsId);
         await MarkAiGenerated(ruleId);
 
-        var edited = await EditedRule(ruleId, $"{_token} kafé", RestaurantsId);
+        var edited = await EditedRule(ruleId, $"{_token} kafé", _restaurantsId);
 
-        Assert.Equal(new SavedCategorizationRuleResponse(ruleId, $"{_token} kafé", RestaurantsId, AiGenerated: false, IsNew: false, 0), edited);
+        Assert.Equal(new SavedCategorizationRuleResponse(ruleId, $"{_token} kafé", _restaurantsId, AiGenerated: false, IsNew: false, 0), edited);
         var rules = await _client.GetFromJsonAsync<List<CategorizationRuleResponse>>("/api/categorization-rules");
-        Assert.Contains(new CategorizationRuleResponse(ruleId, $"{_token} kafé", RestaurantsId, AiGenerated: false, IsNew: false), rules!);
+        Assert.Contains(new CategorizationRuleResponse(ruleId, $"{_token} kafé", _restaurantsId, AiGenerated: false, IsNew: false), rules!);
     }
 
     [Fact]
     public async Task Put_RequestClaimingAiGenerated_LeavesAHandAddedRuleUnmarked()
     {
-        var ruleId = await AddedRuleId($"{_token} butikk", GroceriesId);
+        var ruleId = await AddedRuleId($"{_token} butikk", _groceriesId);
 
         var response = await _client.PutAsJsonAsync(
             $"/api/categorization-rules/{ruleId}",
-            new { keyword = $"{_token} butikk", categoryId = RestaurantsId, aiGenerated = true });
+            new { keyword = $"{_token} butikk", categoryId = _restaurantsId, aiGenerated = true });
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var edited = await response.Content.ReadFromJsonAsync<SavedCategorizationRuleResponse>();
@@ -450,13 +465,13 @@ public class CategorizationRuleEndpointsTests
     public async Task Delete_Rule_HandsItsTransactionsToTheNextBestRuleOrLeavesThemUncategorized()
     {
         var ids = await Imported($"{_token} Butikk {_token} Sentrum", $"{_token} Butikk Nord", $"{_token} Annet");
-        await AddedRuleId($"{_token} sent", OtherId);
-        var ruleId = await AddedRuleId($"{_token} butikk", GroceriesId);
+        await AddedRuleId($"{_token} sent", _otherId);
+        var ruleId = await AddedRuleId($"{_token} butikk", _groceriesId);
 
         var changed = await TransactionsChangedByDeleting(ruleId);
 
         Assert.Equal(2, changed);
-        Assert.Equal([OtherId, null, null], await CategoriesOf(ids));
+        Assert.Equal([_otherId, null, null], await CategoriesOf(ids));
         var rules = await _client.GetFromJsonAsync<List<CategorizationRuleResponse>>("/api/categorization-rules");
         Assert.DoesNotContain(rules!, r => r.Id == ruleId);
     }
@@ -477,16 +492,16 @@ public class CategorizationRuleEndpointsTests
             date = "2026-08-03",
             description = $"{_token} Butikk",
             amount = -100m,
-            categoryId = OtherId,
+            categoryId = _otherId,
         });
         var manual = await response.Content.ReadFromJsonAsync<TransactionResponse>();
-        var ruleId = await AddedRuleId($"{_token} butikk", GroceriesId);
+        var ruleId = await AddedRuleId($"{_token} butikk", _groceriesId);
 
-        var edited = await EditedRule(ruleId, $"{_token} butikk", RestaurantsId);
+        var edited = await EditedRule(ruleId, $"{_token} butikk", _restaurantsId);
         var deleted = await TransactionsChangedByDeleting(ruleId);
 
         Assert.Equal(0, edited.TransactionsChanged);
         Assert.Equal(0, deleted);
-        Assert.Equal([OtherId], await CategoriesOf(manual!.Id));
+        Assert.Equal([_otherId], await CategoriesOf(manual!.Id));
     }
 }

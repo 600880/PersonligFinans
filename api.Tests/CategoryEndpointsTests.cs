@@ -14,11 +14,6 @@ namespace PersonligFinans.Api.Tests;
 [Collection(ApiCollection.Name)]
 public class CategoryEndpointsTests : IAsyncLifetime
 {
-    private const int GroceriesId = 1;
-    private const int TravelId = 10;
-    private const int OtherId = 13;
-    private const int ElectronicsId = 15;
-
     private readonly PostgresApiFactory _factory;
     private readonly HttpClient _client;
 
@@ -26,13 +21,25 @@ public class CategoryEndpointsTests : IAsyncLifetime
     // contain a token of its own.
     private readonly string _token = "t" + Guid.NewGuid().ToString("N")[..8];
 
+    private int _groceriesId;
+    private int _travelId;
+    private int _otherId;
+    private int _electronicsId;
+
     public CategoryEndpointsTests(PostgresApiFactory factory)
     {
         _factory = factory;
         _client = factory.CreateClient();
     }
 
-    public Task InitializeAsync() => Task.CompletedTask;
+    public async Task InitializeAsync()
+    {
+        var seeded = await _client.SeededCategoryIdsByName();
+        _groceriesId = seeded["Groceries"];
+        _travelId = seeded["Travel"];
+        _otherId = seeded["Other"];
+        _electronicsId = seeded["Electronics"];
+    }
 
     // Removes the Categories the test created, and the rules and Transactions using them, since
     // other tests expect only the seeded Categories, e.g. among those offered to the rule generator.
@@ -72,7 +79,7 @@ public class CategoryEndpointsTests : IAsyncLifetime
 
     // Other tests add Categories of their own, which these leave out.
     private async Task<List<CategoryResponse>> ListSeededCategories() =>
-        (await ListCategories()).Where(c => SeedCategories.All.Any(s => s.Id == c.Id)).ToList();
+        (await ListCategories()).Where(c => SeedCategories.All.Any(s => s.Name == c.Name)).ToList();
 
     [Fact]
     public async Task Get_FreshDatabase_ListsTheSeededCategoriesWithDescriptionsAndBuiltInFlags()
@@ -105,26 +112,26 @@ public class CategoryEndpointsTests : IAsyncLifetime
     [Fact]
     public async Task Get_FreshDatabase_GivesTheSeededCategoriesTheirColours()
     {
-        var colours = (await ListSeededCategories()).ToDictionary(c => c.Id, c => c.Colour);
+        var colours = (await ListSeededCategories()).ToDictionary(c => c.Name, c => c.Colour);
 
         Assert.Equal(
-            new Dictionary<int, string>
+            new Dictionary<string, string>
             {
-                [1] = "#2a78d6",
-                [2] = "#eb6834",
-                [3] = "#1baf7a",
-                [4] = "#eda100",
-                [5] = "#e87ba4",
-                [6] = "#008300",
-                [7] = "#4a3aa7",
-                [8] = "#e34948",
-                [9] = "#104281",
-                [10] = "#86b6ef",
-                [11] = "#8a5a1c",
-                [12] = "#0f766e",
-                [13] = "#9085e9",
-                [14] = "#b8336a",
-                [15] = "#6b8e23",
+                ["Groceries"] = "#2a78d6",
+                ["Restaurants"] = "#eb6834",
+                ["Transport"] = "#1baf7a",
+                ["Housing"] = "#eda100",
+                ["Utilities"] = "#e87ba4",
+                ["Subscriptions"] = "#008300",
+                ["Health"] = "#4a3aa7",
+                ["Shopping"] = "#e34948",
+                ["Entertainment"] = "#104281",
+                ["Travel"] = "#86b6ef",
+                ["Income"] = "#8a5a1c",
+                ["Transfers"] = "#0f766e",
+                ["Other"] = "#9085e9",
+                ["Clothing"] = "#b8336a",
+                ["Electronics"] = "#6b8e23",
             },
             colours);
     }
@@ -170,19 +177,19 @@ public class CategoryEndpointsTests : IAsyncLifetime
                 date = "2026-08-03",
                 description,
                 amount = -100m,
-                categoryId = ElectronicsId,
+                categoryId = _electronicsId,
             });
             Assert.Equal(HttpStatusCode.Created, transaction.StatusCode);
         }
         var rule = await _client.PostAsJsonAsync(
-            "/api/categorization-rules", new { keyword = $"{_token} elektro", categoryId = ElectronicsId });
+            "/api/categorization-rules", new { keyword = $"{_token} elektro", categoryId = _electronicsId });
         Assert.Equal(HttpStatusCode.Created, rule.StatusCode);
 
         var after = (await ListCategories()).ToDictionary(c => c.Id);
-        Assert.Equal(before[ElectronicsId].TransactionCount + 2, after[ElectronicsId].TransactionCount);
-        Assert.Equal(before[ElectronicsId].RuleCount + 1, after[ElectronicsId].RuleCount);
-        Assert.Equal(before[TravelId].TransactionCount, after[TravelId].TransactionCount);
-        Assert.Equal(before[TravelId].RuleCount, after[TravelId].RuleCount);
+        Assert.Equal(before[_electronicsId].TransactionCount + 2, after[_electronicsId].TransactionCount);
+        Assert.Equal(before[_electronicsId].RuleCount + 1, after[_electronicsId].RuleCount);
+        Assert.Equal(before[_travelId].TransactionCount, after[_travelId].TransactionCount);
+        Assert.Equal(before[_travelId].RuleCount, after[_travelId].RuleCount);
     }
 
     [Fact]
@@ -446,10 +453,10 @@ public class CategoryEndpointsTests : IAsyncLifetime
         var ordinaryRuleId = await AddedRuleId($"{_token} hageland", id);
         try
         {
-            await TransactionsChangedByDeleting(id, OtherId);
+            await TransactionsChangedByDeleting(id, _otherId);
 
-            Assert.Equal(new CategorizationRuleResponse(aiRuleId, $"{_token} plantasjen", OtherId, AiGenerated: true, IsNew: false), await Rule(aiRuleId));
-            Assert.Equal(new CategorizationRuleResponse(ordinaryRuleId, $"{_token} hageland", OtherId, AiGenerated: false, IsNew: false), await Rule(ordinaryRuleId));
+            Assert.Equal(new CategorizationRuleResponse(aiRuleId, $"{_token} plantasjen", _otherId, AiGenerated: true, IsNew: false), await Rule(aiRuleId));
+            Assert.Equal(new CategorizationRuleResponse(ordinaryRuleId, $"{_token} hageland", _otherId, AiGenerated: false, IsNew: false), await Rule(ordinaryRuleId));
         }
         finally
         {
@@ -685,8 +692,8 @@ public class CategoryEndpointsTests : IAsyncLifetime
         var listed = (await _client.GetFromJsonAsync<List<TransactionResponse>>("/api/transactions?year=2026&month=8"))!
             .Single(t => t.Id == transactionId);
         Assert.Null(listed.CategoryId);
-        await CategorizeManually(transactionId, GroceriesId);
-        Assert.Equal([GroceriesId], await CategoriesOf(transactionId));
+        await CategorizeManually(transactionId, _groceriesId);
+        Assert.Equal([_groceriesId], await CategoriesOf(transactionId));
     }
 
     [Fact]
@@ -812,12 +819,12 @@ public class CategoryEndpointsTests : IAsyncLifetime
     [Fact]
     public async Task Put_BuiltInCategoryRenamed_IsRejected()
     {
-        var errors = await EditCategoryExpectingValidationErrors(GroceriesId, $"{_token} Food", "All groceries.");
+        var errors = await EditCategoryExpectingValidationErrors(_groceriesId, $"{_token} Food", "All groceries.");
 
         Assert.Equal(["A Built-in Category can't be renamed."], errors["name"]);
         Assert.Contains(
             (await ListCategories()),
-            c => c.Id == GroceriesId && c.Name == "Groceries");
+            c => c.Id == _groceriesId && c.Name == "Groceries");
     }
 
     [Fact]
@@ -825,7 +832,7 @@ public class CategoryEndpointsTests : IAsyncLifetime
     {
         try
         {
-            var response = await EditCategory(GroceriesId, "Groceries", $"{_token} Food and drink.");
+            var response = await EditCategory(_groceriesId, "Groceries", $"{_token} Food and drink.");
 
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             var edited = await response.Content.ReadFromJsonAsync<CategoryResponse>();
@@ -834,7 +841,7 @@ public class CategoryEndpointsTests : IAsyncLifetime
         finally
         {
             // Other tests assert the seeded description.
-            await EditCategory(GroceriesId, "Groceries", "All groceries.");
+            await EditCategory(_groceriesId, "Groceries", "All groceries.");
         }
     }
 

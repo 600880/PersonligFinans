@@ -17,17 +17,17 @@ using UglyToad.PdfPig.Writer;
 namespace PersonligFinans.Api.Tests;
 
 [Collection(ApiCollection.Name)]
-public class BankStatementEndpointsTests
+public class BankStatementEndpointsTests : IAsyncLifetime
 {
     private readonly PostgresApiFactory _factory;
     private readonly HttpClient _client;
 
-    private const int GroceriesId = 1;
-    private const int RestaurantsId = 2;
-    private const int TransfersId = 12;
-    private const int OtherId = 13;
-    private const int ClothingId = 14;
-    private const int ElectronicsId = 15;
+    private int _groceriesId;
+    private int _restaurantsId;
+    private int _transfersId;
+    private int _otherId;
+    private int _clothingId;
+    private int _electronicsId;
 
     // The tests share one database and rules match every imported Transaction, so the tests that
     // add rules put a token of their own in each keyword and description.
@@ -38,6 +38,19 @@ public class BankStatementEndpointsTests
         _factory = factory;
         _client = factory.CreateClient();
     }
+
+    public async Task InitializeAsync()
+    {
+        var seeded = await _client.SeededCategoryIdsByName();
+        _groceriesId = seeded["Groceries"];
+        _restaurantsId = seeded["Restaurants"];
+        _transfersId = seeded["Transfers"];
+        _otherId = seeded["Other"];
+        _clothingId = seeded["Clothing"];
+        _electronicsId = seeded["Electronics"];
+    }
+
+    public Task DisposeAsync() => Task.CompletedTask;
 
     // Uploads to the API as configured by default, with no rule generator.
     private Task<HttpResponseMessage> Upload(byte[] pdf) => Upload(pdf, _client);
@@ -104,7 +117,7 @@ public class BankStatementEndpointsTests
             ],
             stored.Select(t => (t.PostedDate, t.Description, t.Amount)));
         // Seeded rules categorize the merchants they know; the rest stay Uncategorized.
-        Assert.Equal([null, null, GroceriesId, TransfersId, null], stored.Select(t => t.CategoryId));
+        Assert.Equal([null, null, _groceriesId, _transfersId, null], stored.Select(t => t.CategoryId));
         Assert.All(stored, t => Assert.Null(t.Note));
     }
 
@@ -339,7 +352,7 @@ public class BankStatementEndpointsTests
     [Fact]
     public async Task Post_Statement_CategorizesMatchingRowsByRuleAndLeavesOthersUncategorized()
     {
-        var ruleId = await AddRule($"{_token} butikk", GroceriesId);
+        var ruleId = await AddRule($"{_token} butikk", _groceriesId);
 
         var response = await Upload(StatementWithPurchasesFrom($"{_token} Butikk Sentrum", $"{_token} Kafé"));
 
@@ -347,7 +360,7 @@ public class BankStatementEndpointsTests
         var created = await response.Content.ReadFromJsonAsync<BankStatementResponse>();
         var stored = await StoredTransactions(created!.Id);
         Assert.Equal(
-            [($"{_token} Butikk Sentrum", (int?)GroceriesId, (int?)ruleId), ($"{_token} Kafé", null, null)],
+            [($"{_token} Butikk Sentrum", (int?)_groceriesId, (int?)ruleId), ($"{_token} Kafé", null, null)],
             stored.Select(t => (t.Description, t.CategoryId, t.CategorizationRuleId)));
     }
 
@@ -364,7 +377,7 @@ public class BankStatementEndpointsTests
         var created = await Created(await Upload(pdf));
 
         var stored = (await StoredTransactions(created.Id)).Single();
-        Assert.Equal(("Overføring til konto 9999.88.77777", (int?)TransfersId), (stored.Description, stored.CategoryId));
+        Assert.Equal(("Overføring til konto 9999.88.77777", (int?)_transfersId), (stored.Description, stored.CategoryId));
     }
 
     [Fact]
@@ -374,27 +387,27 @@ public class BankStatementEndpointsTests
 
         var created = await Created(response);
         Assert.Equal(
-            [ClothingId, ElectronicsId],
+            [_clothingId, _electronicsId],
             (await StoredTransactions(created.Id)).Select(t => t.CategoryId));
     }
 
     [Fact]
     public async Task Post_Statement_RowMatchingSeveralRulesGetsTheLongestKeywordsCategory()
     {
-        await AddRule($"{_token} butikk", GroceriesId);
-        var longerRuleId = await AddRule($"{_token} butikk kafé", RestaurantsId);
+        await AddRule($"{_token} butikk", _groceriesId);
+        var longerRuleId = await AddRule($"{_token} butikk kafé", _restaurantsId);
 
         var response = await Upload(StatementWithPurchasesFrom($"{_token} BUTIKK KAFÉ Bryggen"));
 
         var created = await response.Content.ReadFromJsonAsync<BankStatementResponse>();
         var stored = Assert.Single(await StoredTransactions(created!.Id));
-        Assert.Equal((RestaurantsId, longerRuleId), (stored.CategoryId, stored.CategorizationRuleId));
+        Assert.Equal((_restaurantsId, longerRuleId), (stored.CategoryId, stored.CategorizationRuleId));
     }
 
     [Fact]
     public async Task Post_Statement_ReportsHowManyRowsStayedUncategorized()
     {
-        await AddRule($"{_token} butikk", GroceriesId);
+        await AddRule($"{_token} butikk", _groceriesId);
 
         var response = await Upload(StatementWithPurchasesFrom(
             $"{_token} Butikk Sentrum", $"{_token} Kafé", $"{_token} Frisør", $"{_token} Butikk Torget"));
@@ -426,10 +439,10 @@ public class BankStatementEndpointsTests
             StatementWithPurchasesFrom($"{_token} Kafé Bryggen", $"{_token} Frisør"), generator));
 
         var rule = Assert.Single(await RulesWithToken());
-        Assert.Equal(($"{_token} kafé", RestaurantsId, true), (rule.Keyword, rule.CategoryId, rule.AiGenerated));
+        Assert.Equal(($"{_token} kafé", _restaurantsId, true), (rule.Keyword, rule.CategoryId, rule.AiGenerated));
         Assert.Equal(
             [
-                ($"{_token} Kafé Bryggen", (int?)RestaurantsId, (int?)rule.Id),
+                ($"{_token} Kafé Bryggen", (int?)_restaurantsId, (int?)rule.Id),
                 ($"{_token} Frisør", null, null),
             ],
             (await StoredTransactions(created.Id)).Select(t => (t.Description, t.CategoryId, t.CategorizationRuleId)));
@@ -444,16 +457,16 @@ public class BankStatementEndpointsTests
         var created = await Created(await Upload(StatementWithPurchasesFrom($"{_token} Frisør"), generator));
 
         var rule = Assert.Single(await RulesWithToken());
-        Assert.Equal(($"{_token} frisør", OtherId, true), (rule.Keyword, rule.CategoryId, rule.AiGenerated));
+        Assert.Equal(($"{_token} frisør", _otherId, true), (rule.Keyword, rule.CategoryId, rule.AiGenerated));
         var stored = Assert.Single(await StoredTransactions(created.Id));
-        Assert.Equal(((int?)OtherId, (int?)rule.Id), (stored.CategoryId, stored.CategorizationRuleId));
+        Assert.Equal(((int?)_otherId, (int?)rule.Id), (stored.CategoryId, stored.CategorizationRuleId));
         Assert.Equal(0, created.UncategorizedCount);
     }
 
     [Fact]
     public async Task Post_Statement_SendsOnlyTheDistinctUnmatchedRowsToTheGenerator()
     {
-        await AddRule($"{_token} butikk", GroceriesId);
+        await AddRule($"{_token} butikk", _groceriesId);
         var generator = new FakeRuleGenerator();
 
         await Created(await Upload(
@@ -466,7 +479,7 @@ public class BankStatementEndpointsTests
     [Fact]
     public async Task Post_StatementWhoseRowsAllMatchRules_DoesNotCallTheGenerator()
     {
-        await AddRule($"{_token} butikk", GroceriesId);
+        await AddRule($"{_token} butikk", _groceriesId);
         var generator = new FakeRuleGenerator();
 
         await Created(await Upload(StatementWithPurchasesFrom($"{_token} Butikk Sentrum", $"{_token} Butikk Nord"), generator));
@@ -504,7 +517,7 @@ public class BankStatementEndpointsTests
     public async Task Post_Statement_GeneratorReceivesACategorysEditedDescription()
     {
         const string edited = "Restaurant, takeaway, bakery, café and bar.";
-        await SetDescription(RestaurantsId, edited);
+        await SetDescription(_restaurantsId, edited);
         try
         {
             var generator = new FakeRuleGenerator();
@@ -517,7 +530,7 @@ public class BankStatementEndpointsTests
         finally
         {
             // The tests share one database.
-            await SetDescription(RestaurantsId, SeedCategories.All.Single(c => c.Id == RestaurantsId).Description);
+            await SetDescription(_restaurantsId, SeedCategories.All.Single(c => c.Name == "Restaurants").Description);
         }
     }
 
@@ -538,7 +551,7 @@ public class BankStatementEndpointsTests
 
         await Created(await Upload(StatementWithPurchasesFrom($"{_token} Kafé Sør"), generator));
 
-        Assert.Equal(RestaurantsId, Assert.Single(await StoredTransactions(earlier.Id)).CategoryId);
+        Assert.Equal(_restaurantsId, Assert.Single(await StoredTransactions(earlier.Id)).CategoryId);
     }
 
     private static string NewUploadId() => Guid.NewGuid().ToString();
@@ -607,7 +620,7 @@ public class BankStatementEndpointsTests
         var rule = Assert.Single(await RulesWithToken());
 
         var response = await _client.PutAsJsonAsync(
-            $"/api/categorization-rules/{rule.Id}", new { keyword = rule.Keyword, categoryId = RestaurantsId });
+            $"/api/categorization-rules/{rule.Id}", new { keyword = rule.Keyword, categoryId = _restaurantsId });
 
         var edited = await response.Content.ReadFromJsonAsync<SavedCategorizationRuleResponse>();
         Assert.Equal((false, true), (edited!.AiGenerated, edited.IsNew));
@@ -622,7 +635,7 @@ public class BankStatementEndpointsTests
             date = "2026-08-03",
             description = $"{_token} Kafé",
             amount = -100m,
-            categoryId = OtherId,
+            categoryId = _otherId,
         });
         var manual = await response.Content.ReadFromJsonAsync<TransactionResponse>();
         var generator = new FakeRuleGenerator().Proposing($"{_token} Kafé Sør", $"{_token} kafé", "Restaurants");
@@ -632,7 +645,7 @@ public class BankStatementEndpointsTests
         Assert.Single(await RulesWithToken());
         using var scope = _factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        Assert.Equal(OtherId, (await db.Transactions.SingleAsync(t => t.Id == manual!.Id)).CategoryId);
+        Assert.Equal(_otherId, (await db.Transactions.SingleAsync(t => t.Id == manual!.Id)).CategoryId);
     }
 
     // Uploads a statement whose one row gets the given proposal, and checks that the proposal was
@@ -677,12 +690,12 @@ public class BankStatementEndpointsTests
     [Fact]
     public async Task Post_ProposalWithKeywordThatExistsIgnoringCase_IsDropped()
     {
-        await AddRule($"{_token} bakeri", GroceriesId);
+        await AddRule($"{_token} bakeri", _groceriesId);
 
         await AssertDropped($"{_token.ToUpperInvariant()} BAKERI", "Restaurants");
 
         var rule = Assert.Single(await RulesWithToken());
-        Assert.Equal(($"{_token} bakeri", GroceriesId), (rule.Keyword, rule.CategoryId));
+        Assert.Equal(($"{_token} bakeri", _groceriesId), (rule.Keyword, rule.CategoryId));
     }
 
     [Fact]
@@ -692,7 +705,7 @@ public class BankStatementEndpointsTests
     [Fact]
     public async Task Post_ProposalThatWouldChangeTheCategoryOfAStoredTransaction_IsDropped()
     {
-        await AddRule($"rema {_token}", GroceriesId);
+        await AddRule($"rema {_token}", _groceriesId);
         var earlier = await Created(await Upload(StatementWithPurchasesFrom($"Rema {_token} Bergen Storsenter")));
         var generator = new FakeRuleGenerator()
             .Proposing($"{_token} Bergen Storsenter P-hus", $"{_token} bergen storsenter", "Transport");
@@ -700,14 +713,14 @@ public class BankStatementEndpointsTests
         var created = await Created(await Upload(StatementWithPurchasesFrom($"{_token} Bergen Storsenter P-hus"), generator));
 
         Assert.DoesNotContain(await RulesWithToken(), r => r.AiGenerated);
-        Assert.Equal(GroceriesId, Assert.Single(await StoredTransactions(earlier.Id)).CategoryId);
+        Assert.Equal(_groceriesId, Assert.Single(await StoredTransactions(earlier.Id)).CategoryId);
         Assert.Null(Assert.Single(await StoredTransactions(created.Id)).CategoryId);
     }
 
     [Fact]
     public async Task Post_ProposalThatWouldChangeTheCategoryOfARowInTheSameStatement_IsDropped()
     {
-        await AddRule($"rema {_token}", GroceriesId);
+        await AddRule($"rema {_token}", _groceriesId);
         var generator = new FakeRuleGenerator()
             .Proposing($"{_token} Bergen Storsenter P-hus", $"{_token} bergen storsenter", "Transport");
 
@@ -715,7 +728,7 @@ public class BankStatementEndpointsTests
             StatementWithPurchasesFrom($"{_token} Bergen Storsenter P-hus", $"Rema {_token} Bergen Storsenter"), generator));
 
         Assert.DoesNotContain(await RulesWithToken(), r => r.AiGenerated);
-        Assert.Equal([null, GroceriesId], (await StoredTransactions(created.Id)).Select(t => t.CategoryId));
+        Assert.Equal([null, _groceriesId], (await StoredTransactions(created.Id)).Select(t => t.CategoryId));
     }
 
     [Fact]
@@ -731,8 +744,8 @@ public class BankStatementEndpointsTests
             StatementWithPurchasesFrom($"Kafé {_token} Sentrum Bergen", $"{_token} Sentrum Bergen P-hus"), generator));
 
         var rule = Assert.Single(await RulesWithToken());
-        Assert.Equal(($"kafé {_token}", RestaurantsId, true), (rule.Keyword, rule.CategoryId, rule.AiGenerated));
-        Assert.Equal([RestaurantsId, null], (await StoredTransactions(created.Id)).Select(t => t.CategoryId));
+        Assert.Equal(($"kafé {_token}", _restaurantsId, true), (rule.Keyword, rule.CategoryId, rule.AiGenerated));
+        Assert.Equal([_restaurantsId, null], (await StoredTransactions(created.Id)).Select(t => t.CategoryId));
     }
 
     [Fact]
@@ -747,7 +760,7 @@ public class BankStatementEndpointsTests
 
         var rule = Assert.Single(await RulesWithToken());
         Assert.Equal($"{_token} kaffebrenneriet", rule.Keyword);
-        Assert.Equal([(int?)RestaurantsId, RestaurantsId], (await StoredTransactions(created.Id)).Select(t => t.CategoryId));
+        Assert.Equal([(int?)_restaurantsId, _restaurantsId], (await StoredTransactions(created.Id)).Select(t => t.CategoryId));
     }
 
     [Fact]
@@ -776,14 +789,14 @@ public class BankStatementEndpointsTests
     [Fact]
     public async Task Post_GeneratorUnavailable_ImportsTheStatementWithUnmatchedRowsUncategorized()
     {
-        await AddRule($"{_token} butikk", GroceriesId);
+        await AddRule($"{_token} butikk", _groceriesId);
 
         var created = await Created(await Upload(
             StatementWithPurchasesFrom($"{_token} Butikk Sentrum", $"{_token} Kafé"),
             new FakeRuleGenerator { Unavailable = true }));
 
         Assert.Equal(
-            [(int?)GroceriesId, null],
+            [(int?)_groceriesId, null],
             (await StoredTransactions(created.Id)).Select(t => t.CategoryId));
         Assert.Equal((2, 1), (created.TransactionCount, created.UncategorizedCount));
         Assert.True(created.AiCategorizationUnavailable);
@@ -802,7 +815,7 @@ public class BankStatementEndpointsTests
     [Fact]
     public async Task Post_StatementWhoseRowsAllMatchRules_DoesNotReportAiCategorizationUnavailable()
     {
-        await AddRule($"{_token} butikk", GroceriesId);
+        await AddRule($"{_token} butikk", _groceriesId);
 
         var created = await Created(await Upload(
             StatementWithPurchasesFrom($"{_token} Butikk Sentrum"), new FakeRuleGenerator { Unavailable = true }));
