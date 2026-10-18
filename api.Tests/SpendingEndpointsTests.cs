@@ -11,19 +11,12 @@ namespace PersonligFinans.Api.Tests;
 [Collection(ApiCollection.Name)]
 public class SpendingEndpointsTests : IAsyncLifetime
 {
-    private int _groceriesCategoryId;
-    private int _restaurantsCategoryId;
-    private int _shoppingCategoryId;
-    private int _incomeCategoryId;
-    private int _transfersCategoryId;
-
-    // Signed in as a User of its own, registered for each test.
+    private readonly PostgresApiFactory _factory;
     private HttpClient _client = null!;
+    private SeededCategories _seeded = null!;
 
     // Spending adds up every Transaction of a month, so each test uses a year no other test uses.
     private readonly string _token = "t" + Guid.NewGuid().ToString("N")[..8];
-
-    private readonly PostgresApiFactory _factory;
 
     public SpendingEndpointsTests(PostgresApiFactory factory)
     {
@@ -33,12 +26,7 @@ public class SpendingEndpointsTests : IAsyncLifetime
     public async Task InitializeAsync()
     {
         _client = await _factory.CreateSignedInClientAsync();
-        var seeded = await _client.SeededCategoryIdsByName();
-        _groceriesCategoryId = seeded["Groceries"];
-        _restaurantsCategoryId = seeded["Restaurants"];
-        _shoppingCategoryId = seeded["Shopping"];
-        _incomeCategoryId = seeded["Income"];
-        _transfersCategoryId = seeded["Transfers"];
+        _seeded = await SeededCategories.Of(_client);
     }
 
     public Task DisposeAsync() => Task.CompletedTask;
@@ -102,18 +90,18 @@ public class SpendingEndpointsTests : IAsyncLifetime
     [Fact]
     public async Task Get_Spending_SumsTheAmountsOfEachCategoryAsPositiveFiguresLargestFirst()
     {
-        await AddManualTransaction("2051-03-02", -100m, _groceriesCategoryId);
-        await AddManualTransaction("2051-03-15", -50.50m, _groceriesCategoryId);
-        await AddManualTransaction("2051-03-10", -300m, _restaurantsCategoryId);
-        await AddManualTransaction("2051-03-20", -20m, _shoppingCategoryId);
+        await AddManualTransaction("2051-03-02", -100m, _seeded.Groceries);
+        await AddManualTransaction("2051-03-15", -50.50m, _seeded.Groceries);
+        await AddManualTransaction("2051-03-10", -300m, _seeded.Restaurants);
+        await AddManualTransaction("2051-03-20", -20m, _seeded.Shopping);
 
         var spending = await SpendingOf(2051, 3);
 
         Assert.Equal(
             [
-                new SpendingSliceResponse(_restaurantsCategoryId, 300m),
-                new SpendingSliceResponse(_groceriesCategoryId, 150.50m),
-                new SpendingSliceResponse(_shoppingCategoryId, 20m),
+                new SpendingSliceResponse(_seeded.Restaurants, 300m),
+                new SpendingSliceResponse(_seeded.Groceries, 150.50m),
+                new SpendingSliceResponse(_seeded.Shopping, 20m),
             ],
             spending.Slices);
         Assert.Equal(470.50m, spending.Total);
@@ -122,26 +110,26 @@ public class SpendingEndpointsTests : IAsyncLifetime
     [Fact]
     public async Task Get_Spending_IgnoresTransactionsInTheTransfersCategoryByDefault()
     {
-        await AddManualTransaction("2052-05-03", -5000m, _transfersCategoryId);
-        await AddManualTransaction("2052-05-04", -10m, _groceriesCategoryId);
+        await AddManualTransaction("2052-05-03", -5000m, _seeded.Transfers);
+        await AddManualTransaction("2052-05-04", -10m, _seeded.Groceries);
 
         var spending = await SpendingOf(2052, 5);
 
-        Assert.Equal([new SpendingSliceResponse(_groceriesCategoryId, 10m)], spending.Slices);
+        Assert.Equal([new SpendingSliceResponse(_seeded.Groceries, 10m)], spending.Slices);
         Assert.Equal(10m, spending.Total);
     }
 
     [Fact]
     public async Task Get_SpendingIncludingTransfers_NetsTheTransfersCategoryAsItsOwnSlice()
     {
-        await AddManualTransaction("2061-05-03", -5000m, _transfersCategoryId);
-        await AddManualTransaction("2061-05-04", 2000m, _transfersCategoryId);
-        await AddManualTransaction("2061-05-05", -10m, _groceriesCategoryId);
+        await AddManualTransaction("2061-05-03", -5000m, _seeded.Transfers);
+        await AddManualTransaction("2061-05-04", 2000m, _seeded.Transfers);
+        await AddManualTransaction("2061-05-05", -10m, _seeded.Groceries);
 
         var spending = await SpendingOf(2061, 5, includeTransfers: true);
 
         Assert.Equal(
-            [new SpendingSliceResponse(_transfersCategoryId, 3000m), new SpendingSliceResponse(_groceriesCategoryId, 10m)],
+            [new SpendingSliceResponse(_seeded.Transfers, 3000m), new SpendingSliceResponse(_seeded.Groceries, 10m)],
             spending.Slices);
         Assert.Equal(3010m, spending.Total);
     }
@@ -149,26 +137,26 @@ public class SpendingEndpointsTests : IAsyncLifetime
     [Fact]
     public async Task Get_SpendingExcludingTransfers_IgnoresTransactionsInTheTransfersCategory()
     {
-        await AddManualTransaction("2062-05-03", -5000m, _transfersCategoryId);
-        await AddManualTransaction("2062-05-04", -10m, _groceriesCategoryId);
+        await AddManualTransaction("2062-05-03", -5000m, _seeded.Transfers);
+        await AddManualTransaction("2062-05-04", -10m, _seeded.Groceries);
 
         var spending = await SpendingOf(2062, 5, includeTransfers: false);
 
-        Assert.Equal([new SpendingSliceResponse(_groceriesCategoryId, 10m)], spending.Slices);
+        Assert.Equal([new SpendingSliceResponse(_seeded.Groceries, 10m)], spending.Slices);
         Assert.Equal(10m, spending.Total);
     }
 
     [Fact]
     public async Task Get_Spending_IsReducedByARefundInTheSameCategory()
     {
-        await AddManualTransaction("2053-04-02", -100m, _groceriesCategoryId);
-        await AddManualTransaction("2053-04-09", 40m, _groceriesCategoryId);
-        await AddManualTransaction("2053-04-10", -300m, _restaurantsCategoryId);
+        await AddManualTransaction("2053-04-02", -100m, _seeded.Groceries);
+        await AddManualTransaction("2053-04-09", 40m, _seeded.Groceries);
+        await AddManualTransaction("2053-04-10", -300m, _seeded.Restaurants);
 
         var spending = await SpendingOf(2053, 4);
 
         Assert.Equal(
-            [new SpendingSliceResponse(_restaurantsCategoryId, 300m), new SpendingSliceResponse(_groceriesCategoryId, 60m)],
+            [new SpendingSliceResponse(_seeded.Restaurants, 300m), new SpendingSliceResponse(_seeded.Groceries, 60m)],
             spending.Slices);
         Assert.Equal(360m, spending.Total);
     }
@@ -176,22 +164,22 @@ public class SpendingEndpointsTests : IAsyncLifetime
     [Fact]
     public async Task Get_Spending_LeavesOutACategoryWhoseAmountsNetToZeroOrMore_WithoutReducingTheTotal()
     {
-        await AddManualTransaction("2058-09-02", -100m, _shoppingCategoryId);
-        await AddManualTransaction("2058-09-20", 150m, _shoppingCategoryId);
-        await AddManualTransaction("2058-09-03", -40m, _restaurantsCategoryId);
-        await AddManualTransaction("2058-09-21", 40m, _restaurantsCategoryId);
-        await AddManualTransaction("2058-09-04", -10m, _groceriesCategoryId);
+        await AddManualTransaction("2058-09-02", -100m, _seeded.Shopping);
+        await AddManualTransaction("2058-09-20", 150m, _seeded.Shopping);
+        await AddManualTransaction("2058-09-03", -40m, _seeded.Restaurants);
+        await AddManualTransaction("2058-09-21", 40m, _seeded.Restaurants);
+        await AddManualTransaction("2058-09-04", -10m, _seeded.Groceries);
 
         var spending = await SpendingOf(2058, 9);
 
-        Assert.Equal([new SpendingSliceResponse(_groceriesCategoryId, 10m)], spending.Slices);
+        Assert.Equal([new SpendingSliceResponse(_seeded.Groceries, 10m)], spending.Slices);
         Assert.Equal(10m, spending.Total);
     }
 
     [Fact]
     public async Task Get_Spending_NeverCountsIncome()
     {
-        await AddManualTransaction("2054-08-12", -25m, _incomeCategoryId);
+        await AddManualTransaction("2054-08-12", -25m, _seeded.Income);
 
         foreach (var includeTransfers in new bool?[] { null, true })
         {
@@ -206,12 +194,12 @@ public class SpendingEndpointsTests : IAsyncLifetime
     public async Task Get_Spending_CountsImportedAndManualTransactions_WithUncategorizedAsItsOwnSlice()
     {
         await ImportStatement("01.06.2055 - 30.06.2055", "0306", "1706");
-        await AddManualTransaction("2055-06-20", -5m, _groceriesCategoryId);
+        await AddManualTransaction("2055-06-20", -5m, _seeded.Groceries);
 
         var spending = await SpendingOf(2055, 6);
 
         Assert.Equal(
-            [new SpendingSliceResponse(null, 20m), new SpendingSliceResponse(_groceriesCategoryId, 5m)],
+            [new SpendingSliceResponse(null, 20m), new SpendingSliceResponse(_seeded.Groceries, 5m)],
             spending.Slices);
         Assert.Equal(25m, spending.Total);
     }
@@ -229,21 +217,21 @@ public class SpendingEndpointsTests : IAsyncLifetime
     [Fact]
     public async Task Get_Spending_IncludesTheFirstAndLastDayOfTheMonthButNotTheNeighbouringDays()
     {
-        await AddManualTransaction("2056-01-31", -1m, _groceriesCategoryId);
-        await AddManualTransaction("2056-02-01", -10m, _groceriesCategoryId);
-        await AddManualTransaction("2056-02-29", -100m, _groceriesCategoryId);
-        await AddManualTransaction("2056-03-01", -1000m, _groceriesCategoryId);
+        await AddManualTransaction("2056-01-31", -1m, _seeded.Groceries);
+        await AddManualTransaction("2056-02-01", -10m, _seeded.Groceries);
+        await AddManualTransaction("2056-02-29", -100m, _seeded.Groceries);
+        await AddManualTransaction("2056-03-01", -1000m, _seeded.Groceries);
 
         var spending = await SpendingOf(2056, 2);
 
-        Assert.Equal([new SpendingSliceResponse(_groceriesCategoryId, 110m)], spending.Slices);
+        Assert.Equal([new SpendingSliceResponse(_seeded.Groceries, 110m)], spending.Slices);
     }
 
     [Fact]
     public async Task Get_Spending_OfMonthWithoutSpending_IsZeroWithNoSlices()
     {
-        await AddManualTransaction("2057-07-25", 30000m, _incomeCategoryId);
-        await AddManualTransaction("2057-07-26", -500m, _transfersCategoryId);
+        await AddManualTransaction("2057-07-25", 30000m, _seeded.Income);
+        await AddManualTransaction("2057-07-26", -500m, _seeded.Transfers);
 
         var spending = await SpendingOf(2057, 7);
 
@@ -254,56 +242,56 @@ public class SpendingEndpointsTests : IAsyncLifetime
     [Fact]
     public async Task Get_SpendingOfQuarter_RunsFromTheFirstDayOfItsFirstMonthToTheLastDayOfItsThird()
     {
-        await AddManualTransaction("2071-03-31", -1m, _groceriesCategoryId);
-        await AddManualTransaction("2071-04-01", -10m, _groceriesCategoryId);
-        await AddManualTransaction("2071-05-15", -100m, _groceriesCategoryId);
-        await AddManualTransaction("2071-06-30", -1000m, _groceriesCategoryId);
-        await AddManualTransaction("2071-07-01", -10000m, _groceriesCategoryId);
+        await AddManualTransaction("2071-03-31", -1m, _seeded.Groceries);
+        await AddManualTransaction("2071-04-01", -10m, _seeded.Groceries);
+        await AddManualTransaction("2071-05-15", -100m, _seeded.Groceries);
+        await AddManualTransaction("2071-06-30", -1000m, _seeded.Groceries);
+        await AddManualTransaction("2071-07-01", -10000m, _seeded.Groceries);
 
         var q1 = await SpendingOf("year=2071&quarter=1");
         var q2 = await SpendingOf("year=2071&quarter=2");
 
-        Assert.Equal([new SpendingSliceResponse(_groceriesCategoryId, 1m)], q1.Slices);
-        Assert.Equal([new SpendingSliceResponse(_groceriesCategoryId, 1110m)], q2.Slices);
+        Assert.Equal([new SpendingSliceResponse(_seeded.Groceries, 1m)], q1.Slices);
+        Assert.Equal([new SpendingSliceResponse(_seeded.Groceries, 1110m)], q2.Slices);
         Assert.Equal(1110m, q2.Total);
     }
 
     [Fact]
     public async Task Get_SpendingOfQuarter_IsTheSumOfItsMonthlySpending_SoARefundOnlyReducesTheMonthItIsPostedIn()
     {
-        await AddManualTransaction("2075-07-10", -1200m, _shoppingCategoryId);
-        await AddManualTransaction("2075-08-03", 1200m, _shoppingCategoryId);
-        await AddManualTransaction("2075-08-05", -300m, _groceriesCategoryId);
-        await AddManualTransaction("2075-09-05", -100m, _groceriesCategoryId);
-        await AddManualTransaction("2075-09-06", 50m, _groceriesCategoryId);
+        await AddManualTransaction("2075-07-10", -1200m, _seeded.Shopping);
+        await AddManualTransaction("2075-08-03", 1200m, _seeded.Shopping);
+        await AddManualTransaction("2075-08-05", -300m, _seeded.Groceries);
+        await AddManualTransaction("2075-09-05", -100m, _seeded.Groceries);
+        await AddManualTransaction("2075-09-06", 50m, _seeded.Groceries);
 
         var spending = await SpendingOf("year=2075&quarter=3");
         var monthly = await MonthlySpendingOf(2075, 7, 2075, 9);
 
         Assert.Equal(
-            [new SpendingSliceResponse(_shoppingCategoryId, 1200m), new SpendingSliceResponse(_groceriesCategoryId, 350m)],
+            [new SpendingSliceResponse(_seeded.Shopping, 1200m), new SpendingSliceResponse(_seeded.Groceries, 350m)],
             spending.Slices);
         Assert.Equal(1550m, spending.Total);
-        Assert.Equal([new SpendingSliceResponse(_shoppingCategoryId, 1200m)], monthly[0].Slices);
-        Assert.Equal([new SpendingSliceResponse(_groceriesCategoryId, 300m)], monthly[1].Slices);
-        Assert.Equal([new SpendingSliceResponse(_groceriesCategoryId, 50m)], monthly[2].Slices);
+        Assert.Equal([new SpendingSliceResponse(_seeded.Shopping, 1200m)], monthly[0].Slices);
+        Assert.Equal([new SpendingSliceResponse(_seeded.Groceries, 300m)], monthly[1].Slices);
+        Assert.Equal([new SpendingSliceResponse(_seeded.Groceries, 50m)], monthly[2].Slices);
     }
 
     [Fact]
     public async Task Get_SpendingOfYear_RunsFromTheFirstOfJanuaryToTheThirtyFirstOfDecember()
     {
-        await AddManualTransaction("2072-12-31", -1m, _groceriesCategoryId);
-        await AddManualTransaction("2073-01-01", -10m, _groceriesCategoryId);
-        await AddManualTransaction("2073-06-15", -100m, _restaurantsCategoryId);
-        await AddManualTransaction("2073-12-31", -1000m, _groceriesCategoryId);
-        await AddManualTransaction("2074-01-01", -10000m, _groceriesCategoryId);
+        await AddManualTransaction("2072-12-31", -1m, _seeded.Groceries);
+        await AddManualTransaction("2073-01-01", -10m, _seeded.Groceries);
+        await AddManualTransaction("2073-06-15", -100m, _seeded.Restaurants);
+        await AddManualTransaction("2073-12-31", -1000m, _seeded.Groceries);
+        await AddManualTransaction("2074-01-01", -10000m, _seeded.Groceries);
 
         var spending = await SpendingOf("year=2073");
 
         Assert.Equal(
             [
-                new SpendingSliceResponse(_groceriesCategoryId, 1010m),
-                new SpendingSliceResponse(_restaurantsCategoryId, 100m),
+                new SpendingSliceResponse(_seeded.Groceries, 1010m),
+                new SpendingSliceResponse(_seeded.Restaurants, 100m),
             ],
             spending.Slices);
         Assert.Equal(1110m, spending.Total);
@@ -343,52 +331,52 @@ public class SpendingEndpointsTests : IAsyncLifetime
     [Fact]
     public async Task Get_MonthlySpending_HasOneEntryPerMonthOfTheSpanInOrder_WithEmptyMonthsAsNoSlices()
     {
-        await AddManualTransaction("2081-11-10", -100m, _groceriesCategoryId);
-        await AddManualTransaction("2082-02-10", -40m, _restaurantsCategoryId);
+        await AddManualTransaction("2081-11-10", -100m, _seeded.Groceries);
+        await AddManualTransaction("2082-02-10", -40m, _seeded.Restaurants);
 
         var monthly = await MonthlySpendingOf(2081, 11, 2082, 2);
 
         Assert.Equal(
             [(2081, 11), (2081, 12), (2082, 1), (2082, 2)],
             monthly.Select(m => (m.Year, m.Month)));
-        Assert.Equal([new SpendingSliceResponse(_groceriesCategoryId, 100m)], monthly[0].Slices);
+        Assert.Equal([new SpendingSliceResponse(_seeded.Groceries, 100m)], monthly[0].Slices);
         Assert.Empty(monthly[1].Slices);
         Assert.Empty(monthly[2].Slices);
-        Assert.Equal([new SpendingSliceResponse(_restaurantsCategoryId, 40m)], monthly[3].Slices);
+        Assert.Equal([new SpendingSliceResponse(_seeded.Restaurants, 40m)], monthly[3].Slices);
     }
 
     [Fact]
     public async Task Get_MonthlySpending_IncludesTheFirstAndLastDayOfTheSpanButNotTheNeighbouringDays()
     {
-        await AddManualTransaction("2083-02-28", -1m, _groceriesCategoryId);
-        await AddManualTransaction("2083-03-01", -10m, _groceriesCategoryId);
-        await AddManualTransaction("2083-03-31", -100m, _groceriesCategoryId);
-        await AddManualTransaction("2083-04-01", -1000m, _groceriesCategoryId);
-        await AddManualTransaction("2083-04-30", -10000m, _groceriesCategoryId);
-        await AddManualTransaction("2083-05-01", -100000m, _groceriesCategoryId);
+        await AddManualTransaction("2083-02-28", -1m, _seeded.Groceries);
+        await AddManualTransaction("2083-03-01", -10m, _seeded.Groceries);
+        await AddManualTransaction("2083-03-31", -100m, _seeded.Groceries);
+        await AddManualTransaction("2083-04-01", -1000m, _seeded.Groceries);
+        await AddManualTransaction("2083-04-30", -10000m, _seeded.Groceries);
+        await AddManualTransaction("2083-05-01", -100000m, _seeded.Groceries);
 
         var monthly = await MonthlySpendingOf(2083, 3, 2083, 4);
 
-        Assert.Equal([new SpendingSliceResponse(_groceriesCategoryId, 110m)], monthly[0].Slices);
-        Assert.Equal([new SpendingSliceResponse(_groceriesCategoryId, 11000m)], monthly[1].Slices);
+        Assert.Equal([new SpendingSliceResponse(_seeded.Groceries, 110m)], monthly[0].Slices);
+        Assert.Equal([new SpendingSliceResponse(_seeded.Groceries, 11000m)], monthly[1].Slices);
     }
 
     [Fact]
     public async Task Get_MonthlySpending_NetsEachCategoryWithinTheMonth_LeavingOutIncomeAndCategoriesThatNetToZeroOrMore()
     {
-        await AddManualTransaction("2084-06-02", -100m, _groceriesCategoryId);
-        await AddManualTransaction("2084-06-15", -50.50m, _groceriesCategoryId);
-        await AddManualTransaction("2084-06-16", 40m, _groceriesCategoryId);
-        await AddManualTransaction("2084-06-10", -300m, _restaurantsCategoryId);
-        await AddManualTransaction("2084-06-25", 30000m, _incomeCategoryId);
-        await AddManualTransaction("2084-07-03", 25m, _shoppingCategoryId);
+        await AddManualTransaction("2084-06-02", -100m, _seeded.Groceries);
+        await AddManualTransaction("2084-06-15", -50.50m, _seeded.Groceries);
+        await AddManualTransaction("2084-06-16", 40m, _seeded.Groceries);
+        await AddManualTransaction("2084-06-10", -300m, _seeded.Restaurants);
+        await AddManualTransaction("2084-06-25", 30000m, _seeded.Income);
+        await AddManualTransaction("2084-07-03", 25m, _seeded.Shopping);
 
         var monthly = await MonthlySpendingOf(2084, 6, 2084, 7);
 
         Assert.Equal(
             [
-                new SpendingSliceResponse(_restaurantsCategoryId, 300m),
-                new SpendingSliceResponse(_groceriesCategoryId, 110.50m),
+                new SpendingSliceResponse(_seeded.Restaurants, 300m),
+                new SpendingSliceResponse(_seeded.Groceries, 110.50m),
             ],
             monthly[0].Slices);
         Assert.Empty(monthly[1].Slices);
@@ -398,12 +386,12 @@ public class SpendingEndpointsTests : IAsyncLifetime
     public async Task Get_MonthlySpending_CountsImportedAndManualTransactions_WithUncategorizedAsItsOwnSlice()
     {
         await ImportStatement("01.08.2085 - 30.09.2085", "0308", "1708", "0209");
-        await AddManualTransaction("2085-08-20", -5m, _groceriesCategoryId);
+        await AddManualTransaction("2085-08-20", -5m, _seeded.Groceries);
 
         var monthly = await MonthlySpendingOf(2085, 8, 2085, 9);
 
         Assert.Equal(
-            [new SpendingSliceResponse(null, 20m), new SpendingSliceResponse(_groceriesCategoryId, 5m)],
+            [new SpendingSliceResponse(null, 20m), new SpendingSliceResponse(_seeded.Groceries, 5m)],
             monthly[0].Slices);
         Assert.Equal([new SpendingSliceResponse(null, 10m)], monthly[1].Slices);
     }
@@ -411,16 +399,16 @@ public class SpendingEndpointsTests : IAsyncLifetime
     [Fact]
     public async Task Get_MonthlySpending_IgnoresTransactionsInTheTransfersCategoryByDefault()
     {
-        await AddManualTransaction("2086-05-03", -5000m, _transfersCategoryId);
-        await AddManualTransaction("2086-05-04", -10m, _groceriesCategoryId);
-        await AddManualTransaction("2086-06-03", -700m, _transfersCategoryId);
+        await AddManualTransaction("2086-05-03", -5000m, _seeded.Transfers);
+        await AddManualTransaction("2086-05-04", -10m, _seeded.Groceries);
+        await AddManualTransaction("2086-06-03", -700m, _seeded.Transfers);
 
         var byDefault = await MonthlySpendingOf(2086, 5, 2086, 6);
         var excludingTransfers = await MonthlySpendingOf(2086, 5, 2086, 6, includeTransfers: false);
 
         foreach (var monthly in new[] { byDefault, excludingTransfers })
         {
-            Assert.Equal([new SpendingSliceResponse(_groceriesCategoryId, 10m)], monthly[0].Slices);
+            Assert.Equal([new SpendingSliceResponse(_seeded.Groceries, 10m)], monthly[0].Slices);
             Assert.Empty(monthly[1].Slices);
         }
     }
@@ -428,17 +416,17 @@ public class SpendingEndpointsTests : IAsyncLifetime
     [Fact]
     public async Task Get_MonthlySpendingIncludingTransfers_NetsTheTransfersCategoryAsItsOwnSlice()
     {
-        await AddManualTransaction("2087-05-03", -5000m, _transfersCategoryId);
-        await AddManualTransaction("2087-05-04", 2000m, _transfersCategoryId);
-        await AddManualTransaction("2087-05-05", -10m, _groceriesCategoryId);
-        await AddManualTransaction("2087-06-03", -700m, _transfersCategoryId);
+        await AddManualTransaction("2087-05-03", -5000m, _seeded.Transfers);
+        await AddManualTransaction("2087-05-04", 2000m, _seeded.Transfers);
+        await AddManualTransaction("2087-05-05", -10m, _seeded.Groceries);
+        await AddManualTransaction("2087-06-03", -700m, _seeded.Transfers);
 
         var monthly = await MonthlySpendingOf(2087, 5, 2087, 6, includeTransfers: true);
 
         Assert.Equal(
-            [new SpendingSliceResponse(_transfersCategoryId, 3000m), new SpendingSliceResponse(_groceriesCategoryId, 10m)],
+            [new SpendingSliceResponse(_seeded.Transfers, 3000m), new SpendingSliceResponse(_seeded.Groceries, 10m)],
             monthly[0].Slices);
-        Assert.Equal([new SpendingSliceResponse(_transfersCategoryId, 700m)], monthly[1].Slices);
+        Assert.Equal([new SpendingSliceResponse(_seeded.Transfers, 700m)], monthly[1].Slices);
     }
 
     [Theory]

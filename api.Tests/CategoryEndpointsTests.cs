@@ -15,17 +15,12 @@ namespace PersonligFinans.Api.Tests;
 public class CategoryEndpointsTests : IAsyncLifetime
 {
     private readonly PostgresApiFactory _factory;
-    // Signed in as a User of its own, registered for each test.
     private HttpClient _client = null!;
+    private SeededCategories _seeded = null!;
 
     // The tests share one database, so each test's keywords, descriptions and Category names
     // contain a token of its own.
     private readonly string _token = "t" + Guid.NewGuid().ToString("N")[..8];
-
-    private int _groceriesCategoryId;
-    private int _travelCategoryId;
-    private int _otherCategoryId;
-    private int _electronicsCategoryId;
 
     public CategoryEndpointsTests(PostgresApiFactory factory)
     {
@@ -35,11 +30,7 @@ public class CategoryEndpointsTests : IAsyncLifetime
     public async Task InitializeAsync()
     {
         _client = await _factory.CreateSignedInClientAsync();
-        var seeded = await _client.SeededCategoryIdsByName();
-        _groceriesCategoryId = seeded["Groceries"];
-        _travelCategoryId = seeded["Travel"];
-        _otherCategoryId = seeded["Other"];
-        _electronicsCategoryId = seeded["Electronics"];
+        _seeded = await SeededCategories.Of(_client);
     }
 
     // Removes the Categories the test created, and the rules and Transactions using them, since
@@ -178,19 +169,19 @@ public class CategoryEndpointsTests : IAsyncLifetime
                 date = "2026-08-03",
                 description,
                 amount = -100m,
-                categoryId = _electronicsCategoryId,
+                categoryId = _seeded.Electronics,
             });
             Assert.Equal(HttpStatusCode.Created, transaction.StatusCode);
         }
         var rule = await _client.PostAsJsonAsync(
-            "/api/categorization-rules", new { keyword = $"{_token} elektro", categoryId = _electronicsCategoryId });
+            "/api/categorization-rules", new { keyword = $"{_token} elektro", categoryId = _seeded.Electronics });
         Assert.Equal(HttpStatusCode.Created, rule.StatusCode);
 
         var after = (await ListCategories()).ToDictionary(c => c.Id);
-        Assert.Equal(before[_electronicsCategoryId].TransactionCount + 2, after[_electronicsCategoryId].TransactionCount);
-        Assert.Equal(before[_electronicsCategoryId].RuleCount + 1, after[_electronicsCategoryId].RuleCount);
-        Assert.Equal(before[_travelCategoryId].TransactionCount, after[_travelCategoryId].TransactionCount);
-        Assert.Equal(before[_travelCategoryId].RuleCount, after[_travelCategoryId].RuleCount);
+        Assert.Equal(before[_seeded.Electronics].TransactionCount + 2, after[_seeded.Electronics].TransactionCount);
+        Assert.Equal(before[_seeded.Electronics].RuleCount + 1, after[_seeded.Electronics].RuleCount);
+        Assert.Equal(before[_seeded.Travel].TransactionCount, after[_seeded.Travel].TransactionCount);
+        Assert.Equal(before[_seeded.Travel].RuleCount, after[_seeded.Travel].RuleCount);
     }
 
     [Fact]
@@ -454,10 +445,10 @@ public class CategoryEndpointsTests : IAsyncLifetime
         var ordinaryRuleId = await AddedRuleId($"{_token} hageland", id);
         try
         {
-            await TransactionsChangedByDeleting(id, _otherCategoryId);
+            await TransactionsChangedByDeleting(id, _seeded.Other);
 
-            Assert.Equal(new CategorizationRuleResponse(aiRuleId, $"{_token} plantasjen", _otherCategoryId, AiGenerated: true, IsNew: false), await Rule(aiRuleId));
-            Assert.Equal(new CategorizationRuleResponse(ordinaryRuleId, $"{_token} hageland", _otherCategoryId, AiGenerated: false, IsNew: false), await Rule(ordinaryRuleId));
+            Assert.Equal(new CategorizationRuleResponse(aiRuleId, $"{_token} plantasjen", _seeded.Other, AiGenerated: true, IsNew: false), await Rule(aiRuleId));
+            Assert.Equal(new CategorizationRuleResponse(ordinaryRuleId, $"{_token} hageland", _seeded.Other, AiGenerated: false, IsNew: false), await Rule(ordinaryRuleId));
         }
         finally
         {
@@ -693,8 +684,8 @@ public class CategoryEndpointsTests : IAsyncLifetime
         var listed = (await _client.GetFromJsonAsync<List<TransactionResponse>>("/api/transactions?year=2026&month=8"))!
             .Single(t => t.Id == transactionId);
         Assert.Null(listed.CategoryId);
-        await CategorizeManually(transactionId, _groceriesCategoryId);
-        Assert.Equal([_groceriesCategoryId], await CategoriesOf(transactionId));
+        await CategorizeManually(transactionId, _seeded.Groceries);
+        Assert.Equal([_seeded.Groceries], await CategoriesOf(transactionId));
     }
 
     [Fact]
@@ -820,12 +811,12 @@ public class CategoryEndpointsTests : IAsyncLifetime
     [Fact]
     public async Task Put_BuiltInCategoryRenamed_IsRejected()
     {
-        var errors = await EditCategoryExpectingValidationErrors(_groceriesCategoryId, $"{_token} Food", "All groceries.");
+        var errors = await EditCategoryExpectingValidationErrors(_seeded.Groceries, $"{_token} Food", "All groceries.");
 
         Assert.Equal(["A Built-in Category can't be renamed."], errors["name"]);
         Assert.Contains(
             (await ListCategories()),
-            c => c.Id == _groceriesCategoryId && c.Name == "Groceries");
+            c => c.Id == _seeded.Groceries && c.Name == "Groceries");
     }
 
     [Fact]
@@ -833,7 +824,7 @@ public class CategoryEndpointsTests : IAsyncLifetime
     {
         try
         {
-            var response = await EditCategory(_groceriesCategoryId, "Groceries", $"{_token} Food and drink.");
+            var response = await EditCategory(_seeded.Groceries, "Groceries", $"{_token} Food and drink.");
 
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             var edited = await response.Content.ReadFromJsonAsync<CategoryResponse>();
@@ -842,7 +833,7 @@ public class CategoryEndpointsTests : IAsyncLifetime
         finally
         {
             // Other tests assert the seeded description.
-            await EditCategory(_groceriesCategoryId, "Groceries", "All groceries.");
+            await EditCategory(_seeded.Groceries, "Groceries", "All groceries.");
         }
     }
 
