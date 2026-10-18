@@ -4,12 +4,28 @@ A personal finance web app for tracking spending from uploaded bank transactions
 
 ## Language
 
+**User**:
+Someone who signs in with an email and password, or the Guest. Each User has their own Transactions, Bank Statements, Uploads, Categories and Categorization Rules, and no User ever sees another's. A new User starts with the seeded Categories and Categorization Rules and no Transactions.
+_Avoid_: Account, profile, member
+
+**Guest**:
+The one User anyone can sign in as without registering, so everything in it is seen and changed by every visitor who uses it. It is for trying the app, not for real data, and otherwise works like any other User: it starts like a new User, is never reset, and has its own Daily AI limit, shared by everyone using it.
+_Avoid_: Demo user, anonymous user, guest account
+
+**AI request**:
+One ask of the LLM on a User's behalf, counted whether or not it succeeds: reading one Receipt, or proposing AI-generated rules for one Bank Statement that has rows no Categorization Rule matches. A Bank Statement whose rows all match makes none.
+_Avoid_: LLM call, AI usage, token
+
+**Daily AI limit**:
+How many AI requests a User may make in a day, counted from midnight Norwegian time, alongside a cap on all Users' AI requests together. Past either, nothing is refused: an Upload still imports with its unmatched Transactions left Uncategorized, and a Receipt is entered by hand, each saying the limit is reached.
+_Avoid_: Quota, rate limit, usage cap
+
 **Transaction**:
 A single financial record — either imported from a Bank Statement or entered manually — with a posted date, an Amount, a required description, and a Category (or Uncategorized). An imported Transaction's posted date is the date the bank booked it, and its description is the cleaned merchant or payee name, without any Payment Channel in front of it. A manually-entered Transaction can be deleted, permanently; an imported one cannot, so every imported Bank Statement stays whole and reconciled.
 _Avoid_: Entry, record, purchase
 
 **Bank Statement**:
-A bank's periodic account statement (Norwegian: kontoutskrift) for one account and one period, uploaded to import its Transactions. Identified by its account number and period; each imported Transaction remembers which Bank Statement it came from. Every row on it is imported, including transfers between the user's own accounts, and each row's Amount is the booked NOK value even for foreign-currency purchases. A Bank Statement is imported at most once, and only if its rows reconcile with its opening and closing balances; otherwise nothing from it is imported.
+A bank's periodic account statement (Norwegian: kontoutskrift) for one account and one period, uploaded to import its Transactions. Identified by its account number and period; each imported Transaction remembers which Bank Statement it came from. Every row on it is imported, including transfers between the user's own accounts, and each row's Amount is the booked NOK value even for foreign-currency purchases. A User imports a Bank Statement at most once, and only if its rows reconcile with its opening and closing balances; otherwise nothing from it is imported.
 _Avoid_: Kontoutskrift, file, CSV, export
 
 **Upload**:
@@ -37,7 +53,7 @@ An optional, free-form annotation a user attaches to any Transaction — importe
 _Avoid_: Reference, memo, comment
 
 **Category**:
-A label classifying a Transaction by type of spending (e.g. "Restaurants", "Groceries"), used to group spending on the Dashboard. Has a unique name (ignoring case) and a short description of what belongs in it, which the LLM also reads when creating AI-generated rules. The user manages the list (adding, editing and deleting Categories), which starts from a seeded set. Deleting a Category that is in use means choosing either a replacement Category, which its Transactions and Categorization Rules move to (each Transaction keeping whether it was categorized manually or by a rule), or to delete its Categorization Rules, after which its Transactions are matched against the remaining rules like any rule change, and those left without a Category become Uncategorized.
+A label classifying a Transaction by type of spending (e.g. "Restaurants", "Groceries"), used to group spending on the Dashboard. Has a name unique among the User's Categories (ignoring case) and a short description of what belongs in it, which the LLM also reads when creating AI-generated rules. Each User manages their own list (adding, editing and deleting Categories), which starts from a seeded set. Deleting a Category that is in use means choosing either a replacement Category, which its Transactions and Categorization Rules move to (each Transaction keeping whether it was categorized manually or by a rule), or to delete its Categorization Rules, after which its Transactions are matched against the remaining rules like any rule change, and those left without a Category become Uncategorized.
 _Avoid_: Tag, type, bucket
 
 **Built-in Category**:
@@ -49,7 +65,7 @@ The state of a Transaction with no Category, awaiting a decision: an imported Tr
 _Avoid_: Unreviewed, pending
 
 **Categorization Rule**:
-A keyword paired with a Category: an imported Transaction whose description contains the keyword (ignoring case) is automatically assigned that Category, and reassigned whenever the rules change unless its Category was chosen manually; when several match, the longest keyword wins. Keywords are unique. Seeded with common merchants and visible to the user; correcting a Transaction's Category by hand never creates one. Never applied to manually-entered Transactions.
+A keyword paired with a Category: an imported Transaction whose description contains the keyword (ignoring case) is automatically assigned that Category, and reassigned whenever the rules change unless its Category was chosen manually; when several match, the longest keyword wins. Keywords are unique among the User's rules. Seeded with common merchants and visible to the user; correcting a Transaction's Category by hand never creates one. Never applied to manually-entered Transactions.
 _Avoid_: Mapping, pattern
 
 **AI-generated rule**:
@@ -57,7 +73,7 @@ A Categorization Rule created by an LLM during import, for an imported Transacti
 _Avoid_: Suggested rule, suggestion, unconfirmed rule
 
 **New rule**:
-A Categorization Rule added by the most recent Upload that imported a Bank Statement, marked so the user can review what that Upload brought. Such an Upload replaces the previous one's marks even if it adds no rules; editing the rule does not remove the mark. Since only imports add rules automatically, a New rule always began as an AI-generated rule, though it may no longer be one.
+A Categorization Rule added by the User's most recent Upload that imported a Bank Statement, marked so the user can review what that Upload brought. Such an Upload replaces the previous one's marks even if it adds no rules; editing the rule does not remove the mark. Since only imports add rules automatically, a New rule always began as an AI-generated rule, though it may no longer be one.
 _Avoid_: Recent rule, latest rule, fresh rule
 
 **Payment Channel**:
