@@ -205,6 +205,40 @@ public class UserEndpointsTests
         Assert.Null(await WhoAmI(client));
     }
 
+    [Theory]
+    [InlineData(Guest.Email)]
+    [InlineData("GUEST@PERSONLIGFINANS.INVALID")]
+    [InlineData("someone@personligfinans.invalid")]
+    public async Task Register_AnEmailOnTheGuestsReservedDomain_IsRefused(string email)
+    {
+        var client = _factory.CreateClient();
+
+        var errors = await ValidationErrors(await Register(client, email, Password));
+
+        Assert.Equal(["This email can't be registered."], errors["email"]);
+        Assert.Null(await WhoAmI(client));
+    }
+
+    [Fact]
+    public async Task LogIn_AsTheGuest_GetsTheWrongEmailOrPasswordError_AndNeverLocksIt()
+    {
+        var client = _factory.CreateClient();
+
+        // More failures than lock a registered User's email, and with no password at all.
+        var responses = new List<HttpResponseMessage>();
+        for (var attempt = 0; attempt <= UserSetup.MaxFailedLogIns; attempt++)
+            responses.Add(await LogIn(client, Guest.Email, Password));
+        responses.Add(await LogIn(client, Guest.Email.ToUpperInvariant(), " "));
+
+        foreach (var response in responses)
+        {
+            Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+            Assert.Equal("Wrong email or password.", await ProblemDetail(response));
+        }
+        Assert.Null(await WhoAmI(client));
+        await _factory.CreateGuestClientAsync();
+    }
+
     [Fact]
     public async Task LogIn_MissingFields_AreRefused()
     {

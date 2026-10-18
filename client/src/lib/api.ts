@@ -76,9 +76,10 @@ async function readProblem<Request = object>(
   return { fieldErrors, detail: problem?.detail ?? null }
 }
 
-// The signed-in User, by the email they registered with.
+// The signed-in User, by the email they registered with, and whether they are the Guest.
 export interface User {
   email: string
+  isGuest: boolean
 }
 
 // Who is signed in, or null when nobody is.
@@ -113,27 +114,33 @@ export function register(request: CredentialsRequest): Promise<SubmitCredentials
   return submitCredentials('/api/user/register', request, 'Registering')
 }
 
+// Posts the body as JSON to an endpoint that signs someone in, or null when the server couldn't be
+// reached. Who is signed in changes when it succeeds, so the antiforgery token is forgotten.
+async function postSignIn(url: string, body: object): Promise<Response | null> {
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    if (response.ok) forgetAntiforgeryToken()
+    return response
+  } catch {
+    return null
+  }
+}
+
+const UNREACHABLE = 'Could not reach the server.'
+
 // action names what failed, e.g. "Logging in", for an answer that isn't a problem.
 async function submitCredentials(
   url: string,
   request: CredentialsRequest,
   action: string,
 ): Promise<SubmitCredentialsResult> {
-  let response: Response
-  try {
-    response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(request),
-    })
-  } catch {
-    return { ok: false, fieldErrors: {}, message: 'Could not reach the server.' }
-  }
-
-  if (response.ok) {
-    forgetAntiforgeryToken()
-    return { ok: true, user: (await response.json()) as User }
-  }
+  const response = await postSignIn(url, request)
+  if (!response) return { ok: false, fieldErrors: {}, message: UNREACHABLE }
+  if (response.ok) return { ok: true, user: (await response.json()) as User }
 
   // 400 is a validation problem keyed on the fields. 401 is a wrong email or password, and 429 a
   // locked email: problems whose detail says which.
@@ -144,6 +151,17 @@ async function submitCredentials(
   }
 
   return { ok: false, fieldErrors: {}, message: `${action} failed (${response.status}).` }
+}
+
+export type ContinueAsGuestResult = { ok: true; user: User } | { ok: false; message: string }
+
+// Signs in as the Guest, the one User every visitor shares. Sent as JSON, which the server requires
+// so that another site's form can't sign its visitors in as the Guest.
+export async function continueAsGuest(): Promise<ContinueAsGuestResult> {
+  const response = await postSignIn('/api/user/continue-as-guest', {})
+  if (!response) return { ok: false, message: UNREACHABLE }
+  if (!response.ok) return { ok: false, message: `Continuing as Guest failed (${response.status}).` }
+  return { ok: true, user: (await response.json()) as User }
 }
 
 // Ends the sign-in. Resolves false when the server couldn't be told, so the User is still signed in.

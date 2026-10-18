@@ -38,6 +38,17 @@ public static class SignedInClient
         return client;
     }
 
+    // Returns a client signed in as the Guest, by continuing as the Guest, with an antiforgery
+    // token as above.
+    public static async Task<HttpClient> CreateGuestClientAsync(this WebApplicationFactory<Program> factory)
+    {
+        var client = factory.CreateClient();
+        var response = await client.PostAsJsonAsync("/api/user/continue-as-guest", new { });
+        response.EnsureSuccessStatusCode();
+        await SendAntiforgeryTokenAsync(client);
+        return client;
+    }
+
     private static async Task SendAntiforgeryTokenAsync(HttpClient client)
     {
         var token = (await client.GetFromJsonAsync<AntiforgeryTokenResponse>("/api/antiforgery-token"))!.Token;

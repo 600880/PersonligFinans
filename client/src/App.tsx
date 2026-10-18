@@ -321,7 +321,8 @@ function SignedInApp({ user, onLoggedOut }: SignedInAppProps) {
                 className="absolute top-full right-0 z-10 mt-1 flex w-max max-w-xs flex-col gap-3 rounded-lg border border-slate-200 bg-white p-3 shadow-md max-sm:static max-sm:mt-0 max-sm:w-auto max-sm:max-w-none max-sm:border-0 max-sm:px-3 max-sm:pt-0 max-sm:shadow-none"
               >
                 <p className="text-sm break-all text-slate-600">
-                  Signed in as <span className="font-medium text-slate-900">{user.email}</span>
+                  Signed in as{' '}
+                  <span className="font-medium text-slate-900">{user.isGuest ? 'Guest' : user.email}</span>
                 </p>
                 <button
                   type="button"
@@ -340,6 +341,18 @@ function SignedInApp({ user, onLoggedOut }: SignedInAppProps) {
           </div>
         </nav>
       </header>
+
+      {/* Under the header on every page, for as long as the Guest is signed in. */}
+      {user.isGuest && (
+        <p
+          role="note"
+          aria-label="Guest"
+          className="border-b border-amber-200 bg-amber-50 px-6 py-2 text-center text-sm text-amber-900 max-sm:px-4"
+        >
+          You're the Guest, which everyone trying the app shares: anyone can see and change what you
+          enter, so don't enter real financial data.
+        </p>
+      )}
 
       {view === 'transactions' ? (
         <main className="flex flex-col items-center px-6 py-10 max-sm:px-4">

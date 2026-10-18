@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react'
-import { logIn, register, type CredentialsFieldErrors, type User } from '../lib/api'
+import { continueAsGuest, logIn, register, type CredentialsFieldErrors, type User } from '../lib/api'
 import { Field, inputClassName } from './TransactionForm'
 
 // Everything that differs between logging in and registering. The form's heading and its submit
@@ -29,8 +29,8 @@ interface LandingPageProps {
   onSignedIn: (user: User) => void
 }
 
-// What a visitor who isn't signed in sees: what the app is, and a form to log in or, switched to,
-// to register. The email typed in carries over when switching.
+// What a visitor who isn't signed in sees: what the app is, a form to log in or, switched to, to
+// register, and a way to try the app as the Guest. The email typed in carries over when switching.
 export function LandingPage({ onSignedIn }: LandingPageProps) {
   const [mode, setMode] = useState<Mode>('logIn')
   const [email, setEmail] = useState('')
@@ -38,6 +38,8 @@ export function LandingPage({ onSignedIn }: LandingPageProps) {
   const [fieldErrors, setFieldErrors] = useState<CredentialsFieldErrors>({})
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [guestError, setGuestError] = useState<string | null>(null)
+  const [isContinuingAsGuest, setIsContinuingAsGuest] = useState(false)
   const current = MODES[mode]
 
   function switchMode() {
@@ -59,6 +61,18 @@ export function LandingPage({ onSignedIn }: LandingPageProps) {
     setIsSubmitting(false)
     setFieldErrors(result.fieldErrors)
     setErrorMessage(result.message)
+  }
+
+  async function handleContinueAsGuest() {
+    setIsContinuingAsGuest(true)
+    setGuestError(null)
+    const result = await continueAsGuest()
+    if (result.ok) {
+      onSignedIn(result.user)
+      return
+    }
+    setIsContinuingAsGuest(false)
+    setGuestError(result.message)
   }
 
   return (
@@ -121,6 +135,23 @@ export function LandingPage({ onSignedIn }: LandingPageProps) {
               {MODES[current.other].label}
             </button>
           </p>
+        </section>
+
+        <section aria-label="Try as Guest" className="flex w-full max-w-sm flex-col items-center gap-3 text-center">
+          <p className="text-sm text-slate-600">Or try the app first, without registering.</p>
+          <button
+            type="button"
+            onClick={() => void handleContinueAsGuest()}
+            disabled={isContinuingAsGuest}
+            className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-900 shadow-sm hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isContinuingAsGuest ? 'Continuing as Guest…' : 'Continue as Guest'}
+          </button>
+          {guestError && (
+            <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+              {guestError}
+            </p>
+          )}
         </section>
       </main>
     </div>

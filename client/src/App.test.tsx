@@ -75,9 +75,10 @@ let handleSpending: (year: number, month: number | undefined, quarter: number | 
 // The Spending of each month of the Span from `from` to `to`.
 let handleMonthlySpending: (from: Month, to: Month, includeTransfers: boolean) => Response
 // Who is signed in: signed in as a User unless a test signs out, or keeps the answer waiting.
-let currentUser: { email: string } | Response | Promise<Response>
+let currentUser: { email: string; isGuest: boolean } | Response | Promise<Response>
 let handleLogIn: PostHandler
 let handleRegister: PostHandler
+let handleContinueAsGuest: () => Response
 let handleLogOut: () => Response
 // How many antiforgery tokens the server has given. Each is new: token-1, token-2 and so on.
 let antiforgeryTokensGiven: number
@@ -87,6 +88,7 @@ const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
   }
   if (url === '/api/user/log-in' && init?.method === 'POST') return handleLogIn(JSON.parse(init.body as string))
   if (url === '/api/user/register' && init?.method === 'POST') return handleRegister(JSON.parse(init.body as string))
+  if (url === '/api/user/continue-as-guest' && init?.method === 'POST') return handleContinueAsGuest()
   if (url === '/api/user/log-out' && init?.method === 'POST') return handleLogOut()
   if (url === '/api/antiforgery-token') return Response.json({ token: `token-${++antiforgeryTokensGiven}` })
   const monthlyUrl =
@@ -182,9 +184,10 @@ beforeEach(() => {
   handleSpending = () => Response.json({ total: 0, slices: [] })
   handleMonthlySpending = (from, to) => Response.json(monthlySpending(from, to))
   categoriesServed = categories
-  currentUser = { email: 'me@example.com' }
-  handleLogIn = (body) => Response.json({ email: (body as { email: string }).email })
-  handleRegister = (body) => Response.json({ email: (body as { email: string }).email })
+  currentUser = { email: 'me@example.com', isGuest: false }
+  handleLogIn = (body) => Response.json({ email: (body as { email: string }).email, isGuest: false })
+  handleRegister = (body) => Response.json({ email: (body as { email: string }).email, isGuest: false })
+  handleContinueAsGuest = () => Response.json(guest)
   handleLogOut = () => new Response(null, { status: 204 })
   antiforgeryTokensGiven = 0
   vi.stubGlobal('fetch', fetchMock)
@@ -216,6 +219,9 @@ async function renderApp() {
 function addActions() {
   return within(screen.getByRole('group', { name: 'Ways to add transactions' }))
 }
+
+// The Guest as the API reports it.
+const guest = { email: 'guest@personligfinans.invalid', isGuest: true }
 
 const statementPdf = new File(['%PDF-1.7'], 'kontoutskrift.pdf', { type: 'application/pdf' })
 
@@ -5192,7 +5198,7 @@ describe('Signing in', () => {
     expect(screen.queryByRole('heading', { name: 'Log in' })).not.toBeInTheDocument()
     expect(screen.queryByRole('navigation')).not.toBeInTheDocument()
 
-    respond(Response.json({ email: 'me@example.com' }))
+    respond(Response.json({ email: 'me@example.com', isGuest: false }))
     expect(await screen.findByRole('navigation')).toBeInTheDocument()
   })
 
@@ -5265,6 +5271,34 @@ describe('Signing in', () => {
     expect(await screen.findByText('This email is already registered.')).toBeInTheDocument()
     expect(screen.getByText('Password must be at least 8 characters.')).toBeInTheDocument()
     expect(screen.getByLabelText(/^email/i)).toHaveValue('me@example.com')
+    expect(screen.queryByRole('navigation')).not.toBeInTheDocument()
+  })
+
+  it('continues as the Guest and shows the app, signed in as Guest', async () => {
+    currentUser = signedOut()
+    const user = userEvent.setup()
+    render(<App />)
+    await landingPage()
+
+    await user.click(screen.getByRole('button', { name: 'Continue as Guest' }))
+
+    expect(await screen.findByRole('navigation')).toBeInTheDocument()
+    const continueAsGuest = fetchMock.mock.calls.find(([url]) => url === '/api/user/continue-as-guest')
+    expect(continueAsGuest?.[1]?.headers).toEqual({ 'Content-Type': 'application/json' })
+    await user.click(screen.getByRole('button', { name: 'User' }))
+    expect(screen.getByText(/signed in as/i)).toHaveTextContent('Signed in as Guest')
+  })
+
+  it('stays on the landing page, saying so, when continuing as the Guest fails', async () => {
+    currentUser = signedOut()
+    handleContinueAsGuest = () => new Response(null, { status: 500 })
+    const user = userEvent.setup()
+    render(<App />)
+    await landingPage()
+
+    await user.click(screen.getByRole('button', { name: 'Continue as Guest' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Continuing as Guest failed (500).')
     expect(screen.queryByRole('navigation')).not.toBeInTheDocument()
   })
 
@@ -5357,6 +5391,43 @@ describe('User menu', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Logging out failed. Try again.')
     expect(screen.getByRole('navigation')).toBeInTheDocument()
+  })
+})
+
+describe('Guest notice', () => {
+  function guestNotice() {
+    return screen.queryByRole('note', { name: 'Guest' })
+  }
+
+  it('tells the Guest that the Guest is shared, on every page', async () => {
+    currentUser = guest
+    const user = userEvent.setup()
+    await renderApp()
+
+    expect(guestNotice()).toHaveTextContent('anyone can see and change what you enter')
+    await user.click(screen.getByRole('button', { name: 'Rules' }))
+    expect(guestNotice()).toBeInTheDocument()
+  })
+
+  it('is not shown to a registered User', async () => {
+    await renderApp()
+
+    expect(guestNotice()).not.toBeInTheDocument()
+  })
+
+  it('goes with the Guest when the Guest logs out and a User logs in', async () => {
+    currentUser = guest
+    const user = userEvent.setup()
+    await renderApp()
+
+    await user.click(screen.getByRole('button', { name: 'User' }))
+    await user.click(screen.getByRole('button', { name: 'Log out' }))
+    await user.type(await screen.findByLabelText(/^email/i), 'me@example.com')
+    await user.type(screen.getByLabelText(/^password/i), 'my long passphrase')
+    await user.click(screen.getByRole('button', { name: 'Log in' }))
+    await screen.findByRole('navigation')
+
+    expect(guestNotice()).not.toBeInTheDocument()
   })
 })
 

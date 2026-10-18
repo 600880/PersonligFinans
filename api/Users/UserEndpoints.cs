@@ -8,8 +8,11 @@ namespace PersonligFinans.Api.Users;
 
 public record CredentialsRequest(string? Email, string? Password);
 
-// The signed-in User, by the email they registered with.
-public record UserResponse(string Email);
+// The signed-in User, by their email, and whether they are the Guest.
+public record UserResponse(string Email, bool IsGuest)
+{
+    public static UserResponse Of(string email) => new(email, Guest.Is(email));
+}
 
 public static class UserEndpoints
 {
@@ -18,18 +21,20 @@ public static class UserEndpoints
 
     private const string EmailTaken = "This email is already registered.";
 
+
     public static void MapUserEndpoints(this IEndpointRouteBuilder app)
     {
         var api = app.MapGroup("/api/user");
 
         // Who is signed in. Signed out, the fallback policy answers 401 before this runs, which is
         // how the client knows to show its landing page.
-        api.MapGet("/", (ClaimsPrincipal user) => Results.Ok(new UserResponse(user.Identity!.Name!)));
+        api.MapGet("/", (ClaimsPrincipal user) => Results.Ok(UserResponse.Of(user.Identity!.Name!)));
 
-        // Registering, logging in and logging out are for anyone; logging out when signed out does
-        // nothing.
+        // Registering, logging in, continuing as the Guest and logging out are for anyone; logging
+        // out when signed out does nothing.
         api.MapPost("/register", Register).AllowAnonymous();
         api.MapPost("/log-in", LogIn).AllowAnonymous();
+        api.MapPost("/continue-as-guest", ContinueAsGuest).AllowAnonymous();
         api.MapPost("/log-out", LogOut).AllowAnonymous();
     }
 
@@ -59,16 +64,18 @@ public static class UserEndpoints
             identityErrors.AddRange((await validator.ValidateAsync(userManager, user)).Errors);
         foreach (var validator in userManager.PasswordValidators)
             identityErrors.AddRange((await validator.ValidateAsync(userManager, user, password)).Errors);
-        if (identityErrors.Count > 0)
-            return Results.ValidationProblem(FieldErrors(identityErrors));
+        var fieldErrors = FieldErrors(identityErrors);
+        // The Guest's email, which is taken, and any other on its domain, which is kept for the
+        // Guest.
+        if (Guest.IsReserved(email))
+            fieldErrors["email"] = ["This email can't be registered."];
+        if (fieldErrors.Count > 0)
+            return Results.ValidationProblem(fieldErrors);
 
-        // Identity's store saves through the same context, so the User and their seeds are created
-        // together or not at all.
-        await using var transaction = await db.Database.BeginTransactionAsync();
         IdentityResult result;
         try
         {
-            result = await userManager.CreateAsync(user, password);
+            result = await NewUser.CreateAsync(userManager, db, user, password);
         }
         // The email was registered concurrently, between validation and now.
         catch (DbUpdateException e) when (e.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
@@ -78,23 +85,23 @@ public static class UserEndpoints
         if (!result.Succeeded)
             return Results.ValidationProblem(FieldErrors(result.Errors));
 
-        Seeds.AddTo(db, user.Id);
-        await db.SaveChangesAsync();
-        await transaction.CommitAsync();
-
         await signInManager.SignInAsync(user, isPersistent: true);
-        return Results.Ok(new UserResponse(email));
+        return Results.Ok(UserResponse.Of(email));
     }
 
     // Signs in with an email and password. A wrong email and a wrong password get the same answer, so
     // nobody can find out which emails are registered. Every failure counts towards locking the
     // email, and a locked email is refused, even with the right password, until the lockout ends.
+    // The Guest has no password and is never tried, so its failures never count and it is never
+    // locked.
     private static async Task<IResult> LogIn(
         CredentialsRequest request, UserManager<IdentityUser> userManager, SignInManager<IdentityUser> signInManager)
     {
         var (email, password, errors) = ValidateRequired(request);
         if (errors.Count > 0)
             return Results.ValidationProblem(errors);
+        if (Guest.IsReserved(email))
+            return WrongEmailOrPassword();
 
         var result = await signInManager.PasswordSignInAsync(email, password, isPersistent: true, lockoutOnFailure: true);
         if (result.IsLockedOut)
@@ -102,14 +109,30 @@ public static class UserEndpoints
                 detail: "Too many failed log-ins, so this email is locked for a few minutes. Try again later.",
                 statusCode: StatusCodes.Status429TooManyRequests);
         if (!result.Succeeded)
-            return Results.Problem(
-                detail: "Wrong email or password.",
-                statusCode: StatusCodes.Status401Unauthorized);
+            return WrongEmailOrPassword();
 
         // The email as registered, whatever its case when logging in.
         var user = await userManager.FindByNameAsync(email);
-        return Results.Ok(new UserResponse(user!.Email!));
+        return Results.Ok(UserResponse.Of(user!.Email!));
     }
+
+    // Signs in as the Guest, which the app created at start-up, for as long as any other sign-in.
+    // Like logging in and registering, it takes only JSON, which another site's form can't send, so
+    // no other site can sign its visitors in as the Guest.
+    private static async Task<IResult> ContinueAsGuest(
+        HttpRequest request, UserManager<IdentityUser> userManager, SignInManager<IdentityUser> signInManager)
+    {
+        if (!request.HasJsonContentType())
+            return Results.StatusCode(StatusCodes.Status415UnsupportedMediaType);
+
+        var guest = await userManager.FindByNameAsync(Guest.Email)
+            ?? throw new InvalidOperationException("The Guest doesn't exist; the app creates it at start-up.");
+        await signInManager.SignInAsync(guest, isPersistent: true);
+        return Results.Ok(UserResponse.Of(guest.Email!));
+    }
+
+    private static IResult WrongEmailOrPassword() =>
+        Results.Problem(detail: "Wrong email or password.", statusCode: StatusCodes.Status401Unauthorized);
 
     private static async Task<IResult> LogOut(SignInManager<IdentityUser> signInManager)
     {
