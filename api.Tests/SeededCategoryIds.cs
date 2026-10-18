@@ -4,7 +4,7 @@ using PersonligFinans.Api.Data;
 
 namespace PersonligFinans.Api.Tests;
 
-// Finds the seeded Categories' ids by name, through the categories endpoint like the client does.
+// Finds the seeded Categories' ids by name, through the categories endpoint, as the web app does.
 // The tests never rely on the ids being fixed, since they differ per User once each User has a
 // copy of the seeds of their own.
 public static class SeededCategoryIds

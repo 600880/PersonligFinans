@@ -20,8 +20,8 @@ public class ReceiptEndpointsTests : IAsyncLifetime
     // Signed in as a User of its own, registered for each test.
     private HttpClient _client = null!;
 
-    private int _groceriesId;
-    private int _restaurantsId;
+    private int _groceriesCategoryId;
+    private int _restaurantsCategoryId;
 
     // The tests share one database, so the tests that add rules put a token of their own in each
     // keyword and merchant name.
@@ -36,8 +36,8 @@ public class ReceiptEndpointsTests : IAsyncLifetime
     {
         _client = await _factory.CreateSignedInClientAsync();
         var seeded = await _client.SeededCategoryIdsByName();
-        _groceriesId = seeded["Groceries"];
-        _restaurantsId = seeded["Restaurants"];
+        _groceriesCategoryId = seeded["Groceries"];
+        _restaurantsCategoryId = seeded["Restaurants"];
     }
 
     public Task DisposeAsync() => Task.CompletedTask;
@@ -206,7 +206,7 @@ public class ReceiptEndpointsTests : IAsyncLifetime
     [Fact]
     public async Task Post_ReadReceipt_SuggestsItsDateDescriptionAndAmountWithTheCategoryOfAMatchingRule()
     {
-        await AddRule($"{_token} kafé", _restaurantsId);
+        await AddRule($"{_token} kafé", _restaurantsCategoryId);
 
         var suggestion = await SuggestionFrom(ReaderReading(
             purchaseDate: new DateOnly(2026, 10, 12),
@@ -215,7 +215,7 @@ public class ReceiptEndpointsTests : IAsyncLifetime
             categoryName: "Groceries"));
 
         Assert.Equal(
-            new ReceiptSuggestion(ReceiptOutcome.Read, new DateOnly(2026, 10, 12), $"{_token} Kafé Sentrum", -249.90m, _restaurantsId),
+            new ReceiptSuggestion(ReceiptOutcome.Read, new DateOnly(2026, 10, 12), $"{_token} Kafé Sentrum", -249.90m, _restaurantsCategoryId),
             suggestion);
     }
 
@@ -224,7 +224,7 @@ public class ReceiptEndpointsTests : IAsyncLifetime
     {
         var suggestion = await SuggestionFrom(ReaderReading(merchantName: $"{_token} Torghandel", total: 89m, categoryName: "Groceries"));
 
-        Assert.Equal(_groceriesId, suggestion.CategoryId);
+        Assert.Equal(_groceriesCategoryId, suggestion.CategoryId);
     }
 
     [Fact]
@@ -232,7 +232,7 @@ public class ReceiptEndpointsTests : IAsyncLifetime
     {
         var suggestion = await SuggestionFrom(ReaderReading(merchantName: $"{_token} Torghandel", total: 89m, categoryName: "groceries"));
 
-        Assert.Equal(_groceriesId, suggestion.CategoryId);
+        Assert.Equal(_groceriesCategoryId, suggestion.CategoryId);
     }
 
     [Fact]
@@ -249,7 +249,7 @@ public class ReceiptEndpointsTests : IAsyncLifetime
         var suggestion = await SuggestionFrom(ReaderReading(total: 89m, categoryName: "Groceries"));
 
         Assert.Null(suggestion.Description);
-        Assert.Equal(_groceriesId, suggestion.CategoryId);
+        Assert.Equal(_groceriesCategoryId, suggestion.CategoryId);
     }
 
     [Fact]
@@ -283,7 +283,7 @@ public class ReceiptEndpointsTests : IAsyncLifetime
             categoryName: "Restaurants"));
 
         Assert.Equal(
-            new ReceiptSuggestion(ReceiptOutcome.Read, new DateOnly(2026, 7, 3), $"{_token} Café de Paris", null, _restaurantsId),
+            new ReceiptSuggestion(ReceiptOutcome.Read, new DateOnly(2026, 7, 3), $"{_token} Café de Paris", null, _restaurantsCategoryId),
             suggestion);
     }
 
@@ -336,11 +336,11 @@ public class ReceiptEndpointsTests : IAsyncLifetime
     [Fact]
     public async Task Post_ReadReceiptWithAPaymentChannel_SuggestsTheCategoryOfTheRuleMatchingTheMerchant()
     {
-        await AddRule($"{_token} kiosk", _restaurantsId);
+        await AddRule($"{_token} kiosk", _restaurantsCategoryId);
 
         var suggestion = await SuggestionFrom(ReaderReading(merchantName: $"Vipps*{_token} Kiosk", total: 35m, categoryName: "Other"));
 
-        Assert.Equal(_restaurantsId, suggestion.CategoryId);
+        Assert.Equal(_restaurantsCategoryId, suggestion.CategoryId);
     }
 
     [Fact]
@@ -407,7 +407,7 @@ public class ReceiptEndpointsTests : IAsyncLifetime
     [Fact]
     public async Task Post_ReadReceipt_LeavesTransactionsAndCategorizationRulesUnchanged()
     {
-        await AddRule($"{_token} kafé", _restaurantsId);
+        await AddRule($"{_token} kafé", _restaurantsCategoryId);
         var before = await Stored();
 
         await SuggestionFrom(ReaderReading(merchantName: $"{_token} Kafé", total: 249.90m, categoryName: "Groceries"));
