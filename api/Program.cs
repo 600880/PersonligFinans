@@ -12,6 +12,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddDatabase(builder.Configuration);
 builder.Services.AddRuleGenerator(builder.Configuration);
 builder.Services.AddUsers();
+builder.Services.AddAntiforgeryTokens();
 
 var app = builder.Build();
 
@@ -28,9 +29,12 @@ app.UseStaticFiles();
 // Every endpoint then requires signing in unless it allows anonymous access.
 app.UseAuthentication();
 app.UseAuthorization();
+// After signing in is checked, since a token is bound to the signed-in User.
+app.UseAntiforgery();
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok" })).AllowAnonymous();
 app.MapUserEndpoints();
+app.MapAntiforgeryTokenEndpoint();
 app.MapTransactionEndpoints();
 app.MapCategoryEndpoints();
 app.MapBankStatementEndpoints();

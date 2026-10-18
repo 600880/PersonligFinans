@@ -79,6 +79,8 @@ let currentUser: { email: string } | Response | Promise<Response>
 let handleLogIn: PostHandler
 let handleRegister: PostHandler
 let handleLogOut: () => Response
+// How many antiforgery tokens the server has given. Each is new: token-1, token-2 and so on.
+let antiforgeryTokensGiven: number
 const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
   if (url === '/api/user') {
     return currentUser instanceof Response || currentUser instanceof Promise ? currentUser : Response.json(currentUser)
@@ -86,6 +88,7 @@ const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
   if (url === '/api/user/log-in' && init?.method === 'POST') return handleLogIn(JSON.parse(init.body as string))
   if (url === '/api/user/register' && init?.method === 'POST') return handleRegister(JSON.parse(init.body as string))
   if (url === '/api/user/log-out' && init?.method === 'POST') return handleLogOut()
+  if (url === '/api/antiforgery-token') return Response.json({ token: `token-${++antiforgeryTokensGiven}` })
   const monthlyUrl =
     /^\/api\/spending\/monthly\?fromYear=(\d+)&fromMonth=(\d+)&toYear=(\d+)&toMonth=(\d+)(&includeTransfers=true)?$/.exec(url)
   if (monthlyUrl) {
@@ -183,6 +186,7 @@ beforeEach(() => {
   handleLogIn = (body) => Response.json({ email: (body as { email: string }).email })
   handleRegister = (body) => Response.json({ email: (body as { email: string }).email })
   handleLogOut = () => new Response(null, { status: 204 })
+  antiforgeryTokensGiven = 0
   vi.stubGlobal('fetch', fetchMock)
 })
 
@@ -4461,12 +4465,15 @@ describe('Scan receipts', () => {
 
   // The file of each read-a-Receipt request, in the order they were sent.
   let readRequests: (FormDataEntryValue | null)[]
+  // The antiforgery token sent with each read-a-Receipt request, in the order they were sent.
+  let readTokens: (string | undefined)[]
   let handleReadReceipt: (body: FormData) => Response | Promise<Response>
   // The preview URLs released so far. Each is named after its Receipt's file.
   let releasedUrls: string[]
 
   beforeEach(() => {
     readRequests = []
+    readTokens = []
     handleReadReceipt = () => Response.json(unavailable)
     releasedUrls = []
     vi.stubGlobal(
@@ -4475,6 +4482,7 @@ describe('Scan receipts', () => {
         if (url === '/api/receipts/read' && init?.method === 'POST') {
           const body = init.body as FormData
           readRequests.push(body.get('file'))
+          readTokens.push((init.headers as Record<string, string> | undefined)?.['X-CSRF-TOKEN'])
           return handleReadReceipt(body)
         }
         return fetchMock(url, init)
@@ -4558,6 +4566,13 @@ describe('Scan receipts', () => {
 
     await waitFor(() => expect(readRequests).toEqual([kiwi, rema, narvesen]))
     expect(screen.getByRole('dialog', { name: 'Receipt 1 of 3' })).toBeInTheDocument()
+  })
+
+  it('sends the antiforgery token with every Receipt, fetching it once for them all', async () => {
+    await scan([kiwi, rema, narvesen])
+
+    await waitFor(() => expect(readTokens).toEqual(['token-1', 'token-1', 'token-1']))
+    expect(antiforgeryTokensGiven).toBe(1)
   })
 
   it('saves the entered values as a manually-entered Transaction and moves on to the next Receipt', async () => {
@@ -5364,5 +5379,68 @@ describe('Signed out mid-session', () => {
     await screen.findByRole('navigation')
     expect(screen.getByRole('button', { name: 'Categories' })).not.toHaveAttribute('aria-current')
     expect(screen.getByRole('button', { name: 'Add transaction' })).toBeVisible()
+  })
+})
+
+describe('Antiforgery token', () => {
+  // The antiforgery token sent with each request to the URL, in the order they were sent.
+  function tokensSentTo(url: string) {
+    return fetchMock.mock.calls
+      .filter(([calledUrl]) => calledUrl === url)
+      .map(([, init]) => (init?.headers as Record<string, string> | undefined)?.['X-CSRF-TOKEN'])
+  }
+
+  it('is fetched after signing in and sent with each Bank Statement of an Upload', async () => {
+    const user = userEvent.setup()
+    await renderApp()
+    expect(fetchMock).not.toHaveBeenCalledWith('/api/antiforgery-token', undefined)
+
+    await user.upload(screen.getByLabelText(/bank statement pdf/i), [statementPdf, statementPdf])
+
+    await screen.findByRole('status')
+    expect(tokensSentTo('/api/bank-statements')).toEqual(['token-1', 'token-1'])
+    expect(antiforgeryTokensGiven).toBe(1)
+  })
+
+  it('is fetched afresh, and the Upload sent once more, when the server refuses it', async () => {
+    let uploads = 0
+    handleUpload = () =>
+      ++uploads === 1 ? new Response(null, { status: 403 }) : Response.json(importedStatement, { status: 201 })
+    const user = userEvent.setup()
+    await renderApp()
+
+    await user.upload(screen.getByLabelText(/bank statement pdf/i), statementPdf)
+
+    expect(await screen.findByRole('status')).toHaveTextContent('Imported 38 transactions')
+    expect(tokensSentTo('/api/bank-statements')).toEqual(['token-1', 'token-2'])
+  })
+
+  it('sends the Upload only once more when the fresh token is refused too', async () => {
+    handleUpload = () => new Response(null, { status: 403 })
+    const user = userEvent.setup()
+    await renderApp()
+
+    await user.upload(screen.getByLabelText(/bank statement pdf/i), statementPdf)
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Upload failed (403).')
+    expect(tokensSentTo('/api/bank-statements')).toEqual(['token-1', 'token-2'])
+  })
+
+  it('is fetched afresh for the User who signs in next', async () => {
+    const user = userEvent.setup()
+    await renderApp()
+    await user.upload(screen.getByLabelText(/bank statement pdf/i), statementPdf)
+    await screen.findByRole('status')
+
+    await user.click(screen.getByRole('button', { name: 'User' }))
+    await user.click(screen.getByRole('button', { name: 'Log out' }))
+    await user.type(await screen.findByLabelText(/^email/i), 'other@example.com')
+    await user.type(screen.getByLabelText(/^password/i), 'my long passphrase')
+    await user.click(screen.getByRole('button', { name: 'Log in' }))
+    await screen.findByRole('navigation')
+    await user.upload(screen.getByLabelText(/bank statement pdf/i), statementPdf)
+    await screen.findByRole('status')
+
+    expect(tokensSentTo('/api/bank-statements')).toEqual(['token-1', 'token-2'])
   })
 })

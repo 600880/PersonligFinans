@@ -14,8 +14,49 @@ export function setSignedOutHandler(handler: (() => void) | null) {
 // itself, since the API has the same origin as the app.
 async function apiFetch(input: string, init?: RequestInit): Promise<Response> {
   const response = await fetch(input, init)
-  if (response.status === 401) handleSignedOut?.()
+  if (response.status === 401) {
+    forgetAntiforgeryToken()
+    handleSignedOut?.()
+  }
   return response
+}
+
+// The header the uploads send the antiforgery token in.
+const ANTIFORGERY_HEADER = 'X-CSRF-TOKEN'
+
+// The antiforgery token the uploads send, fetched at the first upload after signing in, since the
+// server binds it to the signed-in User. null until then, and again whenever who is signed in may
+// have changed.
+let antiforgeryToken: Promise<string> | null = null
+
+function forgetAntiforgeryToken() {
+  antiforgeryToken = null
+}
+
+function currentAntiforgeryToken(): Promise<string> {
+  antiforgeryToken ??= (async () => {
+    const response = await apiFetch('/api/antiforgery-token')
+    if (!response.ok) throw new Error(`Loading the antiforgery token failed (${response.status})`)
+    return ((await response.json()) as { token: string }).token
+  })().catch((error: unknown) => {
+    // A failed fetch is tried again at the next upload rather than kept.
+    forgetAntiforgeryToken()
+    throw error
+  })
+  return antiforgeryToken
+}
+
+// Posts a multipart form, which the server only accepts with the antiforgery token. A token it
+// refuses (403), for example one given before the server's keys changed, is replaced by a fresh one
+// and the form sent once more.
+async function postForm(url: string, body: FormData): Promise<Response> {
+  const send = async () =>
+    apiFetch(url, { method: 'POST', headers: { [ANTIFORGERY_HEADER]: await currentAntiforgeryToken() }, body })
+
+  const response = await send()
+  if (response.status !== 403) return response
+  forgetAntiforgeryToken()
+  return send()
 }
 
 // The problem a request was refused with: the first message for each field of a validation problem,
@@ -41,6 +82,7 @@ export interface User {
 
 // Who is signed in, or null when nobody is.
 export async function fetchCurrentUser(): Promise<User | null> {
+  forgetAntiforgeryToken()
   const response = await fetch('/api/user')
   if (response.status === 401) return null
   if (!response.ok) throw new Error(`Loading who is signed in failed (${response.status})`)
@@ -87,7 +129,10 @@ async function submitCredentials(
     return { ok: false, fieldErrors: {}, message: 'Could not reach the server.' }
   }
 
-  if (response.ok) return { ok: true, user: (await response.json()) as User }
+  if (response.ok) {
+    forgetAntiforgeryToken()
+    return { ok: true, user: (await response.json()) as User }
+  }
 
   // 400 is a validation problem keyed on the fields. 401 is a wrong email or password, and 429 a
   // locked email: problems whose detail says which.
@@ -104,6 +149,7 @@ async function submitCredentials(
 export async function logOut(): Promise<boolean> {
   try {
     const response = await fetch('/api/user/log-out', { method: 'POST' })
+    if (response.ok) forgetAntiforgeryToken()
     return response.ok
   } catch {
     return false
@@ -431,7 +477,7 @@ export async function uploadBankStatement(file: File, uploadId: string): Promise
 
   let response: Response
   try {
-    response = await apiFetch('/api/bank-statements', { method: 'POST', body })
+    response = await postForm('/api/bank-statements', body)
   } catch {
     return { ok: false, message: 'Could not reach the server.' }
   }
@@ -477,7 +523,7 @@ export async function readReceipt(file: File): Promise<ReceiptSuggestion> {
   body.append('file', file)
 
   try {
-    const response = await apiFetch('/api/receipts/read', { method: 'POST', body })
+    const response = await postForm('/api/receipts/read', body)
     if (!response.ok) return UNREADABLE
     return (await response.json()) as ReceiptSuggestion
   } catch {

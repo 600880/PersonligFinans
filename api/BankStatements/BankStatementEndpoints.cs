@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Npgsql;
 using PersonligFinans.Api.CategorizationRules;
 using PersonligFinans.Api.Data;
+using PersonligFinans.Api.Users;
 
 namespace PersonligFinans.Api.BankStatements;
 
@@ -23,8 +24,7 @@ public static class BankStatementEndpoints
     {
         var api = app.MapGroup("/api");
 
-        // A JSON API without cookie auth, so there is no forgery risk to guard the upload against.
-        api.MapPost("/bank-statements", ImportBankStatement).DisableAntiforgery();
+        api.MapPost("/bank-statements", ImportBankStatement).RequireAntiforgeryToken();
     }
 
     // The form is read by hand rather than bound to an IFormFile, so that a missing or oversized

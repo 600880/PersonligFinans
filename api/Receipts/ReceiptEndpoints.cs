@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using PersonligFinans.Api.BankStatements;
 using PersonligFinans.Api.CategorizationRules;
 using PersonligFinans.Api.Data;
+using PersonligFinans.Api.Users;
 
 namespace PersonligFinans.Api.Receipts;
 
@@ -45,8 +46,7 @@ public static class ReceiptEndpoints
     {
         var api = app.MapGroup("/api");
 
-        // A JSON API without cookie auth, so there is no forgery risk to guard the form against.
-        api.MapPost("/receipts/read", ReadReceipt).DisableAntiforgery();
+        api.MapPost("/receipts/read", ReadReceipt).RequireAntiforgeryToken();
     }
 
     // Suggests a manually-entered Transaction from one Receipt's image. The form is read by hand
