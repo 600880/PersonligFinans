@@ -5314,6 +5314,24 @@ describe('User menu', () => {
     expect(screen.getByRole('button', { name: 'Add transaction' })).toBeVisible()
   })
 
+  it('sends none of the remaining Bank Statements of an Upload after logging out', async () => {
+    const responders: ((response: Response) => void)[] = []
+    handleUpload = () => new Promise((resolve) => responders.push(resolve))
+    const user = userEvent.setup()
+    await renderApp()
+
+    await user.upload(screen.getByLabelText(/bank statement pdf/i), [statementPdf, statementPdf])
+    await waitFor(() => expect(responders).toHaveLength(1))
+    await user.click(userButton())
+    await user.click(screen.getByRole('button', { name: 'Log out' }))
+    await screen.findByRole('heading', { name: 'Log in' })
+
+    responders[0](Response.json(importedStatement, { status: 201 }))
+    // Lets the finished upload's continuation run, which would send the next one.
+    await act(async () => {})
+    expect(responders).toHaveLength(1)
+  })
+
   it('stays signed in, saying so, when logging out fails', async () => {
     handleLogOut = () => new Response(null, { status: 500 })
     const user = userEvent.setup()

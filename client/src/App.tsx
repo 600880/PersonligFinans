@@ -116,6 +116,15 @@ function SignedInApp({ user, onLoggedOut }: SignedInAppProps) {
   const headerRef = useRef<HTMLElement>(null)
   const addMenuRef = useRef<HTMLDivElement>(null)
   const userMenuRef = useRef<HTMLDivElement>(null)
+  // Set once the User has signed out and the app is gone, so an Upload under way sends none of its
+  // remaining Bank Statements, which would otherwise go to whoever signs in next.
+  const hasSignedOutRef = useRef(false)
+  useEffect(() => {
+    hasSignedOutRef.current = false
+    return () => {
+      hasSignedOutRef.current = true
+    }
+  }, [])
   const closeNav = useCallback(() => setIsNavOpen(false), [])
   const closeAddMenu = useCallback(() => setIsAddMenuOpen(false), [])
   const closeUserMenu = useCallback(() => setIsUserMenuOpen(false), [])
@@ -176,6 +185,7 @@ function SignedInApp({ user, onLoggedOut }: SignedInAppProps) {
     const rejected: Rejection[] = []
     try {
       for (const [index, file] of files.entries()) {
+        if (hasSignedOutRef.current) return
         const result = await uploadBankStatement(file, uploadId)
         if (result.ok) {
           imported.push(result.statement)
