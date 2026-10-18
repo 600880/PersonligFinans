@@ -510,30 +510,42 @@ function scanSummary(saved: number) {
   return `${saved} transaction${saved === 1 ? '' : 's'} saved`
 }
 
+// The Daily AI limit resets at midnight Norwegian time.
+const DAILY_AI_LIMIT_REACHED = 'Daily AI limit reached until midnight Norwegian time'
+
 // One imported Bank Statement is described by its period; several by their sums.
 function importSummary(statements: ImportedBankStatement[]) {
   if (statements.length > 1) {
     const transactions = statements.reduce((sum, statement) => sum + statement.transactionCount, 0)
     const uncategorized = statements.reduce((sum, statement) => sum + statement.uncategorizedCount, 0)
     const aiUnavailable = statements.filter((statement) => statement.aiCategorizationUnavailable).length
+    const limitReached = statements.filter((statement) => statement.dailyAiLimitReached).length
     return (
       `Imported ${statements.length} Bank Statements, ${transactions} transactions: ` +
       `${transactions - uncategorized} categorized, ${uncategorized} Uncategorized` +
-      (aiUnavailable > 0
-        ? `. AI categorization unavailable for ${aiUnavailable} Bank Statement${aiUnavailable === 1 ? '' : 's'}`
-        : '')
+      (aiUnavailable > 0 ? `. AI categorization unavailable for ${countedBankStatements(aiUnavailable)}` : '') +
+      (limitReached > 0 ? `. ${DAILY_AI_LIMIT_REACHED} for ${countedBankStatements(limitReached)}` : '')
     )
   }
 
-  const { transactionCount, uncategorizedCount, aiCategorizationUnavailable, periodStart, periodEnd } = statements[0]
+  const { transactionCount, uncategorizedCount, periodStart, periodEnd } = statements[0]
+  // Why the unmatched rows got no AI-generated rules, when the LLM was meant to propose some.
+  const noAiRulesReason = statements[0].aiCategorizationUnavailable
+    ? 'AI categorization unavailable'
+    : statements[0].dailyAiLimitReached
+      ? DAILY_AI_LIMIT_REACHED
+      : null
   return (
     `Imported ${transactionCount} transactions from statement ` +
     `${formatNorwegianDate(periodStart)}–${formatNorwegianDate(periodEnd)}: ` +
     `${transactionCount - uncategorizedCount} categorized, ${uncategorizedCount} Uncategorized` +
-    (aiCategorizationUnavailable
-      ? `. AI categorization unavailable — ${uncategorizedCount} rows left Uncategorized`
-      : '')
+    (noAiRulesReason ? `. ${noAiRulesReason} — ${uncategorizedCount} rows left Uncategorized` : '')
   )
+}
+
+// "1 Bank Statement", "2 Bank Statements" and so on.
+function countedBankStatements(count: number) {
+  return `${count} Bank Statement${count === 1 ? '' : 's'}`
 }
 
 export default App

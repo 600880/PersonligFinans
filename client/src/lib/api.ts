@@ -474,6 +474,8 @@ export async function createTransaction(
   return { ok: false, fieldErrors: {}, message: `Saving failed (${response.status}).` }
 }
 
+// aiCategorizationUnavailable: the LLM was asked for rules for the unmatched rows but couldn't answer.
+// dailyAiLimitReached: the LLM wasn't asked, because the Daily AI limit was reached.
 export interface ImportedBankStatement {
   id: number
   accountNumber: string
@@ -482,6 +484,7 @@ export interface ImportedBankStatement {
   transactionCount: number
   uncategorizedCount: number
   aiCategorizationUnavailable: boolean
+  dailyAiLimitReached: boolean
 }
 
 export type UploadBankStatementResult =
@@ -514,8 +517,8 @@ export async function uploadBankStatement(file: File, uploadId: string): Promise
 }
 
 // read: the receipt reader read the Receipt. unreadable: it couldn't. unavailable: no receipt reader
-// is configured.
-export type ReceiptOutcome = 'read' | 'unreadable' | 'unavailable'
+// is configured. limitReached: the reader wasn't asked, because the Daily AI limit was reached.
+export type ReceiptOutcome = 'read' | 'unreadable' | 'unavailable' | 'limitReached'
 
 // What a manually-entered Transaction from one Receipt should start from. amount is signed: negative
 // for a purchase, positive for a refund. Every field is null unless the outcome is read.

@@ -4,7 +4,7 @@ using PersonligFinans.Api.Receipts;
 namespace PersonligFinans.Api.Tests;
 
 // Stands in for the LLM: answers every Receipt with what the test scripted, Unreadable unless told
-// otherwise, and remembers what it was asked.
+// otherwise, and remembers what it was asked, even when asked about several Receipts at once.
 public class FakeReceiptReader : IReceiptReader
 {
     public ReceiptReading Reading { get; init; } = new ReceiptReading.Unreadable();
@@ -13,7 +13,8 @@ public class FakeReceiptReader : IReceiptReader
 
     public Task<ReceiptReading> ReadAsync(Receipt receipt, IReadOnlyList<CategoryChoice> categories)
     {
-        Calls.Add((receipt, categories));
+        lock (Calls)
+            Calls.Add((receipt, categories));
         return Task.FromResult(Reading);
     }
 }

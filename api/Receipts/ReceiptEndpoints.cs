@@ -1,6 +1,7 @@
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using PersonligFinans.Api.AiRequests;
 using PersonligFinans.Api.BankStatements;
 using PersonligFinans.Api.CategorizationRules;
 using PersonligFinans.Api.Data;
@@ -19,6 +20,9 @@ public enum ReceiptOutcome
 
     // No receipt reader is configured.
     [JsonStringEnumMemberName("unavailable")] Unavailable,
+
+    // The Daily AI limit was reached, so the receipt reader wasn't asked.
+    [JsonStringEnumMemberName("limitReached")] LimitReached,
 }
 
 // What a manually-entered Transaction from one Receipt should start from. Amount is signed: negative
@@ -33,6 +37,8 @@ public record ReceiptSuggestion(
     public static readonly ReceiptSuggestion Unreadable = new(ReceiptOutcome.Unreadable, null, null, null, null);
 
     public static readonly ReceiptSuggestion Unavailable = new(ReceiptOutcome.Unavailable, null, null, null, null);
+
+    public static readonly ReceiptSuggestion LimitReached = new(ReceiptOutcome.LimitReached, null, null, null, null);
 }
 
 public static class ReceiptEndpoints
@@ -52,10 +58,12 @@ public static class ReceiptEndpoints
     // Suggests a manually-entered Transaction from one Receipt's image. The form is read by hand
     // rather than bound to an IFormFile, so that a missing or oversized file gets the same validation
     // problem as every other rejected file. The image is only passed to the receipt reader, never
-    // stored or logged, and nothing is written to the database.
+    // stored or logged, and nothing but the AI request is written to the database.
     // The receipt reader is optional: without one, every Receipt is answered Unavailable.
+    // Reading a Receipt is one AI request, taken once the image is accepted. Past the Daily AI limit
+    // the reader isn't asked, and the Receipt is answered LimitReached.
     private static async Task<IResult> ReadReceipt(
-        HttpRequest request, AppDbContext db, [FromServices] IReceiptReader? receiptReader)
+        HttpRequest request, AppDbContext db, AiRequestLedger ledger, [FromServices] IReceiptReader? receiptReader)
     {
         IFormFile? file;
         try
@@ -86,6 +94,9 @@ public static class ReceiptEndpoints
             await stream.CopyToAsync(bytes);
             receipt = new Receipt(bytes.ToArray(), mediaType);
         }
+
+        if (!await ledger.TryTakeAsync())
+            return Results.Ok(ReceiptSuggestion.LimitReached);
 
         // Read for each Receipt, so an edited Category description reaches the next reading.
         var categories = await db.Categories.AsNoTracking().OrderBy(c => c.Name).ToListAsync();

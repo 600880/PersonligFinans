@@ -23,6 +23,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, CurrentUser cu
     public DbSet<Transaction> Transactions => Set<Transaction>();
     public DbSet<BankStatement> BankStatements => Set<BankStatement>();
     public DbSet<CategorizationRule> CategorizationRules => Set<CategorizationRule>();
+    public DbSet<AiRequest> AiRequests => Set<AiRequest>();
 
     // The User this context works for, or null for nobody. Its queries see only that User's
     // Transactions, Bank Statements, Categories and Categorization Rules, through the query filters.
@@ -92,6 +93,19 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, CurrentUser cu
             statement.Property(s => s.ClosingBalance).HasPrecision(12, 2);
             // A User imports a Bank Statement at most once.
             statement.HasIndex(s => new { s.UserId, s.AccountNumber, s.PeriodStart, s.PeriodEnd }).IsUnique();
+        });
+
+        // Not owned like the rows above: the AI request ledger counts every User's AI requests
+        // towards the global cap, so there is no query filter, and nothing shows them to a User.
+        // They are only ever counted, by User and by time, within one day.
+        modelBuilder.Entity<AiRequest>(request =>
+        {
+            request.HasOne<IdentityUser>()
+                .WithMany()
+                .HasForeignKey(r => r.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+            request.HasIndex(r => new { r.UserId, r.MadeAt });
+            request.HasIndex(r => r.MadeAt);
         });
     }
 

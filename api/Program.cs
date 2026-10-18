@@ -1,3 +1,4 @@
+using PersonligFinans.Api.AiRequests;
 using PersonligFinans.Api.BankStatements;
 using PersonligFinans.Api.Categories;
 using PersonligFinans.Api.CategorizationRules;
@@ -13,6 +14,9 @@ builder.Services.AddDatabase(builder.Configuration);
 builder.Services.AddRuleGenerator(builder.Configuration);
 builder.Services.AddUsers();
 builder.Services.AddAntiforgeryTokens();
+builder.Services.AddAiRequestLedger(builder.Configuration);
+// The clock, which the tests replace.
+builder.Services.AddSingleton(TimeProvider.System);
 
 var app = builder.Build();
 

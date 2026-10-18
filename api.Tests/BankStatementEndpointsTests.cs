@@ -302,27 +302,12 @@ public class BankStatementEndpointsTests : IAsyncLifetime
         Assert.Equal(["Choose a PDF file to upload."], await FileErrors(response));
     }
 
-    private static string UniqueAccountNumber()
-    {
-        var digits = Random.Shared.NextInt64(0, 100_000_000_000).ToString("D11");
-        return $"{digits[..4]}.{digits[4..6]}.{digits[6..]}";
-    }
-
     private async Task<int> AddRule(string keyword, int categoryId)
     {
         var response = await _client.PostAsJsonAsync("/api/categorization-rules", new { keyword, categoryId });
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         return (await response.Content.ReadFromJsonAsync<SavedCategorizationRuleResponse>())!.Id;
     }
-
-    // Each row is a purchase of 10,00 from the given merchant, from an opening balance of 1.000,00.
-    private static byte[] StatementWithPurchasesFrom(params string[] merchants) =>
-        StatementPdf.Create(
-            UniqueAccountNumber(),
-            period: "01.08.2026 - 31.08.2026",
-            openingBalance: "1.000,00",
-            rows: merchants.Select(m => new StatementPdfRow($"Varer 03.08 {m}", "0408", "10,00", null, "0408", "21", "12345678")),
-            closingBalance: $"{1000 - 10 * merchants.Length},00");
 
     private async Task<List<Transaction>> StoredTransactions(int statementId)
     {
@@ -339,7 +324,7 @@ public class BankStatementEndpointsTests : IAsyncLifetime
     {
         var ruleId = await AddRule("butikk", _seeded.Groceries);
 
-        var response = await Upload(StatementWithPurchasesFrom("Butikk Sentrum", "Kafé"));
+        var response = await Upload(StatementPdf.WithPurchasesFrom("Butikk Sentrum", "Kafé"));
 
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         var created = await response.Content.ReadFromJsonAsync<BankStatementResponse>();
@@ -353,7 +338,7 @@ public class BankStatementEndpointsTests : IAsyncLifetime
     public async Task Post_PaymentToABareAccountNumber_IsCategorizedAsTransfersBySeededRule()
     {
         var pdf = StatementPdf.Create(
-            UniqueAccountNumber(),
+            StatementPdf.UniqueAccountNumber(),
             period: "01.08.2026 - 31.08.2026",
             openingBalance: "1.000,00",
             rows: [new("Til: 9999.88.77777 Betalt: 13.08.26", "1308", "100,00", null, "1308", "21", "12345678")],
@@ -368,7 +353,7 @@ public class BankStatementEndpointsTests : IAsyncLifetime
     [Fact]
     public async Task Post_Statement_SeededRulesCategorizeClothingAndElectronics()
     {
-        var response = await Upload(StatementWithPurchasesFrom("Cubus Bergen Storsenter", "Komplett.no"));
+        var response = await Upload(StatementPdf.WithPurchasesFrom("Cubus Bergen Storsenter", "Komplett.no"));
 
         var created = await Created(response);
         Assert.Equal(
@@ -382,7 +367,7 @@ public class BankStatementEndpointsTests : IAsyncLifetime
         await AddRule("butikk", _seeded.Groceries);
         var longerRuleId = await AddRule("butikk kafé", _seeded.Restaurants);
 
-        var response = await Upload(StatementWithPurchasesFrom("BUTIKK KAFÉ Bryggen"));
+        var response = await Upload(StatementPdf.WithPurchasesFrom("BUTIKK KAFÉ Bryggen"));
 
         var created = await response.Content.ReadFromJsonAsync<BankStatementResponse>();
         var stored = Assert.Single(await StoredTransactions(created!.Id));
@@ -394,7 +379,7 @@ public class BankStatementEndpointsTests : IAsyncLifetime
     {
         await AddRule("butikk", _seeded.Groceries);
 
-        var response = await Upload(StatementWithPurchasesFrom(
+        var response = await Upload(StatementPdf.WithPurchasesFrom(
             "Butikk Sentrum", "Kafé", "Frisør", "Butikk Torget"));
 
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
@@ -422,7 +407,7 @@ public class BankStatementEndpointsTests : IAsyncLifetime
             .Proposing("Kafé Bryggen", "  KAFÉ ", "Restaurants");
 
         var created = await Created(await Upload(
-            StatementWithPurchasesFrom("Kafé Bryggen", "Frisør"), generator));
+            StatementPdf.WithPurchasesFrom("Kafé Bryggen", "Frisør"), generator));
 
         var rule = Assert.Single(await AddedRules());
         Assert.Equal(("kafé", _seeded.Restaurants, true), (rule.Keyword, rule.CategoryId, rule.AiGenerated));
@@ -440,7 +425,7 @@ public class BankStatementEndpointsTests : IAsyncLifetime
     {
         var generator = new FakeRuleGenerator().Proposing("Frisør", "frisør", "Other");
 
-        var created = await Created(await Upload(StatementWithPurchasesFrom("Frisør"), generator));
+        var created = await Created(await Upload(StatementPdf.WithPurchasesFrom("Frisør"), generator));
 
         var rule = Assert.Single(await AddedRules());
         Assert.Equal(("frisør", _seeded.Other, true), (rule.Keyword, rule.CategoryId, rule.AiGenerated));
@@ -456,7 +441,7 @@ public class BankStatementEndpointsTests : IAsyncLifetime
         var generator = new FakeRuleGenerator();
 
         await Created(await Upload(
-            StatementWithPurchasesFrom("Butikk Sentrum", "Kafé", "Kafé"), generator));
+            StatementPdf.WithPurchasesFrom("Butikk Sentrum", "Kafé", "Kafé"), generator));
 
         var call = Assert.Single(generator.Calls);
         Assert.Equal([new UnmatchedRow("Kafé", AmountSign.Negative)], call.Rows);
@@ -468,7 +453,7 @@ public class BankStatementEndpointsTests : IAsyncLifetime
         await AddRule("butikk", _seeded.Groceries);
         var generator = new FakeRuleGenerator();
 
-        await Created(await Upload(StatementWithPurchasesFrom("Butikk Sentrum", "Butikk Nord"), generator));
+        await Created(await Upload(StatementPdf.WithPurchasesFrom("Butikk Sentrum", "Butikk Nord"), generator));
 
         Assert.Empty(generator.Calls);
     }
@@ -477,7 +462,7 @@ public class BankStatementEndpointsTests : IAsyncLifetime
     public async Task Post_Statement_GeneratorReceivesOnlyEachRowsDescriptionAndSignAndTheCategoryNamesAndDescriptions()
     {
         var pdf = StatementPdf.Create(
-            UniqueAccountNumber(),
+            StatementPdf.UniqueAccountNumber(),
             period: "01.08.2026 - 31.08.2026",
             openingBalance: "1.000,00",
             rows:
@@ -506,7 +491,7 @@ public class BankStatementEndpointsTests : IAsyncLifetime
         await SetDescription(_seeded.Restaurants, edited);
         var generator = new FakeRuleGenerator();
 
-        await Created(await Upload(StatementWithPurchasesFrom("Kafé"), generator));
+        await Created(await Upload(StatementPdf.WithPurchasesFrom("Kafé"), generator));
 
         var call = Assert.Single(generator.Calls);
         Assert.Contains(new CategoryChoice("Restaurants", edited), call.Categories);
@@ -524,10 +509,10 @@ public class BankStatementEndpointsTests : IAsyncLifetime
     [Fact]
     public async Task Post_AiGeneratedRule_AlsoCategorizesAnUncategorizedTransactionFromAnEarlierImport()
     {
-        var earlier = await Created(await Upload(StatementWithPurchasesFrom("Kafé Nord")));
+        var earlier = await Created(await Upload(StatementPdf.WithPurchasesFrom("Kafé Nord")));
         var generator = new FakeRuleGenerator().Proposing("Kafé Sør", "kafé", "Restaurants");
 
-        await Created(await Upload(StatementWithPurchasesFrom("Kafé Sør"), generator));
+        await Created(await Upload(StatementPdf.WithPurchasesFrom("Kafé Sør"), generator));
 
         Assert.Equal(_seeded.Restaurants, Assert.Single(await StoredTransactions(earlier.Id)).CategoryId);
     }
@@ -537,7 +522,7 @@ public class BankStatementEndpointsTests : IAsyncLifetime
     // Uploads one statement of a purchase from the merchant, for which the generator proposes the
     // merchant itself as an AI-generated rule.
     private Task<HttpResponseMessage> UploadAddingRuleFor(string merchant, string uploadId) =>
-        Upload(StatementWithPurchasesFrom(merchant), new FakeRuleGenerator().Proposing(merchant, merchant, "Other"), uploadId);
+        Upload(StatementPdf.WithPurchasesFrom(merchant), new FakeRuleGenerator().Proposing(merchant, merchant, "Other"), uploadId);
 
     private async Task<Dictionary<string, bool>> IsNewByKeyword() =>
         (await AddedRules()).ToDictionary(r => r.Keyword, r => r.IsNew);
@@ -554,7 +539,7 @@ public class BankStatementEndpointsTests : IAsyncLifetime
             await IsNewByKeyword());
 
         // The next Upload adds no rules, yet replaces the marks.
-        await Created(await Upload(StatementWithPurchasesFrom("Rema 1000"), _client, NewUploadId()));
+        await Created(await Upload(StatementPdf.WithPurchasesFrom("Rema 1000"), _client, NewUploadId()));
 
         Assert.Equal(
             new Dictionary<string, bool> { ["kafé"] = false, ["frisør"] = false },
@@ -564,7 +549,7 @@ public class BankStatementEndpointsTests : IAsyncLifetime
     [Fact]
     public async Task Post_UploadWhoseBankStatementsAreAllRejected_KeepsTheNewMarks()
     {
-        var pdf = StatementWithPurchasesFrom("kafé");
+        var pdf = StatementPdf.WithPurchasesFrom("kafé");
         await Created(await Upload(pdf, new FakeRuleGenerator().Proposing("kafé", "kafé", "Other"), NewUploadId()));
 
         Assert.Equal(HttpStatusCode.Conflict, (await Upload(pdf, _client, NewUploadId())).StatusCode);
@@ -576,7 +561,7 @@ public class BankStatementEndpointsTests : IAsyncLifetime
     public async Task Post_WithoutAnUploadId_IsAnUploadOfItsOwn()
     {
         await Created(await UploadAddingRuleFor("kafé", NewUploadId()));
-        await Created(await Upload(StatementWithPurchasesFrom("Rema 1000")));
+        await Created(await Upload(StatementPdf.WithPurchasesFrom("Rema 1000")));
 
         Assert.False(Assert.Single(await AddedRules()).IsNew);
     }
@@ -584,7 +569,7 @@ public class BankStatementEndpointsTests : IAsyncLifetime
     [Fact]
     public async Task Post_WithAnInvalidUploadId_IsRejected()
     {
-        var response = await Upload(ReconcilingStatement(UniqueAccountNumber()), _client, "not-a-guid");
+        var response = await Upload(ReconcilingStatement(StatementPdf.UniqueAccountNumber()), _client, "not-a-guid");
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         var problem = await response.Content.ReadFromJsonAsync<ValidationProblemDetails>();
@@ -618,7 +603,7 @@ public class BankStatementEndpointsTests : IAsyncLifetime
         var manual = await response.Content.ReadFromJsonAsync<TransactionResponse>();
         var generator = new FakeRuleGenerator().Proposing("Kafé Sør", "kafé", "Restaurants");
 
-        await Created(await Upload(StatementWithPurchasesFrom("Kafé Sør"), generator));
+        await Created(await Upload(StatementPdf.WithPurchasesFrom("Kafé Sør"), generator));
 
         Assert.Single(await AddedRules());
         await using var user = await UserDatabase.OfAsync(_factory, _email);
@@ -633,7 +618,7 @@ public class BankStatementEndpointsTests : IAsyncLifetime
         description ??= "Kafé";
         var generator = new FakeRuleGenerator().Proposing(description, keyword, categoryName);
 
-        var created = await Created(await Upload(StatementWithPurchasesFrom(description), generator));
+        var created = await Created(await Upload(StatementPdf.WithPurchasesFrom(description), generator));
 
         var stored = Assert.Single(await StoredTransactions(created.Id));
         Assert.Equal((null, null), (stored.CategoryId, stored.CategorizationRuleId));
@@ -684,11 +669,11 @@ public class BankStatementEndpointsTests : IAsyncLifetime
     public async Task Post_ProposalThatWouldChangeTheCategoryOfAStoredTransaction_IsDropped()
     {
         await AddRule("matkroken", _seeded.Groceries);
-        var earlier = await Created(await Upload(StatementWithPurchasesFrom("Matkroken Bergen Storsenter")));
+        var earlier = await Created(await Upload(StatementPdf.WithPurchasesFrom("Matkroken Bergen Storsenter")));
         var generator = new FakeRuleGenerator()
             .Proposing("Bergen Storsenter P-hus", "bergen storsenter", "Transport");
 
-        var created = await Created(await Upload(StatementWithPurchasesFrom("Bergen Storsenter P-hus"), generator));
+        var created = await Created(await Upload(StatementPdf.WithPurchasesFrom("Bergen Storsenter P-hus"), generator));
 
         Assert.DoesNotContain(await AddedRules(), r => r.AiGenerated);
         Assert.Equal(_seeded.Groceries, Assert.Single(await StoredTransactions(earlier.Id)).CategoryId);
@@ -703,7 +688,7 @@ public class BankStatementEndpointsTests : IAsyncLifetime
             .Proposing("Bergen Storsenter P-hus", "bergen storsenter", "Transport");
 
         var created = await Created(await Upload(
-            StatementWithPurchasesFrom("Bergen Storsenter P-hus", "Matkroken Bergen Storsenter"), generator));
+            StatementPdf.WithPurchasesFrom("Bergen Storsenter P-hus", "Matkroken Bergen Storsenter"), generator));
 
         Assert.DoesNotContain(await AddedRules(), r => r.AiGenerated);
         Assert.Equal([null, _seeded.Groceries], (await StoredTransactions(created.Id)).Select(t => t.CategoryId));
@@ -719,7 +704,7 @@ public class BankStatementEndpointsTests : IAsyncLifetime
             .Proposing("Sentrum Bergen P-hus", "sentrum bergen", "Transport");
 
         var created = await Created(await Upload(
-            StatementWithPurchasesFrom("Kafé Sentrum Bergen", "Sentrum Bergen P-hus"), generator));
+            StatementPdf.WithPurchasesFrom("Kafé Sentrum Bergen", "Sentrum Bergen P-hus"), generator));
 
         var rule = Assert.Single(await AddedRules());
         Assert.Equal(("kafé", _seeded.Restaurants, true), (rule.Keyword, rule.CategoryId, rule.AiGenerated));
@@ -734,7 +719,7 @@ public class BankStatementEndpointsTests : IAsyncLifetime
             .Proposing("Kaffebrenneriet Bryggen", "kaffebrenneriet bryggen", "Shopping");
 
         var created = await Created(await Upload(
-            StatementWithPurchasesFrom("Kaffebrenneriet Torget", "Kaffebrenneriet Bryggen"), generator));
+            StatementPdf.WithPurchasesFrom("Kaffebrenneriet Torget", "Kaffebrenneriet Bryggen"), generator));
 
         var rule = Assert.Single(await AddedRules());
         Assert.Equal("kaffebrenneriet", rule.Keyword);
@@ -746,7 +731,7 @@ public class BankStatementEndpointsTests : IAsyncLifetime
     {
         // One spent and one received, so the generator is asked about each of them.
         var pdf = StatementPdf.Create(
-            UniqueAccountNumber(),
+            StatementPdf.UniqueAccountNumber(),
             period: "01.08.2026 - 31.08.2026",
             openingBalance: "1.000,00",
             rows:
@@ -770,7 +755,7 @@ public class BankStatementEndpointsTests : IAsyncLifetime
         await AddRule("butikk", _seeded.Groceries);
 
         var created = await Created(await Upload(
-            StatementWithPurchasesFrom("Butikk Sentrum", "Kafé"),
+            StatementPdf.WithPurchasesFrom("Butikk Sentrum", "Kafé"),
             new FakeRuleGenerator { Unavailable = true }));
 
         Assert.Equal(
@@ -784,7 +769,7 @@ public class BankStatementEndpointsTests : IAsyncLifetime
     public async Task Post_GeneratorProposesNothing_DoesNotReportAiCategorizationUnavailable()
     {
         var created = await Created(await Upload(
-            StatementWithPurchasesFrom("Kafé", "Frisør"), new FakeRuleGenerator()));
+            StatementPdf.WithPurchasesFrom("Kafé", "Frisør"), new FakeRuleGenerator()));
 
         Assert.Equal(2, created.UncategorizedCount);
         Assert.False(created.AiCategorizationUnavailable);
@@ -796,7 +781,7 @@ public class BankStatementEndpointsTests : IAsyncLifetime
         await AddRule("butikk", _seeded.Groceries);
 
         var created = await Created(await Upload(
-            StatementWithPurchasesFrom("Butikk Sentrum"), new FakeRuleGenerator { Unavailable = true }));
+            StatementPdf.WithPurchasesFrom("Butikk Sentrum"), new FakeRuleGenerator { Unavailable = true }));
 
         Assert.Equal(0, created.UncategorizedCount);
         Assert.False(created.AiCategorizationUnavailable);
@@ -805,7 +790,7 @@ public class BankStatementEndpointsTests : IAsyncLifetime
     [Fact]
     public async Task Post_NoGeneratorConfigured_LeavesUnmatchedRowsUncategorizedAndCreatesNoRules()
     {
-        var created = await Created(await Upload(StatementWithPurchasesFrom("Kafé")));
+        var created = await Created(await Upload(StatementPdf.WithPurchasesFrom("Kafé")));
 
         var stored = Assert.Single(await StoredTransactions(created.Id));
         Assert.Null(stored.CategoryId);

@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using PersonligFinans.Api.AiRequests;
 using PersonligFinans.Api.CategorizationRules;
 using PersonligFinans.Api.Data;
 using Testcontainers.PostgreSql;
@@ -27,6 +28,12 @@ public class PostgresApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
         // Never Azure, even when the developer has configured the rule generator and receipt reader
         // in user secrets.
         builder.UseSetting($"{RuleGeneratorSetup.SectionName}:Endpoint", "");
+        // Every test asking the fake LLM on the real clock counts towards the same day's cap on all
+        // Users, in the one database they share. A run makes some 60 AI requests, well under the
+        // default 300, but limits far beyond any run keep these tests from ever depending on how
+        // many there are. The Daily AI limit's own tests set small limits and a clock of their own.
+        builder.UseSetting($"{DailyAiLimit.SectionName}:{nameof(DailyAiLimit.PerUser)}", "1000000");
+        builder.UseSetting($"{DailyAiLimit.SectionName}:{nameof(DailyAiLimit.AllUsers)}", "1000000");
     }
 
     public Task InitializeAsync() => _postgres.StartAsync();

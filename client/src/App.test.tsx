@@ -206,6 +206,7 @@ const importedStatement = {
   transactionCount: 38,
   uncategorizedCount: 7,
   aiCategorizationUnavailable: false,
+  dailyAiLimitReached: false,
 }
 
 // Renders the app for a signed-in User, once it has asked who is signed in and shows the app.
@@ -507,6 +508,56 @@ describe('App', () => {
     )
   })
 
+  it('says when the daily AI limit was reached during the import', async () => {
+    handleUpload = () => Response.json({ ...importedStatement, dailyAiLimitReached: true }, { status: 201 })
+    const user = userEvent.setup()
+    await renderApp()
+
+    await user.upload(screen.getByLabelText(/bank statement pdf/i), statementPdf)
+
+    const status = await screen.findByRole('status')
+    expect(status).toHaveTextContent(
+      'Imported 38 transactions from statement 01.08.2026–31.08.2026: 31 categorized, 7 Uncategorized. ' +
+        'Daily AI limit reached until midnight Norwegian time — 7 rows left Uncategorized',
+    )
+    expect(status).not.toHaveTextContent('AI categorization unavailable')
+  })
+
+  it('sums several imported statements into one line, saying how many reached the daily AI limit', async () => {
+    const statements = [
+      { ...importedStatement, transactionCount: 38, uncategorizedCount: 7, aiCategorizationUnavailable: true },
+      { ...importedStatement, id: 8, transactionCount: 40, uncategorizedCount: 3, dailyAiLimitReached: true },
+      { ...importedStatement, id: 9, transactionCount: 22, uncategorizedCount: 5, dailyAiLimitReached: true },
+    ]
+    let call = 0
+    handleUpload = () => Response.json(statements[call++], { status: 201 })
+    const user = userEvent.setup()
+    await renderApp()
+
+    await user.upload(screen.getByLabelText(/bank statement pdf/i), [statementPdf, statementPdf, statementPdf])
+
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      'Imported 3 Bank Statements, 100 transactions: 85 categorized, 15 Uncategorized. ' +
+        'AI categorization unavailable for 1 Bank Statement. ' +
+        'Daily AI limit reached until midnight Norwegian time for 2 Bank Statements',
+    )
+  })
+
+  it('says Bank Statement in the singular when the daily AI limit was reached for one of them', async () => {
+    let call = 0
+    handleUpload = () => Response.json({ ...importedStatement, dailyAiLimitReached: call++ === 1 }, { status: 201 })
+    const user = userEvent.setup()
+    await renderApp()
+
+    await user.upload(screen.getByLabelText(/bank statement pdf/i), [statementPdf, statementPdf])
+
+    const status = await screen.findByRole('status')
+    expect(status).toHaveTextContent(
+      /14 Uncategorized\. Daily AI limit reached until midnight Norwegian time for 1 Bank Statement$/,
+    )
+    expect(status).not.toHaveTextContent('AI categorization unavailable')
+  })
+
   it('says nothing about AI categorization when it was available for every imported statement', async () => {
     const user = userEvent.setup()
     await renderApp()
@@ -516,6 +567,7 @@ describe('App', () => {
     const status = await screen.findByRole('status')
     expect(status).toHaveTextContent('Imported 2 Bank Statements, 76 transactions: 62 categorized, 14 Uncategorized')
     expect(status).not.toHaveTextContent('AI categorization')
+    expect(status).not.toHaveTextContent('Daily AI limit')
   })
 
   it('keeps uploading after a rejected statement and lists it by filename under the summary', async () => {
@@ -4918,10 +4970,26 @@ describe('Scan receipts', () => {
       expect(within(dialog()).getByText("Couldn't read this receipt")).toBeInTheDocument()
     })
 
+    it("says the daily AI limit is reached above an empty form with today's date when the limit was reached", async () => {
+      answer({ 'kiwi.jpg': { outcome: 'limitReached', date: null, description: null, amount: null, categoryId: null } })
+
+      await scanUntilFormIsReady([kiwi])
+
+      expect(
+        within(dialog()).getByText('Daily AI limit reached until midnight Norwegian time — enter this receipt by hand'),
+      ).toBeInTheDocument()
+      expect(within(dialog()).queryByText("Couldn't read this receipt")).not.toBeInTheDocument()
+      expect(within(dialog()).getByLabelText(/date/i)).toHaveValue(todayIsoDate())
+      expect(within(dialog()).getByLabelText(/description/i)).toHaveValue('')
+      expect(within(dialog()).getByLabelText(/^out$/i)).toHaveValue(null)
+      expect(within(dialog()).getByLabelText(/category/i)).toHaveValue('')
+    })
+
     it('shows no notice when no receipt reader is configured', async () => {
       await scanUntilFormIsReady([kiwi])
 
       expect(within(dialog()).queryByText("Couldn't read this receipt")).not.toBeInTheDocument()
+      expect(within(dialog()).queryByText(/Daily AI limit/)).not.toBeInTheDocument()
       expect(within(dialog()).queryByText('Reading…')).not.toBeInTheDocument()
     })
   })
