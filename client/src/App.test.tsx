@@ -74,7 +74,18 @@ let categoriesServed: ServedCategory[] | Response
 let handleSpending: (year: number, month: number | undefined, quarter: number | undefined, includeTransfers: boolean) => Response
 // The Spending of each month of the Span from `from` to `to`.
 let handleMonthlySpending: (from: Month, to: Month, includeTransfers: boolean) => Response
+// Who is signed in: signed in as a User unless a test signs out, or keeps the answer waiting.
+let currentUser: { email: string } | Response | Promise<Response>
+let handleLogIn: PostHandler
+let handleRegister: PostHandler
+let handleLogOut: () => Response
 const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+  if (url === '/api/user') {
+    return currentUser instanceof Response || currentUser instanceof Promise ? currentUser : Response.json(currentUser)
+  }
+  if (url === '/api/user/log-in' && init?.method === 'POST') return handleLogIn(JSON.parse(init.body as string))
+  if (url === '/api/user/register' && init?.method === 'POST') return handleRegister(JSON.parse(init.body as string))
+  if (url === '/api/user/log-out' && init?.method === 'POST') return handleLogOut()
   const monthlyUrl =
     /^\/api\/spending\/monthly\?fromYear=(\d+)&fromMonth=(\d+)&toYear=(\d+)&toMonth=(\d+)(&includeTransfers=true)?$/.exec(url)
   if (monthlyUrl) {
@@ -168,6 +179,10 @@ beforeEach(() => {
   handleSpending = () => Response.json({ total: 0, slices: [] })
   handleMonthlySpending = (from, to) => Response.json(monthlySpending(from, to))
   categoriesServed = categories
+  currentUser = { email: 'me@example.com' }
+  handleLogIn = (body) => Response.json({ email: (body as { email: string }).email })
+  handleRegister = (body) => Response.json({ email: (body as { email: string }).email })
+  handleLogOut = () => new Response(null, { status: 204 })
   vi.stubGlobal('fetch', fetchMock)
 })
 
@@ -186,6 +201,12 @@ const importedStatement = {
   aiCategorizationUnavailable: false,
 }
 
+// Renders the app for a signed-in User, once it has asked who is signed in and shows the app.
+async function renderApp() {
+  render(<App />)
+  await screen.findByRole('navigation')
+}
+
 // The ways to add Transactions, rather than the Add transactions button that opens them as a menu on
 // a narrow screen.
 function addActions() {
@@ -196,7 +217,7 @@ const statementPdf = new File(['%PDF-1.7'], 'kontoutskrift.pdf', { type: 'applic
 
 async function openModal() {
   const user = userEvent.setup()
-  render(<App />)
+  await renderApp()
   await user.click(screen.getByRole('button', { name: 'Add transaction' }))
   await screen.findByRole('option', { name: 'Groceries' })
   return user
@@ -209,8 +230,8 @@ async function fillValidForm(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe('App', () => {
-  it('shows the Add transaction button with no modal open', () => {
-    render(<App />)
+  it('shows the Add transaction button with no modal open', async () => {
+    await renderApp()
     expect(screen.getByRole('button', { name: 'Add transaction' })).toBeInTheDocument()
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
@@ -309,8 +330,8 @@ describe('App', () => {
     expect(screen.getByLabelText(/description/i)).toHaveValue('')
   })
 
-  it('shows Upload transactions to the left of Add transaction', () => {
-    render(<App />)
+  it('shows Upload transactions to the left of Add transaction', async () => {
+    await renderApp()
 
     const buttons = addActions()
       .getAllByRole('button')
@@ -325,7 +346,7 @@ describe('App', () => {
       return Response.json(importedStatement, { status: 201 })
     }
     const user = userEvent.setup()
-    render(<App />)
+    await renderApp()
 
     await user.upload(screen.getByLabelText(/bank statement pdf/i), statementPdf)
 
@@ -339,7 +360,7 @@ describe('App', () => {
     handleUpload = () =>
       Response.json({ ...importedStatement, aiCategorizationUnavailable: true }, { status: 201 })
     const user = userEvent.setup()
-    render(<App />)
+    await renderApp()
 
     await user.upload(screen.getByLabelText(/bank statement pdf/i), statementPdf)
 
@@ -350,8 +371,8 @@ describe('App', () => {
     expect(status).toHaveTextContent('AI categorization unavailable — 7 rows left Uncategorized')
   })
 
-  it('only accepts PDF files', () => {
-    render(<App />)
+  it('only accepts PDF files', async () => {
+    await renderApp()
 
     expect(screen.getByLabelText(/bank statement pdf/i)).toHaveAttribute('accept', 'application/pdf')
   })
@@ -360,7 +381,7 @@ describe('App', () => {
     let respond: (response: Response) => void = () => {}
     handleUpload = () => new Promise((resolve) => (respond = resolve))
     const user = userEvent.setup()
-    render(<App />)
+    await renderApp()
 
     await user.upload(screen.getByLabelText(/bank statement pdf/i), statementPdf)
 
@@ -384,7 +405,7 @@ describe('App', () => {
     const julyPdf = new File(['%PDF-1.7'], 'juli.pdf', { type: 'application/pdf' })
     const septemberPdf = new File(['%PDF-1.7'], 'september.pdf', { type: 'application/pdf' })
     const user = userEvent.setup()
-    render(<App />)
+    await renderApp()
 
     await user.upload(screen.getByLabelText(/bank statement pdf/i), [julyPdf, statementPdf, septemberPdf])
 
@@ -412,7 +433,7 @@ describe('App', () => {
     }
     const julyPdf = new File(['%PDF-1.7'], 'juli.pdf', { type: 'application/pdf' })
     const user = userEvent.setup()
-    render(<App />)
+    await renderApp()
 
     await user.upload(screen.getByLabelText(/bank statement pdf/i), [julyPdf, statementPdf])
     await screen.findByRole('button', { name: /upload transactions/i })
@@ -429,7 +450,7 @@ describe('App', () => {
     handleUpload = () => new Promise((resolve) => responders.push(resolve))
     const monthsRequests = () => fetchMock.mock.calls.filter(([url]) => url === '/api/transactions/months').length
     const user = userEvent.setup()
-    render(<App />)
+    await renderApp()
     await waitFor(() => expect(monthsRequests()).toBe(1))
 
     await user.upload(screen.getByLabelText(/bank statement pdf/i), [statementPdf, statementPdf])
@@ -452,7 +473,7 @@ describe('App', () => {
     let call = 0
     handleUpload = () => Response.json(statements[call++], { status: 201 })
     const user = userEvent.setup()
-    render(<App />)
+    await renderApp()
 
     await user.upload(screen.getByLabelText(/bank statement pdf/i), [statementPdf, statementPdf, statementPdf])
 
@@ -467,7 +488,7 @@ describe('App', () => {
     handleUpload = () =>
       Response.json({ ...importedStatement, aiCategorizationUnavailable: call++ === 0 }, { status: 201 })
     const user = userEvent.setup()
-    render(<App />)
+    await renderApp()
 
     await user.upload(screen.getByLabelText(/bank statement pdf/i), [statementPdf, statementPdf])
 
@@ -478,7 +499,7 @@ describe('App', () => {
 
   it('says nothing about AI categorization when it was available for every imported statement', async () => {
     const user = userEvent.setup()
-    render(<App />)
+    await renderApp()
 
     await user.upload(screen.getByLabelText(/bank statement pdf/i), [statementPdf, statementPdf])
 
@@ -498,7 +519,7 @@ describe('App', () => {
     const scanPdf = new File(['%PDF-1.7'], 'scan.pdf', { type: 'application/pdf' })
     const septemberPdf = new File(['%PDF-1.7'], 'september.pdf', { type: 'application/pdf' })
     const user = userEvent.setup()
-    render(<App />)
+    await renderApp()
 
     await user.upload(screen.getByLabelText(/bank statement pdf/i), [julyPdf, scanPdf, septemberPdf])
     responders[0](Response.json(importedStatement, { status: 201 }))
@@ -525,7 +546,7 @@ describe('App', () => {
     const augustPdf = new File(['%PDF-1.7'], 'august.pdf', { type: 'application/pdf' })
     const notesPdf = new File(['notes'], 'notes.pdf', { type: 'application/pdf' })
     const user = userEvent.setup()
-    render(<App />)
+    await renderApp()
 
     await user.upload(screen.getByLabelText(/bank statement pdf/i), [augustPdf, notesPdf])
 
@@ -552,7 +573,7 @@ describe('App', () => {
             { status: 409 },
           )
     const user = userEvent.setup()
-    render(<App />)
+    await renderApp()
 
     await user.upload(screen.getByLabelText(/bank statement pdf/i), [statementPdf, statementPdf])
 
@@ -571,7 +592,7 @@ describe('App', () => {
         { status: 400 },
       )
     const user = userEvent.setup()
-    render(<App />)
+    await renderApp()
 
     await user.upload(screen.getByLabelText(/bank statement pdf/i), statementPdf)
 
@@ -592,7 +613,7 @@ describe('App', () => {
         { status: 409 },
       )
     const user = userEvent.setup()
-    render(<App />)
+    await renderApp()
 
     await user.upload(screen.getByLabelText(/bank statement pdf/i), statementPdf)
 
@@ -606,7 +627,7 @@ describe('App', () => {
       throw new TypeError('Failed to fetch')
     }
     const user = userEvent.setup()
-    render(<App />)
+    await renderApp()
 
     await user.upload(screen.getByLabelText(/bank statement pdf/i), statementPdf)
 
@@ -617,7 +638,7 @@ describe('App', () => {
   it('clears an upload error once a later upload succeeds', async () => {
     handleUpload = () => new Response(null, { status: 500 })
     const user = userEvent.setup()
-    render(<App />)
+    await renderApp()
     await user.upload(screen.getByLabelText(/bank statement pdf/i), statementPdf)
     expect(await screen.findByRole('alert')).toHaveTextContent('kontoutskrift.pdf: Upload failed (500).')
 
@@ -633,7 +654,7 @@ describe('App', () => {
   describe('leaving home', () => {
     it('clears the import summary', async () => {
       const user = userEvent.setup()
-      render(<App />)
+      await renderApp()
       await user.upload(screen.getByLabelText(/bank statement pdf/i), statementPdf)
       expect(await screen.findByRole('status')).toHaveTextContent('Imported 38 transactions')
 
@@ -646,7 +667,7 @@ describe('App', () => {
     it('clears the rejected PDFs', async () => {
       handleUpload = () => new Response(null, { status: 500 })
       const user = userEvent.setup()
-      render(<App />)
+      await renderApp()
       await user.upload(screen.getByLabelText(/bank statement pdf/i), statementPdf)
       expect(await screen.findByRole('alert')).toHaveTextContent('kontoutskrift.pdf: Upload failed (500).')
 
@@ -672,7 +693,7 @@ describe('App', () => {
       let respond: (response: Response) => void = () => {}
       handleUpload = () => new Promise((resolve) => (respond = resolve))
       const user = userEvent.setup()
-      render(<App />)
+      await renderApp()
       await user.upload(screen.getByLabelText(/bank statement pdf/i), statementPdf)
 
       await user.click(screen.getByRole('button', { name: 'Transactions' }))
@@ -691,7 +712,7 @@ describe('App', () => {
 
     it('is not clicking the title while on home, which keeps the messages', async () => {
       const user = userEvent.setup()
-      render(<App />)
+      await renderApp()
       await user.upload(screen.getByLabelText(/bank statement pdf/i), statementPdf)
       expect(await screen.findByRole('status')).toHaveTextContent('Imported 38 transactions')
 
@@ -922,7 +943,7 @@ describe('Possible duplicate notice', () => {
 describe('Categories page', () => {
   async function openCategoriesPage() {
     const user = userEvent.setup()
-    render(<App />)
+    await renderApp()
     await user.click(screen.getByRole('button', { name: 'Categories' }))
     await screen.findByRole('heading', { name: 'Categories' })
     return user
@@ -1477,7 +1498,7 @@ describe('Categories page', () => {
 describe('Rules page', () => {
   async function openRulesPage() {
     const user = userEvent.setup()
-    render(<App />)
+    await renderApp()
     await user.click(screen.getByRole('button', { name: 'Rules' }))
     await screen.findByRole('cell', { name: 'kiwi' })
     return user
@@ -1548,7 +1569,7 @@ describe('Rules page', () => {
   it('says when the rules could not be loaded', async () => {
     rules = new Response(null, { status: 500 })
     const user = userEvent.setup()
-    render(<App />)
+    await renderApp()
 
     await user.click(screen.getByRole('button', { name: 'Rules' }))
 
@@ -1770,16 +1791,16 @@ describe('Header', () => {
       .map((item) => item.textContent)
   }
 
-  it('shows Transactions, Categories then Rules, with no Back button', () => {
-    render(<App />)
+  it('shows Transactions, Categories, Rules then User, with no Back button', async () => {
+    await renderApp()
 
-    expect(navItems().map((item) => item.textContent)).toEqual(['Transactions', 'Categories', 'Rules'])
+    expect(navItems().map((item) => item.textContent)).toEqual(['Transactions', 'Categories', 'Rules', 'User'])
     expect(screen.queryByRole('button', { name: 'Back' })).not.toBeInTheDocument()
   })
 
   it('highlights the page being shown', async () => {
     const user = userEvent.setup()
-    render(<App />)
+    await renderApp()
     expect(currentPage()).toEqual([])
 
     await user.click(screen.getByRole('button', { name: 'Transactions' }))
@@ -1795,7 +1816,7 @@ describe('Header', () => {
 
   it('goes to the home page when the app name is clicked', async () => {
     const user = userEvent.setup()
-    render(<App />)
+    await renderApp()
     await user.click(screen.getByRole('button', { name: 'Rules' }))
 
     await user.click(screen.getByRole('button', { name: 'PersonligFinans' }))
@@ -1812,7 +1833,7 @@ describe('Header', () => {
 
     it('opens and closes with its button', async () => {
       const user = userEvent.setup()
-      render(<App />)
+      await renderApp()
       expect(menuButton()).toHaveAttribute('aria-expanded', 'false')
       expect(menuButton()).toHaveAttribute('aria-controls', screen.getByRole('navigation').id)
 
@@ -1825,7 +1846,7 @@ describe('Header', () => {
 
     it('closes once a page is chosen', async () => {
       const user = userEvent.setup()
-      render(<App />)
+      await renderApp()
 
       await user.click(menuButton())
       await user.click(screen.getByRole('button', { name: 'Rules' }))
@@ -1836,7 +1857,7 @@ describe('Header', () => {
 
     it('closes when the app name is clicked', async () => {
       const user = userEvent.setup()
-      render(<App />)
+      await renderApp()
 
       await user.click(menuButton())
       await user.click(screen.getByRole('button', { name: 'PersonligFinans' }))
@@ -1846,7 +1867,7 @@ describe('Header', () => {
 
     it('closes on Escape, or on a press outside it', async () => {
       const user = userEvent.setup()
-      render(<App />)
+      await renderApp()
 
       await user.click(menuButton())
       await user.keyboard('{Escape}')
@@ -1866,7 +1887,7 @@ describe('Add transactions menu on a narrow screen', () => {
 
   it('opens and closes the ways to add Transactions with its button', async () => {
     const user = userEvent.setup()
-    render(<App />)
+    await renderApp()
     expect(menuButton()).toHaveAttribute('aria-controls', screen.getByRole('group', { name: 'Ways to add transactions' }).id)
 
     await user.click(menuButton())
@@ -1878,7 +1899,7 @@ describe('Add transactions menu on a narrow screen', () => {
 
   it('closes once a way is chosen', async () => {
     const user = userEvent.setup()
-    render(<App />)
+    await renderApp()
 
     await user.click(menuButton())
     await user.click(addActions().getByRole('button', { name: 'Add transaction' }))
@@ -1889,7 +1910,7 @@ describe('Add transactions menu on a narrow screen', () => {
 
   it('closes on Escape, or on a press outside it', async () => {
     const user = userEvent.setup()
-    render(<App />)
+    await renderApp()
 
     await user.click(menuButton())
     await user.keyboard('{Escape}')
@@ -1904,7 +1925,7 @@ describe('Add transactions menu on a narrow screen', () => {
     let respond: (response: Response) => void = () => {}
     handleUpload = () => new Promise((resolve) => (respond = resolve))
     const user = userEvent.setup()
-    render(<App />)
+    await renderApp()
 
     await user.upload(screen.getByLabelText(/bank statement pdf/i), statementPdf)
 
@@ -1991,7 +2012,7 @@ describe('Transactions page', () => {
 
   async function openTransactionsPage() {
     const user = userEvent.setup()
-    render(<App />)
+    await renderApp()
     await user.click(screen.getByRole('button', { name: 'Transactions' }))
     return user
   }
@@ -2615,7 +2636,7 @@ describe('Dashboard', () => {
     handleSpending = (year, month) =>
       Response.json(year === 2026 && month === 9 ? septemberSpending : { total: 0, slices: [] })
 
-    render(<App />)
+    await renderApp()
 
     await waitFor(() => expect(legendRows()).toHaveLength(3))
     expect(legendRows()).toEqual([
@@ -2630,7 +2651,7 @@ describe('Dashboard', () => {
   })
 
   it('sits below the upload and Add transaction buttons', async () => {
-    render(<App />)
+    await renderApp()
 
     const addTransaction = screen.getByRole('button', { name: 'Add transaction' })
     expect(addTransaction.compareDocumentPosition(dashboard())).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
@@ -2638,7 +2659,7 @@ describe('Dashboard', () => {
   })
 
   it('opens on the current month with an empty chart and a total of 0 when there are no Transactions', async () => {
-    render(<App />)
+    await renderApp()
 
     await waitFor(() => expect(centreTotal()).toBe('Total 0,00 kr'))
     const today = new Date()
@@ -2658,7 +2679,7 @@ describe('Dashboard', () => {
     handleSpending = (_year, month) =>
       Response.json(month === 8 ? { total: 80, slices: [{ categoryId: 1, amount: 80 }] } : septemberSpending)
     const user = userEvent.setup()
-    render(<App />)
+    await renderApp()
     await waitFor(() => expect(legendRows()).toHaveLength(3))
 
     await user.selectOptions(screen.getByLabelText('Period'), 'August 2026')
@@ -2682,7 +2703,7 @@ describe('Dashboard', () => {
     handleSpending = (_year, month) =>
       Response.json(month === 8 ? { total: 80, slices: [{ categoryId: 1, amount: 80 }] } : septemberSpending)
     const user = userEvent.setup()
-    render(<App />)
+    await renderApp()
     await waitFor(() => expect(legendRows()).toHaveLength(3))
     const groceries = swatchColour('Groceries')
 
@@ -2698,7 +2719,7 @@ describe('Dashboard', () => {
     categoriesServed = [{ ...categories[0], colour: '#123456' }, { ...categories[1], colour: '#abcdef' }]
     months = [{ year: 2026, month: 9 }]
     handleSpending = () => Response.json(septemberSpending)
-    render(<App />)
+    await renderApp()
     await waitFor(() => expect(legendRows()).toHaveLength(3))
 
     expect(swatchColour('Groceries')).toBe('rgb(18, 52, 86)')
@@ -2722,7 +2743,7 @@ describe('Dashboard', () => {
           : { total: 500, slices: [{ categoryId: 1, amount: 500 }] },
       )
     const user = userEvent.setup()
-    render(<App />)
+    await renderApp()
     await waitFor(() => expect(legendRows()).toEqual([['Groceries', '500,00 kr', '100,0 %']]))
     const toggle = within(dashboard()).getByRole('checkbox', { name: 'Include transfers' })
     expect(toggle).not.toBeChecked()
@@ -2758,7 +2779,7 @@ describe('Dashboard', () => {
           : { total: 0, slices: [] },
       )
 
-    render(<App />)
+    await renderApp()
 
     await waitFor(() => expect(centreTotal()).toBe('Total 0,00 kr'))
     expect(legendRows()).toEqual([])
@@ -2769,7 +2790,7 @@ describe('Dashboard', () => {
   it('says when the Spending could not be loaded', async () => {
     handleSpending = () => new Response(null, { status: 500 })
 
-    render(<App />)
+    await renderApp()
 
     expect(await within(dashboard()).findByRole('alert')).toHaveTextContent('Could not load the Spending.')
   })
@@ -2777,14 +2798,14 @@ describe('Dashboard', () => {
   it('says when the months could not be loaded', async () => {
     months = new Response(null, { status: 500 })
 
-    render(<App />)
+    await renderApp()
 
     expect(await within(dashboard()).findByRole('alert')).toHaveTextContent('Could not load the Spending.')
   })
 
   it('reloads after a Bank Statement is uploaded', async () => {
     const user = userEvent.setup()
-    render(<App />)
+    await renderApp()
     await waitFor(() => expect(centreTotal()).toBe('Total 0,00 kr'))
     months = [{ year: 2026, month: 9 }]
     handleSpending = () => Response.json(septemberSpending)
@@ -2801,7 +2822,7 @@ describe('Dashboard', () => {
       { year: 2026, month: 8 },
     ]
     const user = userEvent.setup()
-    render(<App />)
+    await renderApp()
     await waitFor(() => expect(centreTotal()).toBe('Total 0,00 kr'))
     await user.selectOptions(screen.getByLabelText('Period'), 'August 2026')
     await user.click(within(dashboard()).getByRole('checkbox', { name: 'Include transfers' }))
@@ -2835,7 +2856,7 @@ describe('Dashboard', () => {
         { year: 2026, month: 3 },
       ]
       const user = userEvent.setup()
-      render(<App />)
+      await renderApp()
       await waitFor(() => expect(centreTotal()).toBe('Total 0,00 kr'))
       await user.selectOptions(within(dashboard()).getByLabelText('Granularity'), 'Quarter')
       await user.selectOptions(screen.getByLabelText('Period'), 'Q1 2026')
@@ -2859,7 +2880,7 @@ describe('Dashboard', () => {
       months = [{ year: 2026, month: 9 }]
       handleSpending = () => new Response(null, { status: 500 })
       const user = userEvent.setup()
-      render(<App />)
+      await renderApp()
       expect(await within(dashboard()).findByRole('alert')).toHaveTextContent('Could not load the Spending.')
       await user.click(screen.getByRole('button', { name: 'Transactions' }))
       handleSpending = () => Response.json(septemberSpending)
@@ -2895,7 +2916,7 @@ describe('Dashboard', () => {
         return Response.json({ ...transaction, categoryId: 1, locked: true })
       }
       const user = userEvent.setup()
-      render(<App />)
+      await renderApp()
       await waitFor(() => expect(legendRows()).toHaveLength(3))
       await user.click(screen.getByRole('button', { name: 'Transactions' }))
       await user.selectOptions(await screen.findByRole('combobox', { name: 'Category for Rema 1000' }), 'Groceries')
@@ -2918,7 +2939,7 @@ describe('Dashboard', () => {
         { year: 2025, month: 3 },
       ]
       const user = userEvent.setup()
-      render(<App />)
+      await renderApp()
       await waitFor(() => expect(centreTotal()).toBe('Total 0,00 kr'))
       await user.selectOptions(within(dashboard()).getByLabelText('Granularity'), 'Year')
       await user.selectOptions(screen.getByLabelText('Period'), '2025')
@@ -2963,7 +2984,7 @@ describe('Dashboard', () => {
     async function openDashboard() {
       months = monthsWithTransactions
       const user = userEvent.setup()
-      render(<App />)
+      await renderApp()
       await waitFor(() => expect(requestedSpending()).toEqual(['/api/spending?year=2026&month=9']))
       return user
     }
@@ -3117,7 +3138,7 @@ describe('Dashboard', () => {
       handleSpending = () => Response.json(septemberSpending)
       handleListPeriod = () => Response.json(groceriesAndUncategorized)
       const user = userEvent.setup()
-      render(<App />)
+      await renderApp()
       await waitFor(() => expect(legendRows()).toHaveLength(3))
       return user
     }
@@ -3335,7 +3356,7 @@ describe('Dashboard', () => {
         { year: 2026, month: 8 },
       ]
 
-      render(<App />)
+      await renderApp()
 
       await waitFor(() => expect(trendTable()).toHaveLength(2))
       expect(dashboard().compareDocumentPosition(trend())).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
@@ -3359,7 +3380,7 @@ describe('Dashboard', () => {
           }),
         )
 
-      render(<App />)
+      await renderApp()
 
       await waitFor(() =>
         expect(trendTable()).toEqual([
@@ -3390,7 +3411,7 @@ describe('Dashboard', () => {
         { year: 2026, month: 6 },
       ]
 
-      render(<App />)
+      await renderApp()
 
       await waitFor(() => expect(trendTable()).toHaveLength(2))
       expect(selectedMonth('From')).toBe('06.2026')
@@ -3407,7 +3428,7 @@ describe('Dashboard', () => {
     ])('says trends need at least two months with Transactions when there are %s', async (_case, offered) => {
       months = offered
 
-      render(<App />)
+      await renderApp()
 
       expect(await screen.findByText('Trends need at least two months with Transactions')).toBeVisible()
       expect(within(trend()).queryByLabelText('From')).toBeNull()
@@ -3436,7 +3457,7 @@ describe('Dashboard', () => {
           }),
         )
 
-      render(<App />)
+      await renderApp()
 
       await waitFor(() =>
         expect(trendTable()).toEqual([
@@ -3455,7 +3476,7 @@ describe('Dashboard', () => {
           { year: 2025, month: 1 },
         ]
         const user = userEvent.setup()
-        render(<App />)
+        await renderApp()
         await waitFor(() => expect(trendTable()).toHaveLength(2))
         return user
       }
@@ -3562,7 +3583,7 @@ describe('Dashboard', () => {
             }),
           )
         const user = userEvent.setup()
-        render(<App />)
+        await renderApp()
         await waitFor(() => expect(trendTable()[1]?.[0]).toBe('Total'))
         return user
       }
@@ -3620,7 +3641,7 @@ describe('Dashboard', () => {
           { year: 2026, month: 9 },
           { year: 2026, month: 8 },
         ]
-        render(<App />)
+        await renderApp()
         await waitFor(() => expect(trendTable()).toHaveLength(2))
 
         expect(
@@ -3651,7 +3672,7 @@ describe('Dashboard', () => {
           { year: 2023, month: 1 },
         ]
         const user = userEvent.setup()
-        render(<App />)
+        await renderApp()
         await waitFor(() => expect(trendTable()).toHaveLength(2))
 
         for (const [label, value] of choices) {
@@ -3669,7 +3690,7 @@ describe('Dashboard', () => {
       ])('moves %s', async (_case, offered, choices, from, to) => {
         months = offered
         const user = userEvent.setup()
-        render(<App />)
+        await renderApp()
         await waitFor(() => expect(trendTable()).toHaveLength(2))
 
         for (const [label, value] of choices) {
@@ -3686,7 +3707,7 @@ describe('Dashboard', () => {
           { year: 2025, month: 1 },
         ]
         const user = userEvent.setup()
-        render(<App />)
+        await renderApp()
         await waitFor(() => expect(trendTable()[0]).toEqual(['', 'October 2025', 'September 2026', 'Change']))
         const requestsBefore = requestedMonthlySpending().length
 
@@ -3702,7 +3723,7 @@ describe('Dashboard', () => {
       ])('says when the Transactions all fall in one Period at %s, and comes back at Month', async (granularity, offered, message) => {
         months = offered
         const user = userEvent.setup()
-        render(<App />)
+        await renderApp()
         await waitFor(() => expect(trendTable()).toHaveLength(2))
 
         await user.selectOptions(within(trend()).getByLabelText('Granularity'), granularity)
@@ -3723,7 +3744,7 @@ describe('Dashboard', () => {
           { year: 2025, month: 1 },
         ]
         const user = userEvent.setup()
-        render(<App />)
+        await renderApp()
         await waitFor(() => expect(trendTable()).toHaveLength(2))
         await user.selectOptions(within(trend()).getByLabelText('Granularity'), 'Quarter')
         await waitFor(() => expect(trendTable()[0]).toEqual(['', 'Q4 2025', 'Q3 2026', 'Change']))
@@ -3748,7 +3769,7 @@ describe('Dashboard', () => {
       handleSpending = () => Response.json(septemberSpending)
       handleMonthlySpending = () => new Response(null, { status: 500 })
 
-      render(<App />)
+      await renderApp()
 
       await waitFor(() =>
         expect(within(trend()).getByRole('alert')).toHaveTextContent('Could not load the Spending trend.'),
@@ -3765,7 +3786,7 @@ describe('Dashboard', () => {
       ]
       categoriesServed = new Response(null, { status: 500 })
 
-      render(<App />)
+      await renderApp()
 
       await waitFor(() =>
         expect(within(dashboard()).getByRole('alert')).toHaveTextContent('Could not load the Spending.'),
@@ -3813,7 +3834,7 @@ describe('Dashboard', () => {
 
       it('keeps the Span, Include transfers and switched-on lines after a Transaction is added, and fetches the Spending again', async () => {
         const user = userEvent.setup()
-        render(<App />)
+        await renderApp()
         await chooseView(user)
         const requestsBefore = requestedMonthlySpending().length
         await user.click(screen.getByRole('button', { name: 'Add transaction' }))
@@ -3851,7 +3872,7 @@ describe('Dashboard', () => {
 
       it('keeps the Span after a Bank Statement is uploaded, and fetches its Spending again', async () => {
         const user = userEvent.setup()
-        render(<App />)
+        await renderApp()
         await chooseView(user)
         const requestsBefore = requestedMonthlySpending().length
         handleMonthlySpending = (from, to) =>
@@ -3869,7 +3890,7 @@ describe('Dashboard', () => {
 
       it('keeps the default Span when it is still offered', async () => {
         const user = userEvent.setup()
-        render(<App />)
+        await renderApp()
         await waitFor(() => expect(trendTable()).toHaveLength(2))
         months = [
           { year: 2026, month: 10 },
@@ -3889,7 +3910,7 @@ describe('Dashboard', () => {
 
       it('falls back to the 12 months ending at the latest month with Transactions when the Span is no longer offered', async () => {
         const user = userEvent.setup()
-        render(<App />)
+        await renderApp()
         await chooseView(user)
         months = [
           { year: 2026, month: 10 },
@@ -3910,7 +3931,7 @@ describe('Dashboard', () => {
 
       it('keeps the Granularity, Span, Include transfers and switched-on lines when coming back to the home view, and fetches the Spending again', async () => {
         const user = userEvent.setup()
-        render(<App />)
+        await renderApp()
         await chooseView(user)
         await user.selectOptions(within(trend()).getByLabelText('Granularity'), 'Quarter')
         await waitFor(() => expect(trendTable()[0]).toEqual(['', 'Q1 2025', 'Q2 2025', 'Change']))
@@ -3945,7 +3966,7 @@ describe('Dashboard', () => {
 
       it('falls back to the months with Transactions when the kept Span ends on a month no longer offered', async () => {
         const user = userEvent.setup()
-        render(<App />)
+        await renderApp()
         await chooseView(user)
         await user.click(screen.getByRole('button', { name: 'Transactions' }))
         months = [
@@ -4000,7 +4021,7 @@ describe('Dashboard', () => {
             }),
           )
 
-        render(<App />)
+        await renderApp()
 
         await waitFor(() =>
           expect(trendTable()).toEqual([
@@ -4029,7 +4050,7 @@ describe('Dashboard', () => {
         handleMonthlySpending = (from, to) =>
           Response.json(monthlySpending(from, to, { '2026-9': septemberSpending.slices }))
 
-        render(<App />)
+        await renderApp()
 
         await waitFor(() => expect(trendTable()).toHaveLength(5))
         await waitFor(() => expect(legendRows()).toHaveLength(3))
@@ -4048,7 +4069,7 @@ describe('Dashboard', () => {
         handleMonthlySpending = (from, to) =>
           Response.json(monthlySpending(from, to, { '2026-9': septemberSpending.slices }))
 
-        render(<App />)
+        await renderApp()
 
         await waitFor(() => expect(trendTable()).toHaveLength(5))
         expect(rowSwatch(trend(), 'Groceries')).toBe('rgb(18, 52, 86)')
@@ -4064,7 +4085,7 @@ describe('Dashboard', () => {
         handleMonthlySpending = (from, to) =>
           Response.json(monthlySpending(from, to, { '2026-9': septemberSpending.slices }))
         const user = userEvent.setup()
-        render(<App />)
+        await renderApp()
         await waitFor(() => expect(trendTable()).toHaveLength(5))
         expect(switchedOn()).toEqual(['Total'])
 
@@ -4090,7 +4111,7 @@ describe('Dashboard', () => {
             }),
           )
         const user = userEvent.setup()
-        render(<App />)
+        await renderApp()
         await waitFor(() => expect(trendTable()).toHaveLength(4))
         await user.click(toggle('Total'))
         await user.click(toggle('Other'))
@@ -4133,7 +4154,7 @@ describe('Dashboard', () => {
             }),
           )
         const user = userEvent.setup()
-        render(<App />)
+        await renderApp()
         await waitFor(() => expect(trendTable()).toHaveLength(3))
         await user.click(toggle('Groceries'))
 
@@ -4184,7 +4205,7 @@ describe('Dashboard', () => {
 
       it('counts Transfers in the Total for the same Span while ticked', async () => {
         const user = userEvent.setup()
-        render(<App />)
+        await renderApp()
         await waitFor(() => expect(trendTable()[1]).toEqual(['Total', '400,00 kr', '500,00 kr', '▲ +25,0 %']))
         expect(trendToggle()).not.toBeChecked()
 
@@ -4209,7 +4230,7 @@ describe('Dashboard', () => {
           { year: 2026, month: 7 },
         ]
         const user = userEvent.setup()
-        render(<App />)
+        await renderApp()
         await waitFor(() => expect(trendTable()).toHaveLength(3))
         await user.click(trendToggle())
         await waitFor(() => expect(trendTable()[1][2]).toBe('2 000,00 kr'))
@@ -4225,7 +4246,7 @@ describe('Dashboard', () => {
 
       it("is left alone by the donut's Include transfers", async () => {
         const user = userEvent.setup()
-        render(<App />)
+        await renderApp()
         await waitFor(() => expect(trendTable()).toHaveLength(3))
         await waitFor(() => expect(requestedSpending()).toHaveLength(1))
 
@@ -4242,7 +4263,7 @@ describe('Dashboard', () => {
 
       it("leaves the donut's Include transfers alone", async () => {
         const user = userEvent.setup()
-        render(<App />)
+        await renderApp()
         await waitFor(() => expect(trendTable()).toHaveLength(3))
         await waitFor(() => expect(requestedSpending()).toHaveLength(1))
 
@@ -4324,7 +4345,7 @@ describe('Dashboard', () => {
       // Waits for the trend, then switches the named lines on, or Total off.
       async function openTrend(...lines: string[]) {
         const user = userEvent.setup()
-        render(<App />)
+        await renderApp()
         await waitFor(() => expect(trendTable()).toHaveLength(5))
         for (const line of lines) await user.click(within(trend()).getByRole('checkbox', { name: line }))
         return user
@@ -4483,7 +4504,7 @@ describe('Scan receipts', () => {
   // wrong-type files can be picked too.
   async function scan(files: File[]) {
     const user = userEvent.setup({ applyAccept: false })
-    render(<App />)
+    await renderApp()
     await user.upload(screen.getByLabelText(/^receipts$/i), files)
     return user
   }
@@ -4505,8 +4526,8 @@ describe('Scan receipts', () => {
     return fetchMock.mock.calls.filter(([url]) => url === '/api/transactions/months').length
   }
 
-  it('sits right after Add transaction, with a picker for several JPEG, PNG, WebP or GIF images', () => {
-    render(<App />)
+  it('sits right after Add transaction, with a picker for several JPEG, PNG, WebP or GIF images', async () => {
+    await renderApp()
 
     const buttons = addActions()
       .getAllByRole('button')
@@ -5121,5 +5142,209 @@ describe('Scan receipts', () => {
       expect(items[0]).toHaveTextContent('Rema 1000')
       expect(items[0]).toHaveTextContent('-249,90 kr')
     })
+  })
+})
+
+describe('Signing in', () => {
+  const signedOut = () => new Response(null, { status: 401 })
+
+  function landingPage(heading: 'Log in' | 'Register' = 'Log in') {
+    return screen.findByRole('heading', { name: heading })
+  }
+
+  async function fillIn(user: ReturnType<typeof userEvent.setup>, email: string, password: string) {
+    await user.type(screen.getByLabelText(/^email/i), email)
+    await user.type(screen.getByLabelText(/^password/i), password)
+  }
+
+  it('shows the landing page, not the app, when nobody is signed in', async () => {
+    currentUser = signedOut()
+    render(<App />)
+
+    expect(await landingPage()).toBeInTheDocument()
+    expect(screen.getByText(/bank statements and receipts/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Register' })).toBeInTheDocument()
+    expect(screen.queryByRole('navigation')).not.toBeInTheDocument()
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(['/api/user'])
+  })
+
+  it('shows neither the landing page nor the app while asking who is signed in', async () => {
+    let respond: (response: Response) => void = () => {}
+    currentUser = new Promise((resolve) => (respond = resolve))
+    render(<App />)
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/user'))
+    expect(screen.queryByRole('heading', { name: 'Log in' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('navigation')).not.toBeInTheDocument()
+
+    respond(Response.json({ email: 'me@example.com' }))
+    expect(await screen.findByRole('navigation')).toBeInTheDocument()
+  })
+
+  it('logs in and shows the app', async () => {
+    currentUser = signedOut()
+    const user = userEvent.setup()
+    render(<App />)
+    await landingPage()
+
+    await fillIn(user, 'me@example.com', 'my long passphrase')
+    await user.click(screen.getByRole('button', { name: 'Log in' }))
+
+    expect(await screen.findByRole('navigation')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Add transaction' })).toBeInTheDocument()
+    const logIn = fetchMock.mock.calls.find(([url]) => url === '/api/user/log-in')
+    expect(JSON.parse(logIn?.[1]?.body as string)).toEqual({ email: 'me@example.com', password: 'my long passphrase' })
+  })
+
+  it.each([
+    [401, 'Wrong email or password.'],
+    [429, 'Too many failed log-ins, so this email is locked for a few minutes. Try again later.'],
+  ])('stays on the landing page with the error of a log-in refused with %i', async (status, detail) => {
+    currentUser = signedOut()
+    handleLogIn = () => Response.json({ detail }, { status })
+    const user = userEvent.setup()
+    render(<App />)
+    await landingPage()
+
+    await fillIn(user, 'me@example.com', 'wrong password')
+    await user.click(screen.getByRole('button', { name: 'Log in' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(detail)
+    expect(screen.getByRole('heading', { name: 'Log in' })).toBeInTheDocument()
+    expect(screen.queryByRole('navigation')).not.toBeInTheDocument()
+  })
+
+  it('registers and shows the app', async () => {
+    currentUser = signedOut()
+    const user = userEvent.setup()
+    render(<App />)
+    await landingPage()
+
+    await user.click(screen.getByRole('button', { name: 'Register' }))
+    await landingPage('Register')
+    await fillIn(user, 'new@example.com', 'my long passphrase')
+    await user.click(screen.getByRole('button', { name: 'Register' }))
+
+    expect(await screen.findByRole('navigation')).toBeInTheDocument()
+    const register = fetchMock.mock.calls.find(([url]) => url === '/api/user/register')
+    expect(JSON.parse(register?.[1]?.body as string)).toEqual({ email: 'new@example.com', password: 'my long passphrase' })
+    await user.click(screen.getByRole('button', { name: 'User' }))
+    expect(screen.getByText('new@example.com')).toBeInTheDocument()
+  })
+
+  it('shows each field error of a refused registration under its field', async () => {
+    currentUser = signedOut()
+    handleRegister = () =>
+      Response.json(
+        { errors: { email: ['This email is already registered.'], password: ['Password must be at least 8 characters.'] } },
+        { status: 400 },
+      )
+    const user = userEvent.setup()
+    render(<App />)
+    await landingPage()
+
+    await user.click(screen.getByRole('button', { name: 'Register' }))
+    await fillIn(user, 'me@example.com', 'short')
+    await user.click(screen.getByRole('button', { name: 'Register' }))
+
+    expect(await screen.findByText('This email is already registered.')).toBeInTheDocument()
+    expect(screen.getByText('Password must be at least 8 characters.')).toBeInTheDocument()
+    expect(screen.getByLabelText(/^email/i)).toHaveValue('me@example.com')
+    expect(screen.queryByRole('navigation')).not.toBeInTheDocument()
+  })
+
+  it('keeps the email but not the errors when switching between Log in and Register', async () => {
+    currentUser = signedOut()
+    handleLogIn = () => Response.json({ detail: 'Wrong email or password.' }, { status: 401 })
+    const user = userEvent.setup()
+    render(<App />)
+    await landingPage()
+    await fillIn(user, 'me@example.com', 'wrong password')
+    await user.click(screen.getByRole('button', { name: 'Log in' }))
+    await screen.findByRole('alert')
+
+    await user.click(screen.getByRole('button', { name: 'Register' }))
+
+    expect(await landingPage('Register')).toBeInTheDocument()
+    expect(screen.getByLabelText(/^email/i)).toHaveValue('me@example.com')
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+})
+
+describe('User menu', () => {
+  function userButton() {
+    return screen.getByRole('button', { name: 'User' })
+  }
+
+  it('shows who is signed in, and closes on Escape or a press outside it', async () => {
+    const user = userEvent.setup()
+    await renderApp()
+    expect(screen.queryByText(/signed in as/i)).not.toBeInTheDocument()
+
+    await user.click(userButton())
+    expect(userButton()).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByText(/signed in as/i)).toHaveTextContent('Signed in as me@example.com')
+    expect(screen.getByRole('button', { name: 'Log out' })).toBeInTheDocument()
+
+    await user.keyboard('{Escape}')
+    expect(screen.queryByText(/signed in as/i)).not.toBeInTheDocument()
+
+    await user.click(userButton())
+    await user.click(screen.getByRole('main'))
+    expect(screen.queryByText(/signed in as/i)).not.toBeInTheDocument()
+  })
+
+  it('logs out to the landing page, and logging in again starts afresh', async () => {
+    const user = userEvent.setup()
+    await renderApp()
+    await user.click(screen.getByRole('button', { name: 'Rules' }))
+
+    await user.click(userButton())
+    await user.click(screen.getByRole('button', { name: 'Log out' }))
+
+    expect(await screen.findByRole('heading', { name: 'Log in' })).toBeInTheDocument()
+    expect(screen.queryByRole('navigation')).not.toBeInTheDocument()
+    expect(fetchMock).toHaveBeenCalledWith('/api/user/log-out', { method: 'POST' })
+
+    await user.type(screen.getByLabelText(/^email/i), 'me@example.com')
+    await user.type(screen.getByLabelText(/^password/i), 'my long passphrase')
+    await user.click(screen.getByRole('button', { name: 'Log in' }))
+    await screen.findByRole('navigation')
+    expect(screen.getByRole('button', { name: 'Rules' })).not.toHaveAttribute('aria-current')
+    expect(screen.getByRole('button', { name: 'Add transaction' })).toBeVisible()
+  })
+
+  it('stays signed in, saying so, when logging out fails', async () => {
+    handleLogOut = () => new Response(null, { status: 500 })
+    const user = userEvent.setup()
+    await renderApp()
+
+    await user.click(userButton())
+    await user.click(screen.getByRole('button', { name: 'Log out' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Logging out failed. Try again.')
+    expect(screen.getByRole('navigation')).toBeInTheDocument()
+  })
+})
+
+describe('Signed out mid-session', () => {
+  it('returns to the landing page when a call answers 401, and logging in again starts afresh', async () => {
+    const user = userEvent.setup()
+    await renderApp()
+    await user.click(screen.getByRole('button', { name: 'Rules' }))
+    categoriesServed = new Response(null, { status: 401 })
+
+    await user.click(screen.getByRole('button', { name: 'Categories' }))
+
+    expect(await screen.findByRole('heading', { name: 'Log in' })).toBeInTheDocument()
+    expect(screen.queryByRole('navigation')).not.toBeInTheDocument()
+
+    categoriesServed = categories
+    await user.type(screen.getByLabelText(/^email/i), 'me@example.com')
+    await user.type(screen.getByLabelText(/^password/i), 'my long passphrase')
+    await user.click(screen.getByRole('button', { name: 'Log in' }))
+    await screen.findByRole('navigation')
+    expect(screen.getByRole('button', { name: 'Categories' })).not.toHaveAttribute('aria-current')
+    expect(screen.getByRole('button', { name: 'Add transaction' })).toBeVisible()
   })
 })

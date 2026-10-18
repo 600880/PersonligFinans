@@ -2,6 +2,100 @@ import { periodQuery, type Period } from './period'
 import { spanQuery, type Span } from './span'
 import type { CreateTransactionRequest, PossibleDuplicateQuery } from './transactionForm'
 
+// Told when any call for the app's data answers 401, which means the sign-in has ended: it expired,
+// or the User logged out elsewhere. The app then goes back to its landing page.
+let handleSignedOut: (() => void) | null = null
+
+export function setSignedOutHandler(handler: (() => void) | null) {
+  handleSignedOut = handler
+}
+
+// fetch for the app's data, which needs a signed-in User. The browser sends the sign-in cookie
+// itself, since the API has the same origin as the app.
+async function apiFetch(input: string, init?: RequestInit): Promise<Response> {
+  const response = await fetch(input, init)
+  if (response.status === 401) handleSignedOut?.()
+  return response
+}
+
+// The signed-in User, by the email they registered with.
+export interface User {
+  email: string
+}
+
+// Who is signed in, or null when nobody is.
+export async function fetchCurrentUser(): Promise<User | null> {
+  const response = await fetch('/api/user')
+  if (response.status === 401) return null
+  if (!response.ok) throw new Error(`Loading who is signed in failed (${response.status})`)
+  return (await response.json()) as User
+}
+
+export interface Credentials {
+  email: string
+  password: string
+}
+
+export type CredentialFieldErrors = Partial<Record<keyof Credentials, string>>
+
+export type SignInResult =
+  | { ok: true; user: User }
+  | { ok: false; fieldErrors: CredentialFieldErrors; message: string | null }
+
+// A wrong email or password gets one message that doesn't say which was wrong; a locked email gets
+// a message of its own.
+export function logIn(credentials: Credentials): Promise<SignInResult> {
+  return signIn('/api/user/log-in', credentials)
+}
+
+// Creates a User and signs it in. A registered email, an invalid email or a short password gets a
+// field error.
+export function register(credentials: Credentials): Promise<SignInResult> {
+  return signIn('/api/user/register', credentials)
+}
+
+async function signIn(url: string, credentials: Credentials): Promise<SignInResult> {
+  let response: Response
+  try {
+    response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(credentials),
+    })
+  } catch {
+    return { ok: false, fieldErrors: {}, message: 'Could not reach the server.' }
+  }
+
+  if (response.ok) return { ok: true, user: (await response.json()) as User }
+
+  // 400 is a validation problem keyed on the fields. 401 is a wrong email or password, and 429 a
+  // locked email: problems whose detail says which.
+  if (response.status === 400 || response.status === 401 || response.status === 429) {
+    const problem = (await response.json().catch(() => null)) as {
+      detail?: string
+      errors?: Record<string, string[]>
+    } | null
+    const fieldErrors: CredentialFieldErrors = {}
+    for (const [field, messages] of Object.entries(problem?.errors ?? {})) {
+      fieldErrors[field as keyof CredentialFieldErrors] = messages[0]
+    }
+    if (Object.keys(fieldErrors).length > 0) return { ok: false, fieldErrors, message: null }
+    if (problem?.detail) return { ok: false, fieldErrors: {}, message: problem.detail }
+  }
+
+  return { ok: false, fieldErrors: {}, message: `Signing in failed (${response.status}).` }
+}
+
+// Ends the sign-in. Resolves false when the server couldn't be told, so the User is still signed in.
+export async function logOut(): Promise<boolean> {
+  try {
+    const response = await fetch('/api/user/log-out', { method: 'POST' })
+    return response.ok
+  } catch {
+    return false
+  }
+}
+
 // colour is what the Dashboard draws the Category in, as #rrggbb. transactionCount and ruleCount are
 // how many Transactions and Categorization Rules have the Category.
 export interface Category {
@@ -21,7 +115,7 @@ export type CreateTransactionResult =
   | { ok: false; fieldErrors: FieldErrors; message: string | null }
 
 export async function fetchCategories(): Promise<Category[]> {
-  const response = await fetch('/api/categories')
+  const response = await apiFetch('/api/categories')
   if (!response.ok) throw new Error(`Loading categories failed (${response.status})`)
   return (await response.json()) as Category[]
 }
@@ -53,7 +147,7 @@ export async function deleteCategory(
 
   let response: Response
   try {
-    response = await fetch(`/api/categories/${id}${search}`, { method: 'DELETE' })
+    response = await apiFetch(`/api/categories/${id}${search}`, { method: 'DELETE' })
   } catch {
     return { ok: false, message: 'Could not reach the server.' }
   }
@@ -103,7 +197,7 @@ async function saveCategory(
 ): Promise<SaveCategoryResult> {
   let response: Response
   try {
-    response = await fetch(url, {
+    response = await apiFetch(url, {
       method,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(request),
@@ -149,7 +243,7 @@ export interface TransactionMonth {
 
 // The months that have at least one Transaction, newest first.
 export async function fetchTransactionMonths(): Promise<TransactionMonth[]> {
-  const response = await fetch('/api/transactions/months')
+  const response = await apiFetch('/api/transactions/months')
   if (!response.ok) throw new Error(`Loading months failed (${response.status})`)
   return (await response.json()) as TransactionMonth[]
 }
@@ -158,7 +252,7 @@ export async function fetchTransactionMonths(): Promise<TransactionMonth[]> {
 export type YearOrMonth = Exclude<Period, { granularity: 'quarter' }>
 
 export async function fetchTransactions(period: YearOrMonth): Promise<Transaction[]> {
-  const response = await fetch(`/api/transactions?${periodQuery(period)}`)
+  const response = await apiFetch(`/api/transactions?${periodQuery(period)}`)
   if (!response.ok) throw new Error(`Loading transactions failed (${response.status})`)
   return (await response.json()) as Transaction[]
 }
@@ -178,7 +272,7 @@ export interface Spending {
 // Transactions in the Transfers Category count only when includeTransfers is set.
 export async function fetchSpending(period: Period, includeTransfers: boolean): Promise<Spending> {
   const transfers = includeTransfers ? '&includeTransfers=true' : ''
-  const response = await fetch(`/api/spending?${periodQuery(period)}${transfers}`)
+  const response = await apiFetch(`/api/spending?${periodQuery(period)}${transfers}`)
   if (!response.ok) throw new Error(`Loading spending failed (${response.status})`)
   return (await response.json()) as Spending
 }
@@ -195,7 +289,7 @@ export interface MonthSpending {
 // Transfers Category count only when includeTransfers is set.
 export async function fetchMonthlySpending(span: Span, includeTransfers: boolean): Promise<MonthSpending[]> {
   const transfers = includeTransfers ? '&includeTransfers=true' : ''
-  const response = await fetch(`/api/spending/monthly?${spanQuery(span)}${transfers}`)
+  const response = await apiFetch(`/api/spending/monthly?${spanQuery(span)}${transfers}`)
   if (!response.ok) throw new Error(`Loading monthly spending failed (${response.status})`)
   return (await response.json()) as MonthSpending[]
 }
@@ -209,7 +303,7 @@ export async function changeTransactionCategory(
 ): Promise<ChangeCategoryResult> {
   let response: Response
   try {
-    response = await fetch(`/api/transactions/${id}/category`, {
+    response = await apiFetch(`/api/transactions/${id}/category`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ categoryId }),
@@ -229,7 +323,7 @@ export type ChangeNoteResult = { ok: true; transaction: Transaction } | { ok: fa
 export async function changeTransactionNote(id: number, note: string | null): Promise<ChangeNoteResult> {
   let response: Response
   try {
-    response = await fetch(`/api/transactions/${id}/note`, {
+    response = await apiFetch(`/api/transactions/${id}/note`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ note }),
@@ -250,7 +344,7 @@ export type DeleteTransactionResult = { ok: true; alreadyDeleted: boolean } | { 
 export async function deleteTransaction(id: number): Promise<DeleteTransactionResult> {
   let response: Response
   try {
-    response = await fetch(`/api/transactions/${id}`, { method: 'DELETE' })
+    response = await apiFetch(`/api/transactions/${id}`, { method: 'DELETE' })
   } catch {
     return { ok: false, message: 'Could not reach the server.' }
   }
@@ -280,7 +374,7 @@ export interface PossibleDuplicate {
 // The Possible duplicates of a Transaction on the query's date with its signed Amount, oldest first.
 export async function fetchPossibleDuplicates({ date, amount }: PossibleDuplicateQuery): Promise<PossibleDuplicate[]> {
   const search = new URLSearchParams({ date, amount: String(amount) })
-  const response = await fetch(`/api/transactions/possible-duplicates?${search}`)
+  const response = await apiFetch(`/api/transactions/possible-duplicates?${search}`)
   if (!response.ok) throw new Error(`Checking for possible duplicates failed (${response.status})`)
   return (await response.json()) as PossibleDuplicate[]
 }
@@ -290,7 +384,7 @@ export async function createTransaction(
 ): Promise<CreateTransactionResult> {
   let response: Response
   try {
-    response = await fetch('/api/transactions', {
+    response = await apiFetch('/api/transactions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(request),
@@ -337,7 +431,7 @@ export async function uploadBankStatement(file: File, uploadId: string): Promise
 
   let response: Response
   try {
-    response = await fetch('/api/bank-statements', { method: 'POST', body })
+    response = await apiFetch('/api/bank-statements', { method: 'POST', body })
   } catch {
     return { ok: false, message: 'Could not reach the server.' }
   }
@@ -386,7 +480,7 @@ export async function readReceipt(file: File): Promise<ReceiptSuggestion> {
   body.append('file', file)
 
   try {
-    const response = await fetch('/api/receipts/read', { method: 'POST', body })
+    const response = await apiFetch('/api/receipts/read', { method: 'POST', body })
     if (!response.ok) return UNREADABLE
     return (await response.json()) as ReceiptSuggestion
   } catch {
@@ -422,7 +516,7 @@ export type DeleteRuleResult =
   | { ok: false; message: string }
 
 export async function fetchRules(): Promise<CategorizationRule[]> {
-  const response = await fetch('/api/categorization-rules')
+  const response = await apiFetch('/api/categorization-rules')
   if (!response.ok) throw new Error(`Loading rules failed (${response.status})`)
   return (await response.json()) as CategorizationRule[]
 }
@@ -438,7 +532,7 @@ export function editRule(id: number, request: CategorizationRuleRequest): Promis
 export async function deleteRule(id: number): Promise<DeleteRuleResult> {
   let response: Response
   try {
-    response = await fetch(`/api/categorization-rules/${id}`, { method: 'DELETE' })
+    response = await apiFetch(`/api/categorization-rules/${id}`, { method: 'DELETE' })
   } catch {
     return { ok: false, message: 'Could not reach the server.' }
   }
@@ -460,7 +554,7 @@ async function saveRule(
 ): Promise<SaveRuleResult> {
   let response: Response
   try {
-    response = await fetch(url, {
+    response = await apiFetch(url, {
       method,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(request),

@@ -17,7 +17,7 @@ import {
   type TransactionFormValues,
 } from '../lib/transactionForm'
 
-const inputClassName =
+export const inputClassName =
   'rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-slate-500 focus:outline-none'
 
 interface FieldProps {
@@ -26,7 +26,8 @@ interface FieldProps {
   children: ReactNode
 }
 
-function Field({ label, error, children }: FieldProps) {
+// A labelled input with its validation error under it.
+export function Field({ label, error, children }: FieldProps) {
   return (
     <label className="flex flex-col gap-1 text-sm font-medium text-slate-700">
       {label}

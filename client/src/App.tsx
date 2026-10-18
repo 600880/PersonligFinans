@@ -1,12 +1,21 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { AddTransactionModal } from './components/AddTransactionModal'
 import { CategoriesPage } from './components/CategoriesPage'
 import { Dashboard } from './components/Dashboard'
+import { LandingPage } from './components/LandingPage'
 import { ErrorMessage, StatusMessage } from './components/Messages'
 import { ReceiptScanModal, type Receipt } from './components/ReceiptScanModal'
 import { RulesPage } from './components/RulesPage'
 import { TransactionsPage, type TransactionsTarget } from './components/TransactionsPage'
-import { readReceipt, uploadBankStatement, type ImportedBankStatement } from './lib/api'
+import {
+  fetchCurrentUser,
+  logOut,
+  readReceipt,
+  setSignedOutHandler,
+  uploadBankStatement,
+  type ImportedBankStatement,
+  type User,
+} from './lib/api'
 import { formatNorwegianDate } from './lib/date'
 import { checkReceiptPick, RECEIPT_IMAGE_TYPES } from './lib/receiptPick'
 import { useDismiss } from './lib/useDismiss'
@@ -28,7 +37,53 @@ const NAV_ITEMS: { view: View; label: string }[] = [
 const ADD_ACTION_CLASS =
   'rounded-lg border border-slate-300 bg-white px-5 py-2.5 text-sm font-medium text-slate-900 shadow-sm hover:bg-slate-100 max-sm:w-full max-sm:border-0 max-sm:text-left max-sm:shadow-none'
 
+// Asks who is signed in, and shows the landing page to nobody and the app to a User. Signing out,
+// by logging out or by any call answering 401, unmounts the app, so the next User starts from
+// nothing the previous one saw.
 function App() {
+  // undefined while asking, null when nobody is signed in.
+  const [user, setUser] = useState<User | null | undefined>(undefined)
+  const [loadFailed, setLoadFailed] = useState(false)
+
+  useEffect(() => {
+    let ignore = false
+    fetchCurrentUser().then(
+      (current) => {
+        if (!ignore) setUser(current)
+      },
+      () => {
+        if (!ignore) setLoadFailed(true)
+      },
+    )
+    return () => {
+      ignore = true
+    }
+  }, [])
+
+  useEffect(() => {
+    setSignedOutHandler(() => setUser(null))
+    return () => setSignedOutHandler(null)
+  }, [])
+
+  if (loadFailed) {
+    return (
+      <div className="flex min-h-screen justify-center bg-slate-50 px-6 py-10 max-sm:px-4">
+        <ErrorMessage className="h-fit">Could not reach the server. Reload the page to try again.</ErrorMessage>
+      </div>
+    )
+  }
+  // A blank page while asking, so a signed-in User never sees the landing page flash by.
+  if (user === undefined) return <div className="min-h-screen bg-slate-50" />
+  if (user === null) return <LandingPage onSignedIn={setUser} />
+  return <SignedInApp user={user} onLoggedOut={() => setUser(null)} />
+}
+
+interface SignedInAppProps {
+  user: User
+  onLoggedOut: () => void
+}
+
+function SignedInApp({ user, onLoggedOut }: SignedInAppProps) {
   const [view, setView] = useState<View>('home')
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [showSavedMessage, setShowSavedMessage] = useState(false)
@@ -55,12 +110,18 @@ function App() {
   // On a narrow screen the pages, and the ways to add Transactions, each sit behind a menu.
   const [isNavOpen, setIsNavOpen] = useState(false)
   const [isAddMenuOpen, setIsAddMenuOpen] = useState(false)
+  // Who is signed in, and Log out, behind the User entry in the header.
+  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false)
+  const [logOutFailed, setLogOutFailed] = useState(false)
   const headerRef = useRef<HTMLElement>(null)
   const addMenuRef = useRef<HTMLDivElement>(null)
+  const userMenuRef = useRef<HTMLDivElement>(null)
   const closeNav = useCallback(() => setIsNavOpen(false), [])
   const closeAddMenu = useCallback(() => setIsAddMenuOpen(false), [])
+  const closeUserMenu = useCallback(() => setIsUserMenuOpen(false), [])
   useDismiss(headerRef, isNavOpen, closeNav)
   useDismiss(addMenuRef, isAddMenuOpen, closeAddMenu)
+  useDismiss(userMenuRef, isUserMenuOpen, closeUserMenu)
 
   function clearHomeMessages() {
     setShowSavedMessage(false)
@@ -78,7 +139,15 @@ function App() {
     if (view !== 'home' && next === 'home') setDashboardVersion((version) => version + 1)
     setTransactionsTarget(undefined)
     setIsNavOpen(false)
+    setIsUserMenuOpen(false)
     setView(next)
+  }
+
+  // Stays signed in, saying so, when the server couldn't be told.
+  async function handleLogOut() {
+    setLogOutFailed(false)
+    if (await logOut()) onLoggedOut()
+    else setLogOutFailed(true)
   }
 
   function openTransactions(target: TransactionsTarget) {
@@ -225,6 +294,40 @@ function App() {
               {item.label}
             </button>
           ))}
+          {/* A dropdown under the entry on a wide screen; within the panel on a narrow one. */}
+          <div ref={userMenuRef} className="relative">
+            <button
+              type="button"
+              aria-expanded={isUserMenuOpen}
+              aria-controls="user-menu"
+              onClick={() => setIsUserMenuOpen((open) => !open)}
+              className="rounded-lg px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-100 max-sm:w-full max-sm:py-3 max-sm:text-left max-sm:text-base"
+            >
+              User
+            </button>
+            {isUserMenuOpen && (
+              <div
+                id="user-menu"
+                className="absolute top-full right-0 z-10 mt-1 flex w-max max-w-xs flex-col gap-3 rounded-lg border border-slate-200 bg-white p-3 shadow-md max-sm:static max-sm:mt-0 max-sm:w-auto max-sm:max-w-none max-sm:border-0 max-sm:px-3 max-sm:pt-0 max-sm:shadow-none"
+              >
+                <p className="text-sm break-all text-slate-600">
+                  Signed in as <span className="font-medium text-slate-900">{user.email}</span>
+                </p>
+                <button
+                  type="button"
+                  onClick={() => void handleLogOut()}
+                  className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-900 shadow-sm hover:bg-slate-100"
+                >
+                  Log out
+                </button>
+                {logOutFailed && (
+                  <p role="alert" className="text-xs text-red-600">
+                    Logging out failed. Try again.
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
         </nav>
       </header>
 
