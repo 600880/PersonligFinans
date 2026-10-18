@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react'
-import { logIn, register, type CredentialFieldErrors, type User } from '../lib/api'
+import { logIn, register, type CredentialsFieldErrors, type User } from '../lib/api'
 import { Field, inputClassName } from './TransactionForm'
 
 type Mode = 'logIn' | 'register'
@@ -14,7 +14,7 @@ export function LandingPage({ onSignedIn }: LandingPageProps) {
   const [mode, setMode] = useState<Mode>('logIn')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [fieldErrors, setFieldErrors] = useState<CredentialFieldErrors>({})
+  const [fieldErrors, setFieldErrors] = useState<CredentialsFieldErrors>({})
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const isLogIn = mode === 'logIn'
@@ -55,10 +55,10 @@ export function LandingPage({ onSignedIn }: LandingPageProps) {
         </p>
 
         <section
-          aria-labelledby="sign-in-heading"
+          aria-labelledby="credentials-heading"
           className="w-full max-w-sm rounded-xl border border-slate-200 bg-white p-6 shadow-sm max-sm:p-4"
         >
-          <h2 id="sign-in-heading" className="text-lg font-semibold text-slate-900">
+          <h2 id="credentials-heading" className="text-lg font-semibold text-slate-900">
             {isLogIn ? 'Log in' : 'Register'}
           </h2>
 

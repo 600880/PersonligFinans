@@ -47,36 +47,41 @@ export async function fetchCurrentUser(): Promise<User | null> {
   return (await response.json()) as User
 }
 
-export interface Credentials {
+export interface CredentialsRequest {
   email: string
   password: string
 }
 
-export type CredentialFieldErrors = Partial<Record<keyof Credentials, string>>
+export type CredentialsFieldErrors = Partial<Record<keyof CredentialsRequest, string>>
 
-export type SignInResult =
+export type SubmitCredentialsResult =
   | { ok: true; user: User }
-  | { ok: false; fieldErrors: CredentialFieldErrors; message: string | null }
+  | { ok: false; fieldErrors: CredentialsFieldErrors; message: string | null }
 
 // A wrong email or password gets one message that doesn't say which was wrong; a locked email gets
 // a message of its own.
-export function logIn(credentials: Credentials): Promise<SignInResult> {
-  return signIn('/api/user/log-in', credentials)
+export function logIn(request: CredentialsRequest): Promise<SubmitCredentialsResult> {
+  return submitCredentials('/api/user/log-in', request, 'Logging in')
 }
 
 // Creates a User and signs it in. A registered email, an invalid email or a short password gets a
 // field error.
-export function register(credentials: Credentials): Promise<SignInResult> {
-  return signIn('/api/user/register', credentials)
+export function register(request: CredentialsRequest): Promise<SubmitCredentialsResult> {
+  return submitCredentials('/api/user/register', request, 'Registering')
 }
 
-async function signIn(url: string, credentials: Credentials): Promise<SignInResult> {
+// action names what failed, e.g. "Logging in", for an answer that isn't a problem.
+async function submitCredentials(
+  url: string,
+  request: CredentialsRequest,
+  action: string,
+): Promise<SubmitCredentialsResult> {
   let response: Response
   try {
     response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(credentials),
+      body: JSON.stringify(request),
     })
   } catch {
     return { ok: false, fieldErrors: {}, message: 'Could not reach the server.' }
@@ -87,12 +92,12 @@ async function signIn(url: string, credentials: Credentials): Promise<SignInResu
   // 400 is a validation problem keyed on the fields. 401 is a wrong email or password, and 429 a
   // locked email: problems whose detail says which.
   if (response.status === 400 || response.status === 401 || response.status === 429) {
-    const { fieldErrors, detail } = await readProblem<Credentials>(response)
+    const { fieldErrors, detail } = await readProblem<CredentialsRequest>(response)
     if (Object.keys(fieldErrors).length > 0) return { ok: false, fieldErrors, message: null }
     if (detail) return { ok: false, fieldErrors: {}, message: detail }
   }
 
-  return { ok: false, fieldErrors: {}, message: `Signing in failed (${response.status}).` }
+  return { ok: false, fieldErrors: {}, message: `${action} failed (${response.status}).` }
 }
 
 // Ends the sign-in. Resolves false when the server couldn't be told, so the User is still signed in.

@@ -5,7 +5,7 @@ using Npgsql;
 
 namespace PersonligFinans.Api.Users;
 
-public record UserRequest(string? Email, string? Password);
+public record CredentialsRequest(string? Email, string? Password);
 
 // The signed-in User, by the email they registered with.
 public record UserResponse(string Email);
@@ -25,7 +25,8 @@ public static class UserEndpoints
         // how the client knows to show its landing page.
         api.MapGet("/", (ClaimsPrincipal user) => Results.Ok(new UserResponse(user.Identity!.Name!)));
 
-        // Signing in, and signing out, are for anyone; signing out when signed out does nothing.
+        // Registering, logging in and logging out are for anyone; logging out when signed out does
+        // nothing.
         api.MapPost("/register", Register).AllowAnonymous();
         api.MapPost("/log-in", LogIn).AllowAnonymous();
         api.MapPost("/log-out", LogOut).AllowAnonymous();
@@ -33,7 +34,7 @@ public static class UserEndpoints
 
     // Creates a User whose user name is their email, and signs it in.
     private static async Task<IResult> Register(
-        UserRequest request, UserManager<IdentityUser> userManager, SignInManager<IdentityUser> signInManager)
+        CredentialsRequest request, UserManager<IdentityUser> userManager, SignInManager<IdentityUser> signInManager)
     {
         var (email, password, errors) = ValidateRequired(request);
         if (errors.Count > 0)
@@ -77,7 +78,7 @@ public static class UserEndpoints
     // nobody can find out which emails are registered. Every failure counts towards locking the
     // email, and a locked email is refused, even with the right password, until the lockout ends.
     private static async Task<IResult> LogIn(
-        UserRequest request, UserManager<IdentityUser> userManager, SignInManager<IdentityUser> signInManager)
+        CredentialsRequest request, UserManager<IdentityUser> userManager, SignInManager<IdentityUser> signInManager)
     {
         var (email, password, errors) = ValidateRequired(request);
         if (errors.Count > 0)
@@ -105,7 +106,7 @@ public static class UserEndpoints
     }
 
     // The trimmed email and the password, and an error for each that is missing.
-    private static (string Email, string Password, Dictionary<string, string[]> Errors) ValidateRequired(UserRequest request)
+    private static (string Email, string Password, Dictionary<string, string[]> Errors) ValidateRequired(CredentialsRequest request)
     {
         var errors = new Dictionary<string, string[]>();
         var email = request.Email?.Trim() ?? "";
