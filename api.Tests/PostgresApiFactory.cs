@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using PersonligFinans.Api.AiRequests;
 using PersonligFinans.Api.CategorizationRules;
 using PersonligFinans.Api.Data;
+using PersonligFinans.Api.Emails;
 using Testcontainers.PostgreSql;
 
 namespace PersonligFinans.Api.Tests;
@@ -28,6 +29,9 @@ public class PostgresApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
         // Never Azure, even when the developer has configured the rule generator and receipt reader
         // in user secrets.
         builder.UseSetting($"{RuleGeneratorSetup.SectionName}:Endpoint", "");
+        // Nor Azure's email, even when the developer has configured it in user secrets: no test ever
+        // sends a real email. The tests of Password reset send through a fake.
+        builder.UseSetting($"{EmailSetup.SectionName}:Endpoint", "");
         // Every test asking the fake LLM on the real clock counts towards the same day's cap on all
         // Users, in the one database they share. A run makes some 60 AI requests, well under the
         // default 300, but limits far beyond any run keep these tests from ever depending on how
