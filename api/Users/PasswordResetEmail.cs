@@ -41,4 +41,18 @@ public static class PasswordResetEmail
         return $"{appUrl.TrimEnd('/')}/reset-password" +
             $"?email={Uri.EscapeDataString(email)}&token={Uri.EscapeDataString(encodedToken)}";
     }
+
+    // The token Identity gave, from the base64url a link holds it in, or null when it isn't
+    // base64url, which makes it a link nobody was sent.
+    public static string? DecodedToken(string encodedToken)
+    {
+        try
+        {
+            return Encoding.UTF8.GetString(WebEncoders.Base64UrlDecode(encodedToken));
+        }
+        catch (FormatException)
+        {
+            return null;
+        }
+    }
 }

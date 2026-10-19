@@ -55,6 +55,13 @@ public static class UserSetup
         services.Configure<DataProtectionTokenProviderOptions>(options =>
             options.TokenLifespan = TimeSpan.FromHours(PasswordResetLinkHours));
 
+        // Every request checks its sign-in cookie's security stamp against the User's, rather than
+        // only every 30 minutes, Identity's default. A Password reset changes the stamp, so whoever
+        // was signed in as the User elsewhere, perhaps with the old password, is signed out at their
+        // very next request. It costs a small read of the User per request, and a refreshed cookie
+        // with each answer.
+        services.Configure<SecurityStampValidatorOptions>(options => options.ValidationInterval = TimeSpan.Zero);
+
         services.ConfigureApplicationCookie(options =>
         {
             // Out of reach of scripts, only ever sent over HTTPS, and not sent with cross-site
