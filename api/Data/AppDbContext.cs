@@ -24,6 +24,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, CurrentUser cu
     public DbSet<BankStatement> BankStatements => Set<BankStatement>();
     public DbSet<CategorizationRule> CategorizationRules => Set<CategorizationRule>();
     public DbSet<AiRequest> AiRequests => Set<AiRequest>();
+    public DbSet<SentPasswordResetEmail> SentPasswordResetEmails => Set<SentPasswordResetEmail>();
 
     // The User this context works for, or null for nobody. Its queries see only that User's
     // Transactions, Bank Statements, Categories and Categorization Rules, through the query filters.
@@ -112,6 +113,20 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, CurrentUser cu
                 .OnDelete(DeleteBehavior.Cascade);
             request.HasIndex(r => new { r.UserId, r.MadeAt });
             request.HasIndex(r => r.MadeAt);
+        });
+
+        // Not owned either: nobody is signed in when a reset email is sent, since whoever asks for one
+        // can't sign in, and the daily cap counts every User's. So there is no query filter, and
+        // nothing shows them to a User. They are only ever counted, by User and by time, and deleted
+        // once no cap counts them any more.
+        modelBuilder.Entity<SentPasswordResetEmail>(email =>
+        {
+            email.HasOne<IdentityUser>()
+                .WithMany()
+                .HasForeignKey(e => e.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+            email.HasIndex(e => new { e.UserId, e.SentAt });
+            email.HasIndex(e => e.SentAt);
         });
     }
 

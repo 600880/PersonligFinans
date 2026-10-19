@@ -364,6 +364,36 @@ namespace PersonligFinans.Api.Data.Migrations
                     b.ToTable("categories", (string)null);
                 });
 
+            modelBuilder.Entity("PersonligFinans.Api.Data.SentPasswordResetEmail", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTimeOffset>("SentAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("sent_at");
+
+                    b.Property<string>("UserId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_sent_password_reset_emails");
+
+                    b.HasIndex("SentAt")
+                        .HasDatabaseName("ix_sent_password_reset_emails_sent_at");
+
+                    b.HasIndex("UserId", "SentAt")
+                        .HasDatabaseName("ix_sent_password_reset_emails_user_id_sent_at");
+
+                    b.ToTable("sent_password_reset_emails", (string)null);
+                });
+
             modelBuilder.Entity("PersonligFinans.Api.Data.Transaction", b =>
                 {
                     b.Property<int>("Id")
@@ -508,6 +538,16 @@ namespace PersonligFinans.Api.Data.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_categories_asp_net_users_user_id");
+                });
+
+            modelBuilder.Entity("PersonligFinans.Api.Data.SentPasswordResetEmail", b =>
+                {
+                    b.HasOne("Microsoft.AspNetCore.Identity.IdentityUser", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_sent_password_reset_emails_asp_net_users_user_id");
                 });
 
             modelBuilder.Entity("PersonligFinans.Api.Data.Transaction", b =>

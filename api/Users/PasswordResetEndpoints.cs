@@ -35,6 +35,7 @@ public static class PasswordResetEndpoints
     private static async Task<IResult> RequestReset(
         PasswordResetRequest request,
         UserManager<IdentityUser> userManager,
+        PasswordResetEmailLedger ledger,
         IOptions<EmailOptions> emailOptions,
         ILoggerFactory loggerFactory,
         [FromServices] IEmailSender? emailSender)
@@ -51,6 +52,11 @@ public static class PasswordResetEndpoints
         // Matched ignoring case, as Identity matches emails, and sent to the email as signed up.
         var user = await userManager.FindByEmailAsync(email);
         if (user is null)
+            return Results.NoContent();
+
+        // Over a cap the answer is the same and nothing is sent, so the caps don't reveal which
+        // emails are in use either. The ledger logs which cap was reached.
+        if (!await ledger.TryTakeAsync(user.Id))
             return Results.NoContent();
 
         var token = await userManager.GeneratePasswordResetTokenAsync(user);

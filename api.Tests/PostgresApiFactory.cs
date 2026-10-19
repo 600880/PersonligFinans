@@ -4,6 +4,7 @@ using PersonligFinans.Api.AiRequests;
 using PersonligFinans.Api.CategorizationRules;
 using PersonligFinans.Api.Data;
 using PersonligFinans.Api.Emails;
+using PersonligFinans.Api.Users;
 using Testcontainers.PostgreSql;
 
 namespace PersonligFinans.Api.Tests;
@@ -38,6 +39,12 @@ public class PostgresApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
         // many there are. The Daily AI limit's own tests set small limits and a clock of their own.
         builder.UseSetting($"{DailyAiLimit.SectionName}:{nameof(DailyAiLimit.PerUser)}", "1000000");
         builder.UseSetting($"{DailyAiLimit.SectionName}:{nameof(DailyAiLimit.AllUsers)}", "1000000");
+        // Likewise every reset email sent on the real clock counts towards the same day's cap on the
+        // whole app, and a test may ask for more than one reset email for a User in a row. So there is
+        // no window between a User's emails, and the daily cap is far beyond any run. The caps' own
+        // tests set small caps and a clock of their own.
+        builder.UseSetting($"{PasswordResetLimit.SectionName}:{nameof(PasswordResetLimit.PerAddressMinutes)}", "0");
+        builder.UseSetting($"{PasswordResetLimit.SectionName}:{nameof(PasswordResetLimit.PerDay)}", "1000000");
     }
 
     public Task InitializeAsync() => _postgres.StartAsync();
