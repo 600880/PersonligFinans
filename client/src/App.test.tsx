@@ -5252,7 +5252,7 @@ describe('Signing in', () => {
 
     expect(await landingPage()).toBeInTheDocument()
     expect(screen.queryByText(/bank statements and receipts/i)).not.toBeInTheDocument()
-    expect(screen.getByText('No account?', { exact: false })).toContainElement(screen.getByRole('button', { name: 'Sign up' }))
+    expect(screen.getByText('New user?', { exact: false })).toContainElement(screen.getByRole('button', { name: 'Sign up' }))
     expect(screen.getByText('Or try the app first, without signing up.')).toBeInTheDocument()
     expect(screen.queryByRole('navigation')).not.toBeInTheDocument()
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(['/api/user'])

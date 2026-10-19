@@ -9,7 +9,7 @@ const MODES = {
     label: 'Sign in',
     submittingLabel: 'Signing in…',
     passwordAutoComplete: 'current-password',
-    switchPrompt: 'No account? ',
+    switchPrompt: 'New user? ',
     other: 'signUp',
     submit: signIn,
   },
