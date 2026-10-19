@@ -1,15 +1,16 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import {
   continueAsGuest,
-  fetchPasswordResetAvailable,
+  fetchPasswordReset,
   signIn,
   signUp,
   type CredentialsFieldErrors,
+  type PasswordReset,
   type User,
 } from '../lib/api'
 import { confirmPasswordError } from '../lib/confirmPassword'
 import { ConfirmPasswordField } from './ConfirmPasswordField'
-import { ForgotPasswordForm } from './ForgotPasswordForm'
+import { PasswordResetForm } from './PasswordResetForm'
 import { Field, inputClassName } from './TransactionForm'
 
 // Everything that differs between signing in and signing up. The form's heading and its submit
@@ -54,24 +55,24 @@ export function LandingPage({ onSignedIn }: LandingPageProps) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
-  const [confirmPasswordMismatch, setConfirmPasswordMismatch] = useState<string | undefined>()
+  const [confirmPasswordFieldError, setConfirmPasswordFieldError] = useState<string | undefined>()
   const [fieldErrors, setFieldErrors] = useState<CredentialsFieldErrors>({})
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [guestError, setGuestError] = useState<string | null>(null)
   const [isContinuingAsGuest, setIsContinuingAsGuest] = useState(false)
   const current = MODES[mode]
-  // Whether Password reset is available, which is false until the server says so. Everything the
-  // landing page says about resetting a password depends on this alone.
-  const [canResetPassword, setCanResetPassword] = useState(false)
+  // Password reset, or null while unavailable, which it is until the server says otherwise.
+  // Everything the landing page says about resetting a password depends on this alone.
+  const [passwordReset, setPasswordReset] = useState<PasswordReset | null>(null)
   const [isAskingForReset, setIsAskingForReset] = useState(false)
   // Whether errorMessage says the email is locked after too many failed sign-ins.
   const [isLockedOut, setIsLockedOut] = useState(false)
 
   useEffect(() => {
     let ignore = false
-    void fetchPasswordResetAvailable().then((available) => {
-      if (!ignore) setCanResetPassword(available)
+    void fetchPasswordReset().then((reset) => {
+      if (!ignore) setPasswordReset(reset)
     })
     return () => {
       ignore = true
@@ -81,7 +82,7 @@ export function LandingPage({ onSignedIn }: LandingPageProps) {
   function switchMode() {
     setMode(current.other)
     setConfirmPassword('')
-    setConfirmPasswordMismatch(undefined)
+    setConfirmPasswordFieldError(undefined)
     setFieldErrors({})
     setErrorMessage(null)
   }
@@ -92,7 +93,7 @@ export function LandingPage({ onSignedIn }: LandingPageProps) {
     setErrorMessage(null)
     // Signing up sends nothing until the confirm field matches the password.
     const mismatch = mode === 'signUp' ? confirmPasswordError(password, confirmPassword) : undefined
-    setConfirmPasswordMismatch(mismatch)
+    setConfirmPasswordFieldError(mismatch)
     if (mismatch) return
     setIsSubmitting(true)
     const result = await current.submit({ email, password })
@@ -125,8 +126,13 @@ export function LandingPage({ onSignedIn }: LandingPageProps) {
       </header>
 
       <main className="flex flex-col items-center gap-6 px-6 py-10 max-sm:px-4">
-        {isAskingForReset && (
-          <ForgotPasswordForm email={email} onEmailChange={setEmail} onBack={() => setIsAskingForReset(false)} />
+        {isAskingForReset && passwordReset && (
+          <PasswordResetForm
+            email={email}
+            onEmailChange={setEmail}
+            linkHours={passwordReset.linkHours}
+            onBack={() => setIsAskingForReset(false)}
+          />
         )}
 
         {/* Hidden rather than gone while asking for a reset, so going back finds Sign in as it was
@@ -142,7 +148,7 @@ export function LandingPage({ onSignedIn }: LandingPageProps) {
 
           {errorMessage && (
             <p role="alert" className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
-              {isLockedOut && canResetPassword ? withResetOffer(errorMessage) : errorMessage}
+              {isLockedOut && passwordReset ? withResetOffer(errorMessage) : errorMessage}
             </p>
           )}
 
@@ -170,7 +176,7 @@ export function LandingPage({ onSignedIn }: LandingPageProps) {
               <ConfirmPasswordField
                 value={confirmPassword}
                 onChange={setConfirmPassword}
-                error={confirmPasswordMismatch}
+                error={confirmPasswordFieldError}
               />
             )}
             <button
@@ -182,7 +188,7 @@ export function LandingPage({ onSignedIn }: LandingPageProps) {
             </button>
           </form>
 
-          {mode === 'signIn' && canResetPassword && (
+          {mode === 'signIn' && passwordReset && (
             <p className="mt-3 text-center text-sm">
               <button
                 type="button"

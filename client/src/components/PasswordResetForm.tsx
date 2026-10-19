@@ -3,19 +3,23 @@ import { requestPasswordReset } from '../lib/api'
 import { Field, inputClassName } from './TransactionForm'
 
 // The same for every email, whether or not it is a User's, as the server's answer is, so nobody can
-// find out which emails are in use.
-const LINK_SENT = "If that email is in use, we've sent a link to it. It works for 1 hour."
+// find out which emails are in use. "1 hour" or, say, "2 hours", as the email says it.
+function linkSent(linkHours: number) {
+  return `If that email is in use, we've sent a link to it. It works for ${linkHours === 1 ? '1 hour' : `${linkHours} hours`}.`
+}
 
-interface ForgotPasswordFormProps {
+interface PasswordResetFormProps {
   // The email, shared with Sign in, so it starts as typed there and carries back.
   email: string
   onEmailChange: (email: string) => void
+  // How long the link works, as the server says.
+  linkHours: number
   onBack: () => void
 }
 
 // Asks for a link to choose a new password, for a User who can't sign in. Shown only while Password
 // reset is available.
-export function ForgotPasswordForm({ email, onEmailChange, onBack }: ForgotPasswordFormProps) {
+export function PasswordResetForm({ email, onEmailChange, linkHours, onBack }: PasswordResetFormProps) {
   const [emailError, setEmailError] = useState<string | undefined>()
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [isSending, setIsSending] = useState(false)
@@ -47,7 +51,7 @@ export function ForgotPasswordForm({ email, onEmailChange, onBack }: ForgotPassw
 
       {isSent ? (
         <p role="status" className="mt-3 rounded-lg bg-slate-100 px-3 py-2 text-sm text-slate-700">
-          {LINK_SENT}
+          {linkSent(linkHours)}
         </p>
       ) : (
         <>

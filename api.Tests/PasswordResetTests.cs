@@ -75,6 +75,18 @@ public class PasswordResetTests
         Assert.True(await IsAvailable(api.CreateClient()));
     }
 
+    // As the email says, so the landing page can say it too.
+    [Fact]
+    public async Task Availability_SaysALinkWorksForAnHour()
+    {
+        await using var api = Api(new FakeEmailSender());
+
+        var availability = await api.CreateClient()
+            .GetFromJsonAsync<PasswordResetAvailability>("/api/user/password-reset/availability");
+
+        Assert.Equal(1, availability!.LinkHours);
+    }
+
     [Fact]
     public async Task Availability_WithoutAnEmailSender_IsUnavailable()
     {

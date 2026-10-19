@@ -12,7 +12,7 @@ public static class PasswordResetEmail
 
     private const string Request =
         "Someone asked to reset the PersonligFinans password for this email, so here is a link to choose a new one:";
-    private const string Lifespan = "It works for 1 hour.";
+    private static readonly string Lifespan = $"It works for {LinkLifespan(UserSetup.PasswordResetLinkHours)}.";
     private const string Ignore = "If you didn't ask for this, ignore this email.";
 
     // The email to the User's email, with a link holding that email and the reset token.
@@ -27,6 +27,9 @@ public static class PasswordResetEmail
             $"<p>{WebUtility.HtmlEncode(Ignore)}</p>\n";
         return new OutgoingEmail(email, Subject, plainText, html);
     }
+
+    // "1 hour" or, say, "2 hours", as the landing page says it too.
+    private static string LinkLifespan(int hours) => hours == 1 ? "1 hour" : $"{hours} hours";
 
     // The page to choose a new password, on the app's configured address. It is never built from
     // the request's Host, which whoever sends the request chooses, so a forged request can't send a

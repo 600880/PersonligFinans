@@ -165,16 +165,22 @@ export async function continueAsGuest(): Promise<ContinueAsGuestResult> {
   return { ok: true, user: (await response.json()) as User }
 }
 
-// Whether Password reset is available, meaning the server can send email. Anything but a clear yes,
-// a server that can't be reached included, counts as unavailable, so the landing page never offers
-// a reset that can't work.
-export async function fetchPasswordResetAvailable(): Promise<boolean> {
+// linkHours is how long a link to choose a new password works.
+export interface PasswordReset {
+  linkHours: number
+}
+
+// Password reset when it is available, meaning the server can send email, or null. Anything but a
+// clear yes, a server that can't be reached included, counts as unavailable, so the landing page
+// never offers a reset that can't work.
+export async function fetchPasswordReset(): Promise<PasswordReset | null> {
   try {
     const response = await fetch('/api/user/password-reset/availability')
-    if (!response.ok) return false
-    return ((await response.json()) as { available: boolean }).available === true
+    if (!response.ok) return null
+    const { available, linkHours } = (await response.json()) as { available: boolean; linkHours: number }
+    return available === true ? { linkHours } : null
   } catch {
-    return false
+    return null
   }
 }
 

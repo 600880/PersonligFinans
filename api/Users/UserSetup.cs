@@ -9,7 +9,9 @@ public static class UserSetup
     public const int MinPasswordLength = 8;
     public const int MaxFailedSignIns = 5;
     public static readonly TimeSpan LockoutDuration = TimeSpan.FromMinutes(5);
-    public static readonly TimeSpan PasswordResetLinkLifespan = TimeSpan.FromHours(1);
+    // How long a link to choose a new password works. Whole hours, since the email and the landing
+    // page both say it in hours.
+    public const int PasswordResetLinkHours = 1;
 
     // Users sign in with ASP.NET Core Identity, stored in the app's database, and stay signed in
     // through Identity's application cookie. The client is served from the same origin as the API,
@@ -49,10 +51,9 @@ public static class UserSetup
             // whole set of default providers.
             .AddTokenProvider<DataProtectorTokenProvider<IdentityUser>>(TokenOptions.DefaultProvider);
 
-        // A link to choose a new password works for an hour. These options cover every
-        // data-protection token, and only the Password reset gives any out.
+        // These options cover every data-protection token, and only the Password reset gives any out.
         services.Configure<DataProtectionTokenProviderOptions>(options =>
-            options.TokenLifespan = PasswordResetLinkLifespan);
+            options.TokenLifespan = TimeSpan.FromHours(PasswordResetLinkHours));
 
         services.ConfigureApplicationCookie(options =>
         {

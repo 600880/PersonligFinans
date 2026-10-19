@@ -6,8 +6,9 @@ using PersonligFinans.Api.Emails;
 namespace PersonligFinans.Api.Users;
 
 // Whether Password reset is available: only when an email sender is configured, since the link to
-// choose a new password goes out by email.
-public record PasswordResetAvailability(bool Available);
+// choose a new password goes out by email. LinkHours is how long a link works, which the landing
+// page tells whoever asks for one.
+public record PasswordResetAvailability(bool Available, int LinkHours);
 
 public record PasswordResetRequest(string? Email);
 
@@ -21,7 +22,7 @@ public static class PasswordResetEndpoints
 
         // The landing page asks, to show "Forgot your password?" only when it would work.
         api.MapGet("/availability", ([FromServices] IEmailSender? emailSender) =>
-            Results.Ok(new PasswordResetAvailability(emailSender is not null)));
+            Results.Ok(new PasswordResetAvailability(emailSender is not null, UserSetup.PasswordResetLinkHours)));
         api.MapPost("/request", RequestReset);
     }
 
@@ -53,11 +54,10 @@ public static class PasswordResetEndpoints
             return Results.NoContent();
 
         var token = await userManager.GeneratePasswordResetTokenAsync(user);
-        var appUrl = emailOptions.Value.AppUrl
-            ?? throw new InvalidOperationException($"'{EmailSetup.SectionName}:AppUrl' is not set.");
         try
         {
-            await emailSender.SendAsync(PasswordResetEmail.To(user.Email!, token, appUrl));
+            // Set whenever an email sender is: the app doesn't start without it.
+            await emailSender.SendAsync(PasswordResetEmail.To(user.Email!, token, emailOptions.Value.AppUrl!));
         }
         // Saying the email failed would tell whoever asked that the email is a User's.
         catch (Exception e)

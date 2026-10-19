@@ -31,18 +31,18 @@ public static class EmailSetup
         var section = configuration.GetSection(SectionName);
         services.AddOptions<EmailOptions>().Bind(section);
 
-        var endpoint = section[nameof(EmailOptions.Endpoint)];
+        var options = section.Get<EmailOptions>() ?? new EmailOptions();
+        var endpoint = options.Endpoint;
         if (string.IsNullOrWhiteSpace(endpoint))
             return services;
 
-        var sender = section[nameof(EmailOptions.Sender)];
+        var sender = options.Sender;
         if (string.IsNullOrWhiteSpace(sender))
             throw new InvalidOperationException(
                 $"'{SectionName}:Endpoint' is set, but '{SectionName}:{nameof(EmailOptions.Sender)}' is not. " +
                 "Set it to the sender address of the Email Communication Services domain, e.g. DoNotReply@<guid>.azurecomm.net.");
 
-        var appUrl = section[nameof(EmailOptions.AppUrl)];
-        if (!Uri.TryCreate(appUrl, UriKind.Absolute, out var uri) || (uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeHttp))
+        if (!Uri.TryCreate(options.AppUrl, UriKind.Absolute, out var uri) || (uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeHttp))
             throw new InvalidOperationException(
                 $"'{SectionName}:Endpoint' is set, but '{SectionName}:{nameof(EmailOptions.AppUrl)}' is not the app's address. " +
                 "Set it to the address emails link to, e.g. https://personligfinans-ds.azurewebsites.net.");
