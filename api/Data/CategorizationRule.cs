@@ -4,7 +4,11 @@ public class CategorizationRule
 {
     public int Id { get; set; }
 
-    // Matched against a Transaction's description, ignoring case. Unique, ignoring case.
+    // The User it belongs to.
+    public required string UserId { get; set; }
+
+    // Matched against a Transaction's description, ignoring case. Unique among the User's rules,
+    // ignoring case.
     public required string Keyword { get; set; }
 
     public int CategoryId { get; set; }

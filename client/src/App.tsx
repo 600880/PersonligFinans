@@ -1,13 +1,24 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { AddTransactionModal } from './components/AddTransactionModal'
 import { CategoriesPage } from './components/CategoriesPage'
+import { ChooseNewPasswordPage } from './components/ChooseNewPasswordPage'
 import { Dashboard } from './components/Dashboard'
+import { LandingPage } from './components/LandingPage'
 import { ErrorMessage, StatusMessage } from './components/Messages'
 import { ReceiptScanModal, type Receipt } from './components/ReceiptScanModal'
 import { RulesPage } from './components/RulesPage'
 import { TransactionsPage, type TransactionsTarget } from './components/TransactionsPage'
-import { readReceipt, uploadBankStatement, type ImportedBankStatement } from './lib/api'
+import {
+  fetchCurrentUser,
+  signOut,
+  readReceipt,
+  setSignedOutHandler,
+  uploadBankStatement,
+  type ImportedBankStatement,
+  type User,
+} from './lib/api'
 import { formatNorwegianDate } from './lib/date'
+import { resetLinkAt } from './lib/passwordReset'
 import { checkReceiptPick, RECEIPT_IMAGE_TYPES } from './lib/receiptPick'
 import { useDismiss } from './lib/useDismiss'
 
@@ -28,7 +39,88 @@ const NAV_ITEMS: { view: View; label: string }[] = [
 const ADD_ACTION_CLASS =
   'rounded-lg border border-slate-300 bg-white px-5 py-2.5 text-sm font-medium text-slate-900 shadow-sm hover:bg-slate-100 max-sm:w-full max-sm:border-0 max-sm:text-left max-sm:shadow-none'
 
+// Opened at the link in a reset email, shows the page to choose a new password, whoever is signed in,
+// so it never asks who is. Otherwise, or once the page is done, the landing page or the app. The
+// app has no router: the reset email's link is the only address besides its own. Leaving the page
+// puts / in the address bar, so reloading doesn't open it again.
 function App() {
+  const [resetLink, setResetLink] = useState(() => resetLinkAt(window.location))
+  // The User the new password signed in as, so the app shows without asking who is signed in.
+  const [signedInByReset, setSignedInByReset] = useState<User | undefined>()
+
+  function leaveResetPage() {
+    window.history.replaceState(null, '', '/')
+    setResetLink(null)
+  }
+
+  if (resetLink) {
+    return (
+      <ChooseNewPasswordPage
+        link={resetLink}
+        onSignedIn={(user) => {
+          setSignedInByReset(user)
+          leaveResetPage()
+        }}
+        onLeave={leaveResetPage}
+      />
+    )
+  }
+  return <LandingPageOrApp signedIn={signedInByReset} />
+}
+
+interface LandingPageOrAppProps {
+  // Who is already known to be signed in; undefined to ask.
+  signedIn?: User
+}
+
+// Asks who is signed in, unless told, and shows the landing page to nobody and the app to a User.
+// Being signed out, by Sign out or by any call answering 401, unmounts the app, so the next User
+// starts from nothing the previous one saw.
+function LandingPageOrApp({ signedIn }: LandingPageOrAppProps) {
+  // undefined while asking, null when nobody is signed in.
+  const [user, setUser] = useState<User | null | undefined>(signedIn)
+  const [loadFailed, setLoadFailed] = useState(false)
+
+  useEffect(() => {
+    if (signedIn) return
+    let ignore = false
+    fetchCurrentUser().then(
+      (current) => {
+        if (!ignore) setUser(current)
+      },
+      () => {
+        if (!ignore) setLoadFailed(true)
+      },
+    )
+    return () => {
+      ignore = true
+    }
+  }, [signedIn])
+
+  useEffect(() => {
+    setSignedOutHandler(() => setUser(null))
+    return () => setSignedOutHandler(null)
+  }, [])
+
+  if (loadFailed) {
+    return (
+      <div className="flex min-h-screen justify-center bg-slate-50 px-6 py-10 max-sm:px-4">
+        <ErrorMessage className="h-fit">Could not reach the server. Reload the page to try again.</ErrorMessage>
+      </div>
+    )
+  }
+  // A blank page while asking, so a signed-in User never sees the landing page flash by.
+  if (user === undefined) return <div className="min-h-screen bg-slate-50" />
+  if (user === null) return <LandingPage onSignedIn={setUser} />
+  return <SignedInApp user={user} onSignedOut={() => setUser(null)} />
+}
+
+interface SignedInAppProps {
+  user: User
+  onSignedOut: () => void
+}
+
+function SignedInApp({ user, onSignedOut }: SignedInAppProps) {
   const [view, setView] = useState<View>('home')
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [showSavedMessage, setShowSavedMessage] = useState(false)
@@ -55,12 +147,27 @@ function App() {
   // On a narrow screen the pages, and the ways to add Transactions, each sit behind a menu.
   const [isNavOpen, setIsNavOpen] = useState(false)
   const [isAddMenuOpen, setIsAddMenuOpen] = useState(false)
+  // Who is signed in, and Sign out, behind the User entry in the header.
+  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false)
+  const [signOutFailed, setSignOutFailed] = useState(false)
   const headerRef = useRef<HTMLElement>(null)
   const addMenuRef = useRef<HTMLDivElement>(null)
+  const userMenuRef = useRef<HTMLDivElement>(null)
+  // Set once the User has signed out and the app is gone, so an Upload under way sends none of its
+  // remaining Bank Statements, which would otherwise go to whoever signs in next.
+  const hasSignedOutRef = useRef(false)
+  useEffect(() => {
+    hasSignedOutRef.current = false
+    return () => {
+      hasSignedOutRef.current = true
+    }
+  }, [])
   const closeNav = useCallback(() => setIsNavOpen(false), [])
   const closeAddMenu = useCallback(() => setIsAddMenuOpen(false), [])
+  const closeUserMenu = useCallback(() => setIsUserMenuOpen(false), [])
   useDismiss(headerRef, isNavOpen, closeNav)
   useDismiss(addMenuRef, isAddMenuOpen, closeAddMenu)
+  useDismiss(userMenuRef, isUserMenuOpen, closeUserMenu)
 
   function clearHomeMessages() {
     setShowSavedMessage(false)
@@ -78,7 +185,15 @@ function App() {
     if (view !== 'home' && next === 'home') setDashboardVersion((version) => version + 1)
     setTransactionsTarget(undefined)
     setIsNavOpen(false)
+    setIsUserMenuOpen(false)
     setView(next)
+  }
+
+  // Stays signed in, saying so, when the server couldn't be told.
+  async function handleSignOut() {
+    setSignOutFailed(false)
+    if (await signOut()) onSignedOut()
+    else setSignOutFailed(true)
   }
 
   function openTransactions(target: TransactionsTarget) {
@@ -107,6 +222,7 @@ function App() {
     const rejected: Rejection[] = []
     try {
       for (const [index, file] of files.entries()) {
+        if (hasSignedOutRef.current) return
         const result = await uploadBankStatement(file, uploadId)
         if (result.ok) {
           imported.push(result.statement)
@@ -225,8 +341,54 @@ function App() {
               {item.label}
             </button>
           ))}
+          {/* A dropdown under the entry on a wide screen; within the panel on a narrow one. */}
+          <div ref={userMenuRef} className="relative">
+            <button
+              type="button"
+              aria-expanded={isUserMenuOpen}
+              aria-controls="user-menu"
+              onClick={() => setIsUserMenuOpen((open) => !open)}
+              className="rounded-lg px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-100 max-sm:w-full max-sm:py-3 max-sm:text-left max-sm:text-base"
+            >
+              User
+            </button>
+            {isUserMenuOpen && (
+              <div
+                id="user-menu"
+                className="absolute top-full right-0 z-10 mt-1 flex w-max max-w-xs flex-col gap-3 rounded-lg border border-slate-200 bg-white p-3 shadow-md max-sm:static max-sm:mt-0 max-sm:w-auto max-sm:max-w-none max-sm:border-0 max-sm:px-3 max-sm:pt-0 max-sm:shadow-none"
+              >
+                <p className="text-sm break-all text-slate-600">
+                  Signed in as{' '}
+                  <span className="font-medium text-slate-900">{user.isGuest ? 'Guest' : user.email}</span>
+                </p>
+                <button
+                  type="button"
+                  onClick={() => void handleSignOut()}
+                  className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-900 shadow-sm hover:bg-slate-100"
+                >
+                  Sign out
+                </button>
+                {signOutFailed && (
+                  <p role="alert" className="text-xs text-red-600">
+                    Signing out failed. Try again.
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
         </nav>
       </header>
+
+      {/* Under the header on every page, for as long as the Guest is signed in. */}
+      {user.isGuest && (
+        <p
+          role="note"
+          aria-label="Guest"
+          className="border-b border-amber-200 bg-amber-50 px-6 py-2 text-center text-sm text-amber-900 max-sm:px-4"
+        >
+          Demo mode: only use test data.
+        </p>
+      )}
 
       {view === 'transactions' ? (
         <main className="flex flex-col items-center px-6 py-10 max-sm:px-4">
@@ -384,30 +546,42 @@ function scanSummary(saved: number) {
   return `${saved} transaction${saved === 1 ? '' : 's'} saved`
 }
 
+// The Daily AI limit resets at midnight Norwegian time.
+const DAILY_AI_LIMIT_REACHED = 'Daily AI limit reached until midnight Norwegian time'
+
 // One imported Bank Statement is described by its period; several by their sums.
 function importSummary(statements: ImportedBankStatement[]) {
   if (statements.length > 1) {
     const transactions = statements.reduce((sum, statement) => sum + statement.transactionCount, 0)
     const uncategorized = statements.reduce((sum, statement) => sum + statement.uncategorizedCount, 0)
     const aiUnavailable = statements.filter((statement) => statement.aiCategorizationUnavailable).length
+    const limitReached = statements.filter((statement) => statement.dailyAiLimitReached).length
     return (
       `Imported ${statements.length} Bank Statements, ${transactions} transactions: ` +
       `${transactions - uncategorized} categorized, ${uncategorized} Uncategorized` +
-      (aiUnavailable > 0
-        ? `. AI categorization unavailable for ${aiUnavailable} Bank Statement${aiUnavailable === 1 ? '' : 's'}`
-        : '')
+      (aiUnavailable > 0 ? `. AI categorization unavailable for ${countedBankStatements(aiUnavailable)}` : '') +
+      (limitReached > 0 ? `. ${DAILY_AI_LIMIT_REACHED} for ${countedBankStatements(limitReached)}` : '')
     )
   }
 
-  const { transactionCount, uncategorizedCount, aiCategorizationUnavailable, periodStart, periodEnd } = statements[0]
+  const { transactionCount, uncategorizedCount, periodStart, periodEnd } = statements[0]
+  // Why the unmatched rows got no AI-generated rules, when the LLM was meant to propose some.
+  const noAiRulesReason = statements[0].aiCategorizationUnavailable
+    ? 'AI categorization unavailable'
+    : statements[0].dailyAiLimitReached
+      ? DAILY_AI_LIMIT_REACHED
+      : null
   return (
     `Imported ${transactionCount} transactions from statement ` +
     `${formatNorwegianDate(periodStart)}–${formatNorwegianDate(periodEnd)}: ` +
     `${transactionCount - uncategorizedCount} categorized, ${uncategorizedCount} Uncategorized` +
-    (aiCategorizationUnavailable
-      ? `. AI categorization unavailable — ${uncategorizedCount} rows left Uncategorized`
-      : '')
+    (noAiRulesReason ? `. ${noAiRulesReason} — ${uncategorizedCount} rows left Uncategorized` : '')
   )
+}
+
+// "1 Bank Statement", "2 Bank Statements" and so on.
+function countedBankStatements(count: number) {
+  return `${count} Bank Statement${count === 1 ? '' : 's'}`
 }
 
 export default App

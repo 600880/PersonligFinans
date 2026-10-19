@@ -52,7 +52,8 @@ public static class Categorizer
     }
 
     // Opens the database transaction for a rule change and takes the rule-change lock. It conflicts
-    // with itself, so whoever changes rules waits for the previous change to commit first.
+    // with itself, so whoever changes rules waits for the previous change to commit first. It locks
+    // the whole table, so one User's rule change also waits for another's.
     public static async Task<IDbContextTransaction> BeginRuleChangeAsync(AppDbContext db)
     {
         var transaction = await db.Database.BeginTransactionAsync();
@@ -78,7 +79,8 @@ public static class Categorizer
     // - no rule matches its row's description;
     // - its Category exists;
     // - its keyword, trimmed and lowercased, is within the length limits, is not a Payment Channel,
-    //   appears in the row's description ignoring case, and is unique ignoring case;
+    //   appears in the row's description ignoring case, and is unique among the User's rules
+    //   ignoring case;
     // - it would change the Category of nothing that has one: no rule-eligible Transaction, and none
     //   of the descriptions about to be imported. It may only categorize what is Uncategorized.
     // Each added rule is saved at once, so that the uniqueness check is made by the database,
@@ -109,6 +111,7 @@ public static class Categorizer
 
             var rule = new CategorizationRule
             {
+                UserId = db.OwnerOfNewRows,
                 Keyword = keyword,
                 CategoryId = categoryId,
                 CreatedAt = now,

@@ -4,7 +4,10 @@ public class Category
 {
     public int Id { get; set; }
 
-    // Unique, ignoring case.
+    // The User it belongs to.
+    public required string UserId { get; set; }
+
+    // Unique among the User's Categories, ignoring case.
     public required string Name { get; set; }
 
     // What belongs in the Category.

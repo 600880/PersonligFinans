@@ -2,6 +2,264 @@ import { periodQuery, type Period } from './period'
 import { spanQuery, type Span } from './span'
 import type { CreateTransactionRequest, PossibleDuplicateQuery } from './transactionForm'
 
+// Told when any call for the app's data answers 401, which means the sign-in has ended: it expired,
+// or the User signed out elsewhere. The app then goes back to its landing page.
+let handleSignedOut: (() => void) | null = null
+
+export function setSignedOutHandler(handler: (() => void) | null) {
+  handleSignedOut = handler
+}
+
+// fetch for the app's data, which needs a signed-in User. The browser sends the sign-in cookie
+// itself, since the API has the same origin as the app.
+async function apiFetch(input: string, init?: RequestInit): Promise<Response> {
+  const response = await fetch(input, init)
+  if (response.status === 401) {
+    forgetAntiforgeryToken()
+    handleSignedOut?.()
+  }
+  return response
+}
+
+// The header the multipart forms (a Bank Statement's Upload and reading a Receipt) send the
+// antiforgery token in.
+const ANTIFORGERY_HEADER = 'X-CSRF-TOKEN'
+
+// The antiforgery token the multipart forms send, fetched at the first one after signing in, since the
+// server binds it to the signed-in User. null until then, and again whenever who is signed in may
+// have changed.
+let antiforgeryToken: Promise<string> | null = null
+
+function forgetAntiforgeryToken() {
+  antiforgeryToken = null
+}
+
+function currentAntiforgeryToken(): Promise<string> {
+  antiforgeryToken ??= (async () => {
+    const response = await apiFetch('/api/antiforgery-token')
+    if (!response.ok) throw new Error(`Loading the antiforgery token failed (${response.status})`)
+    return ((await response.json()) as { token: string }).token
+  })().catch((error: unknown) => {
+    // A failed fetch is tried again at the next form rather than kept.
+    forgetAntiforgeryToken()
+    throw error
+  })
+  return antiforgeryToken
+}
+
+// Posts a multipart form, which the server only accepts with the antiforgery token. A token it
+// refuses (403), for example one given before the server's keys changed, is replaced by a fresh one
+// and the form sent once more.
+async function postForm(url: string, body: FormData): Promise<Response> {
+  const send = async () =>
+    apiFetch(url, { method: 'POST', headers: { [ANTIFORGERY_HEADER]: await currentAntiforgeryToken() }, body })
+
+  const response = await send()
+  if (response.status !== 403) return response
+  forgetAntiforgeryToken()
+  return send()
+}
+
+// The problem a request was refused with: the first message for each field of a validation problem,
+// keyed on the field, and the detail of any other problem. A body that isn't a problem gives neither.
+async function readProblem<Request = object>(
+  response: Response,
+): Promise<{ fieldErrors: Partial<Record<keyof Request, string>>; detail: string | null }> {
+  const problem = (await response.json().catch(() => null)) as {
+    detail?: string
+    errors?: Record<string, string[]>
+  } | null
+  const fieldErrors: Partial<Record<keyof Request, string>> = {}
+  for (const [field, messages] of Object.entries(problem?.errors ?? {})) {
+    fieldErrors[field as keyof Request] = messages[0]
+  }
+  return { fieldErrors, detail: problem?.detail ?? null }
+}
+
+// The signed-in User, by the email they signed up with, and whether they are the Guest.
+export interface User {
+  email: string
+  isGuest: boolean
+}
+
+// Who is signed in, or null when nobody is.
+export async function fetchCurrentUser(): Promise<User | null> {
+  forgetAntiforgeryToken()
+  const response = await fetch('/api/user')
+  if (response.status === 401) return null
+  if (!response.ok) throw new Error(`Loading who is signed in failed (${response.status})`)
+  return (await response.json()) as User
+}
+
+export interface CredentialsRequest {
+  email: string
+  password: string
+}
+
+export type CredentialsFieldErrors = Partial<Record<keyof CredentialsRequest, string>>
+
+// lockedOut is true when the email is locked after too many failed sign-ins.
+export type SubmitCredentialsResult =
+  | { ok: true; user: User }
+  | { ok: false; fieldErrors: CredentialsFieldErrors; message: string | null; lockedOut?: boolean }
+
+// A wrong email or password gets one message that doesn't say which was wrong; a locked email gets
+// a message of its own.
+export function signIn(request: CredentialsRequest): Promise<SubmitCredentialsResult> {
+  return submitCredentials('/api/user/sign-in', request, 'Signing in')
+}
+
+// Creates a User and signs it in. An email in use, an invalid email or a short password gets a
+// field error.
+export function signUp(request: CredentialsRequest): Promise<SubmitCredentialsResult> {
+  return submitCredentials('/api/user/sign-up', request, 'Signing up')
+}
+
+// Posts the body as JSON to an endpoint that signs someone in, or null when the server couldn't be
+// reached. Who is signed in changes when it succeeds, so the antiforgery token is forgotten.
+async function postSignIn(url: string, body: object): Promise<Response | null> {
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    if (response.ok) forgetAntiforgeryToken()
+    return response
+  } catch {
+    return null
+  }
+}
+
+const UNREACHABLE = 'Could not reach the server.'
+
+// action names what failed, e.g. "Signing in", for an answer that isn't a problem.
+async function submitCredentials(
+  url: string,
+  request: CredentialsRequest,
+  action: string,
+): Promise<SubmitCredentialsResult> {
+  const response = await postSignIn(url, request)
+  if (!response) return { ok: false, fieldErrors: {}, message: UNREACHABLE }
+  if (response.ok) return { ok: true, user: (await response.json()) as User }
+
+  // 400 is a validation problem keyed on the fields. 401 is a wrong email or password, and 429 a
+  // locked email: problems whose detail says which.
+  if (response.status === 400 || response.status === 401 || response.status === 429) {
+    const { fieldErrors, detail } = await readProblem<CredentialsRequest>(response)
+    if (Object.keys(fieldErrors).length > 0) return { ok: false, fieldErrors, message: null }
+    if (detail) return { ok: false, fieldErrors: {}, message: detail, lockedOut: response.status === 429 }
+  }
+
+  return { ok: false, fieldErrors: {}, message: `${action} failed (${response.status}).` }
+}
+
+export type ContinueAsGuestResult = { ok: true; user: User } | { ok: false; message: string }
+
+// Signs in as the Guest, the one User every visitor shares. Sent as JSON, which the server requires
+// so that another site's form can't sign its visitors in as the Guest.
+export async function continueAsGuest(): Promise<ContinueAsGuestResult> {
+  const response = await postSignIn('/api/user/continue-as-guest', {})
+  if (!response) return { ok: false, message: UNREACHABLE }
+  if (!response.ok) return { ok: false, message: `Continuing as Guest failed (${response.status}).` }
+  return { ok: true, user: (await response.json()) as User }
+}
+
+// linkHours is how long a link to choose a new password works.
+export interface PasswordReset {
+  linkHours: number
+}
+
+// Password reset when it is available, meaning the server can send email, or null. Anything but a
+// clear yes, a server that can't be reached included, counts as unavailable, so the landing page
+// never offers a reset that can't work.
+export async function fetchPasswordReset(): Promise<PasswordReset | null> {
+  try {
+    const response = await fetch('/api/user/password-reset/availability')
+    if (!response.ok) return null
+    const { available, linkHours } = (await response.json()) as { available: boolean; linkHours: number }
+    return available === true ? { linkHours } : null
+  } catch {
+    return null
+  }
+}
+
+export type RequestPasswordResetResult =
+  | { ok: true }
+  | { ok: false; fieldErrors: { email?: string }; message: string | null }
+
+// Asks for a link to choose a new password to be emailed. The server answers the same for every
+// email, whether or not it is a User's, so success says only that the request was taken. Sent as
+// JSON, which the server requires, like Sign in.
+export async function requestPasswordReset(email: string): Promise<RequestPasswordResetResult> {
+  let response: Response
+  try {
+    response = await fetch('/api/user/password-reset/request', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email }),
+    })
+  } catch {
+    return { ok: false, fieldErrors: {}, message: UNREACHABLE }
+  }
+  if (response.ok) return { ok: true }
+
+  // 400 is a validation problem for the email, and 503 means email can't be sent at all.
+  if (response.status === 400) {
+    const { fieldErrors } = await readProblem<{ email: string }>(response)
+    if (Object.keys(fieldErrors).length > 0) return { ok: false, fieldErrors, message: null }
+  }
+  if (response.status === 503) return { ok: false, fieldErrors: {}, message: 'Password reset is unavailable.' }
+  return { ok: false, fieldErrors: {}, message: `Sending the link failed (${response.status}).` }
+}
+
+// The email and token from the link in a reset email, the token as the link holds it, and the new
+// password.
+export interface NewPasswordRequest {
+  email: string
+  token: string
+  password: string
+}
+
+// expired is true for a link that can't reset a password: the server says only that it has expired
+// or was already used, never which, nor whether the email is a User's.
+export type ChooseNewPasswordResult =
+  | { ok: true; user: User }
+  | { ok: false; expired: true }
+  | { ok: false; expired: false; fieldErrors: { password?: string }; message: string | null }
+
+// Sets the new password and signs in as the User, replacing whoever was signed in. Sent as JSON,
+// which the server requires, like Sign in.
+export async function chooseNewPassword(request: NewPasswordRequest): Promise<ChooseNewPasswordResult> {
+  const response = await postSignIn('/api/user/password-reset/new-password', request)
+  if (!response) return { ok: false, expired: false, fieldErrors: {}, message: UNREACHABLE }
+  if (response.ok) return { ok: true, user: (await response.json()) as User }
+
+  // 410 is a link that has expired or was already used. 400 is a validation problem, which for a
+  // link's email and token can only be a password the server refused, and 503 means Password reset
+  // is unavailable.
+  if (response.status === 410) return { ok: false, expired: true }
+  if (response.status === 400) {
+    const { fieldErrors } = await readProblem<{ password: string }>(response)
+    if (fieldErrors.password) return { ok: false, expired: false, fieldErrors, message: null }
+  }
+  if (response.status === 503) {
+    return { ok: false, expired: false, fieldErrors: {}, message: 'Password reset is unavailable.' }
+  }
+  return { ok: false, expired: false, fieldErrors: {}, message: `Setting the new password failed (${response.status}).` }
+}
+
+// Ends the sign-in. Resolves false when the server couldn't be told, so the User is still signed in.
+export async function signOut(): Promise<boolean> {
+  try {
+    const response = await fetch('/api/user/sign-out', { method: 'POST' })
+    if (response.ok) forgetAntiforgeryToken()
+    return response.ok
+  } catch {
+    return false
+  }
+}
+
 // colour is what the Dashboard draws the Category in, as #rrggbb. transactionCount and ruleCount are
 // how many Transactions and Categorization Rules have the Category.
 export interface Category {
@@ -21,7 +279,7 @@ export type CreateTransactionResult =
   | { ok: false; fieldErrors: FieldErrors; message: string | null }
 
 export async function fetchCategories(): Promise<Category[]> {
-  const response = await fetch('/api/categories')
+  const response = await apiFetch('/api/categories')
   if (!response.ok) throw new Error(`Loading categories failed (${response.status})`)
   return (await response.json()) as Category[]
 }
@@ -53,7 +311,7 @@ export async function deleteCategory(
 
   let response: Response
   try {
-    response = await fetch(`/api/categories/${id}${search}`, { method: 'DELETE' })
+    response = await apiFetch(`/api/categories/${id}${search}`, { method: 'DELETE' })
   } catch {
     return { ok: false, message: 'Could not reach the server.' }
   }
@@ -66,10 +324,8 @@ export async function deleteCategory(
   if (response.status === 404) return { ok: true, alreadyDeleted: true, transactionsChanged: 0 }
 
   if (response.status === 400) {
-    const problem = (await response.json().catch(() => null)) as {
-      errors?: Record<string, string[]>
-    } | null
-    const message = Object.values(problem?.errors ?? {})[0]?.[0]
+    const { fieldErrors } = await readProblem<Record<string, unknown>>(response)
+    const message = Object.values(fieldErrors)[0]
     if (message) return { ok: false, message }
   }
 
@@ -103,7 +359,7 @@ async function saveCategory(
 ): Promise<SaveCategoryResult> {
   let response: Response
   try {
-    response = await fetch(url, {
+    response = await apiFetch(url, {
       method,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(request),
@@ -115,13 +371,7 @@ async function saveCategory(
   if (response.ok) return { ok: true, category: (await response.json()) as Category }
 
   if (response.status === 400) {
-    const problem = (await response.json().catch(() => null)) as {
-      errors?: Record<string, string[]>
-    } | null
-    const fieldErrors: CategoryFieldErrors = {}
-    for (const [field, messages] of Object.entries(problem?.errors ?? {})) {
-      fieldErrors[field as keyof CategoryFieldErrors] = messages[0]
-    }
+    const { fieldErrors } = await readProblem<CategoryRequest>(response)
     if (Object.keys(fieldErrors).length > 0) return { ok: false, fieldErrors, message: null }
   }
 
@@ -149,7 +399,7 @@ export interface TransactionMonth {
 
 // The months that have at least one Transaction, newest first.
 export async function fetchTransactionMonths(): Promise<TransactionMonth[]> {
-  const response = await fetch('/api/transactions/months')
+  const response = await apiFetch('/api/transactions/months')
   if (!response.ok) throw new Error(`Loading months failed (${response.status})`)
   return (await response.json()) as TransactionMonth[]
 }
@@ -158,7 +408,7 @@ export async function fetchTransactionMonths(): Promise<TransactionMonth[]> {
 export type YearOrMonth = Exclude<Period, { granularity: 'quarter' }>
 
 export async function fetchTransactions(period: YearOrMonth): Promise<Transaction[]> {
-  const response = await fetch(`/api/transactions?${periodQuery(period)}`)
+  const response = await apiFetch(`/api/transactions?${periodQuery(period)}`)
   if (!response.ok) throw new Error(`Loading transactions failed (${response.status})`)
   return (await response.json()) as Transaction[]
 }
@@ -178,7 +428,7 @@ export interface Spending {
 // Transactions in the Transfers Category count only when includeTransfers is set.
 export async function fetchSpending(period: Period, includeTransfers: boolean): Promise<Spending> {
   const transfers = includeTransfers ? '&includeTransfers=true' : ''
-  const response = await fetch(`/api/spending?${periodQuery(period)}${transfers}`)
+  const response = await apiFetch(`/api/spending?${periodQuery(period)}${transfers}`)
   if (!response.ok) throw new Error(`Loading spending failed (${response.status})`)
   return (await response.json()) as Spending
 }
@@ -195,7 +445,7 @@ export interface MonthSpending {
 // Transfers Category count only when includeTransfers is set.
 export async function fetchMonthlySpending(span: Span, includeTransfers: boolean): Promise<MonthSpending[]> {
   const transfers = includeTransfers ? '&includeTransfers=true' : ''
-  const response = await fetch(`/api/spending/monthly?${spanQuery(span)}${transfers}`)
+  const response = await apiFetch(`/api/spending/monthly?${spanQuery(span)}${transfers}`)
   if (!response.ok) throw new Error(`Loading monthly spending failed (${response.status})`)
   return (await response.json()) as MonthSpending[]
 }
@@ -209,7 +459,7 @@ export async function changeTransactionCategory(
 ): Promise<ChangeCategoryResult> {
   let response: Response
   try {
-    response = await fetch(`/api/transactions/${id}/category`, {
+    response = await apiFetch(`/api/transactions/${id}/category`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ categoryId }),
@@ -229,7 +479,7 @@ export type ChangeNoteResult = { ok: true; transaction: Transaction } | { ok: fa
 export async function changeTransactionNote(id: number, note: string | null): Promise<ChangeNoteResult> {
   let response: Response
   try {
-    response = await fetch(`/api/transactions/${id}/note`, {
+    response = await apiFetch(`/api/transactions/${id}/note`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ note }),
@@ -250,7 +500,7 @@ export type DeleteTransactionResult = { ok: true; alreadyDeleted: boolean } | { 
 export async function deleteTransaction(id: number): Promise<DeleteTransactionResult> {
   let response: Response
   try {
-    response = await fetch(`/api/transactions/${id}`, { method: 'DELETE' })
+    response = await apiFetch(`/api/transactions/${id}`, { method: 'DELETE' })
   } catch {
     return { ok: false, message: 'Could not reach the server.' }
   }
@@ -261,8 +511,8 @@ export async function deleteTransaction(id: number): Promise<DeleteTransactionRe
 
   // 409 is a problem whose detail says why the Transaction can't be deleted.
   if (response.status === 409) {
-    const problem = (await response.json().catch(() => null)) as { detail?: string } | null
-    if (problem?.detail) return { ok: false, message: problem.detail }
+    const { detail } = await readProblem(response)
+    if (detail) return { ok: false, message: detail }
   }
 
   return { ok: false, message: `Deleting failed (${response.status}).` }
@@ -280,7 +530,7 @@ export interface PossibleDuplicate {
 // The Possible duplicates of a Transaction on the query's date with its signed Amount, oldest first.
 export async function fetchPossibleDuplicates({ date, amount }: PossibleDuplicateQuery): Promise<PossibleDuplicate[]> {
   const search = new URLSearchParams({ date, amount: String(amount) })
-  const response = await fetch(`/api/transactions/possible-duplicates?${search}`)
+  const response = await apiFetch(`/api/transactions/possible-duplicates?${search}`)
   if (!response.ok) throw new Error(`Checking for possible duplicates failed (${response.status})`)
   return (await response.json()) as PossibleDuplicate[]
 }
@@ -290,7 +540,7 @@ export async function createTransaction(
 ): Promise<CreateTransactionResult> {
   let response: Response
   try {
-    response = await fetch('/api/transactions', {
+    response = await apiFetch('/api/transactions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(request),
@@ -302,19 +552,15 @@ export async function createTransaction(
   if (response.ok) return { ok: true }
 
   if (response.status === 400) {
-    const problem = (await response.json().catch(() => null)) as {
-      errors?: Record<string, string[]>
-    } | null
-    const fieldErrors: FieldErrors = {}
-    for (const [field, messages] of Object.entries(problem?.errors ?? {})) {
-      fieldErrors[field as keyof FieldErrors] = messages[0]
-    }
+    const { fieldErrors } = await readProblem<CreateTransactionRequest>(response)
     if (Object.keys(fieldErrors).length > 0) return { ok: false, fieldErrors, message: null }
   }
 
   return { ok: false, fieldErrors: {}, message: `Saving failed (${response.status}).` }
 }
 
+// aiCategorizationUnavailable: the LLM was asked for rules for the unmatched rows but couldn't answer.
+// dailyAiLimitReached: the LLM wasn't asked, because the Daily AI limit was reached.
 export interface ImportedBankStatement {
   id: number
   accountNumber: string
@@ -323,6 +569,7 @@ export interface ImportedBankStatement {
   transactionCount: number
   uncategorizedCount: number
   aiCategorizationUnavailable: boolean
+  dailyAiLimitReached: boolean
 }
 
 export type UploadBankStatementResult =
@@ -337,7 +584,7 @@ export async function uploadBankStatement(file: File, uploadId: string): Promise
 
   let response: Response
   try {
-    response = await fetch('/api/bank-statements', { method: 'POST', body })
+    response = await postForm('/api/bank-statements', body)
   } catch {
     return { ok: false, message: 'Could not reach the server.' }
   }
@@ -346,11 +593,8 @@ export async function uploadBankStatement(file: File, uploadId: string): Promise
 
   // 400 is a validation problem keyed on "file"; 409 is a problem whose detail explains the conflict.
   if (response.status === 400 || response.status === 409) {
-    const problem = (await response.json().catch(() => null)) as {
-      detail?: string
-      errors?: { file?: string[] }
-    } | null
-    const message = problem?.errors?.file?.[0] ?? problem?.detail
+    const { fieldErrors, detail } = await readProblem<{ file: File }>(response)
+    const message = fieldErrors.file ?? detail
     if (message) return { ok: false, message }
   }
 
@@ -358,8 +602,8 @@ export async function uploadBankStatement(file: File, uploadId: string): Promise
 }
 
 // read: the receipt reader read the Receipt. unreadable: it couldn't. unavailable: no receipt reader
-// is configured.
-export type ReceiptOutcome = 'read' | 'unreadable' | 'unavailable'
+// is configured. limitReached: the reader wasn't asked, because the Daily AI limit was reached.
+export type ReceiptOutcome = 'read' | 'unreadable' | 'unavailable' | 'limitReached'
 
 // What a manually-entered Transaction from one Receipt should start from. amount is signed: negative
 // for a purchase, positive for a refund. Every field is null unless the outcome is read.
@@ -386,7 +630,7 @@ export async function readReceipt(file: File): Promise<ReceiptSuggestion> {
   body.append('file', file)
 
   try {
-    const response = await fetch('/api/receipts/read', { method: 'POST', body })
+    const response = await postForm('/api/receipts/read', body)
     if (!response.ok) return UNREADABLE
     return (await response.json()) as ReceiptSuggestion
   } catch {
@@ -422,7 +666,7 @@ export type DeleteRuleResult =
   | { ok: false; message: string }
 
 export async function fetchRules(): Promise<CategorizationRule[]> {
-  const response = await fetch('/api/categorization-rules')
+  const response = await apiFetch('/api/categorization-rules')
   if (!response.ok) throw new Error(`Loading rules failed (${response.status})`)
   return (await response.json()) as CategorizationRule[]
 }
@@ -438,7 +682,7 @@ export function editRule(id: number, request: CategorizationRuleRequest): Promis
 export async function deleteRule(id: number): Promise<DeleteRuleResult> {
   let response: Response
   try {
-    response = await fetch(`/api/categorization-rules/${id}`, { method: 'DELETE' })
+    response = await apiFetch(`/api/categorization-rules/${id}`, { method: 'DELETE' })
   } catch {
     return { ok: false, message: 'Could not reach the server.' }
   }
@@ -460,7 +704,7 @@ async function saveRule(
 ): Promise<SaveRuleResult> {
   let response: Response
   try {
-    response = await fetch(url, {
+    response = await apiFetch(url, {
       method,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(request),
@@ -477,13 +721,7 @@ async function saveRule(
   }
 
   if (response.status === 400) {
-    const problem = (await response.json().catch(() => null)) as {
-      errors?: Record<string, string[]>
-    } | null
-    const fieldErrors: RuleFieldErrors = {}
-    for (const [field, messages] of Object.entries(problem?.errors ?? {})) {
-      fieldErrors[field as keyof RuleFieldErrors] = messages[0]
-    }
+    const { fieldErrors } = await readProblem<CategorizationRuleRequest>(response)
     if (Object.keys(fieldErrors).length > 0) return { ok: false, fieldErrors, message: null }
   }
 

@@ -170,6 +170,11 @@ function ReceiptStep({ receipt, heading, headingId, onSaved, onDone }: ReceiptSt
             Couldn't read this receipt
           </p>
         )}
+        {suggestion?.outcome === 'limitReached' && (
+          <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            Daily AI limit reached until midnight Norwegian time — enter this receipt by hand
+          </p>
+        )}
 
         <TransactionForm
           // Started over from what was read, once the Receipt has been read.

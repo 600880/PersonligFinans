@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Design;
+using PersonligFinans.Api.Users;
 
 namespace PersonligFinans.Api.Data;
 
@@ -10,6 +11,7 @@ public class DesignTimeDbContextFactory : IDesignTimeDbContextFactory<AppDbConte
     {
         var options = new DbContextOptionsBuilder<AppDbContext>();
         DatabaseSetup.Configure(options, "Host=localhost;Database=design_time");
-        return new AppDbContext(options.Options);
+        // Building the model needs no signed-in User.
+        return new AppDbContext(options.Options, new CurrentUser(new HttpContextAccessor()));
     }
 }

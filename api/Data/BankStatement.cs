@@ -3,6 +3,9 @@ namespace PersonligFinans.Api.Data;
 public class BankStatement
 {
     public int Id { get; set; }
+
+    // The User it belongs to.
+    public required string UserId { get; set; }
     public required string AccountNumber { get; set; }
     public DateOnly PeriodStart { get; set; }
     public DateOnly PeriodEnd { get; set; }

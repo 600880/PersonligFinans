@@ -54,6 +54,22 @@ public static class StatementPdf
         string closingBalance) =>
         Create(accountNumber, period, openingBalance, [new StatementPdfPage(rows.ToList())], closingBalance);
 
+    // A statement for August 2026 of an account no other test uses, unless by chance. Each row is a
+    // purchase of 10,00 from the given merchant, from an opening balance of 1.000,00.
+    public static byte[] WithPurchasesFrom(params string[] merchants) =>
+        Create(
+            UniqueAccountNumber(),
+            period: "01.08.2026 - 31.08.2026",
+            openingBalance: "1.000,00",
+            rows: merchants.Select(m => new StatementPdfRow($"Varer 03.08 {m}", "0408", "10,00", null, "0408", "21", "12345678")),
+            closingBalance: $"{1000 - 10 * merchants.Length},00");
+
+    public static string UniqueAccountNumber()
+    {
+        var digits = Random.Shared.NextInt64(0, 100_000_000_000).ToString("D11");
+        return $"{digits[..4]}.{digits[4..6]}.{digits[6..]}";
+    }
+
     // Each page but the last needs a CarriedBalance, printed as "Overført til neste side" at its
     // bottom and "Overført fra forrige side" at the top of the next page, as the bank does.
     public static byte[] Create(

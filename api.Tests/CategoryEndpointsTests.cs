@@ -14,49 +14,33 @@ namespace PersonligFinans.Api.Tests;
 [Collection(ApiCollection.Name)]
 public class CategoryEndpointsTests : IAsyncLifetime
 {
-    private const int GroceriesId = 1;
-    private const int TravelId = 10;
-    private const int OtherId = 13;
-    private const int ElectronicsId = 15;
-
     private readonly PostgresApiFactory _factory;
-    private readonly HttpClient _client;
-
-    // The tests share one database, so each test's keywords, descriptions and Category names
-    // contain a token of its own.
-    private readonly string _token = "t" + Guid.NewGuid().ToString("N")[..8];
+    private readonly string _email = SignedInClient.UniqueEmail();
+    private HttpClient _client = null!;
+    private TestCategories _categories = null!;
 
     public CategoryEndpointsTests(PostgresApiFactory factory)
     {
         _factory = factory;
-        _client = factory.CreateClient();
     }
 
-    public Task InitializeAsync() => Task.CompletedTask;
-
-    // Removes the Categories the test created, and the rules and Transactions using them, since
-    // other tests expect only the seeded Categories, e.g. among those offered to the rule generator.
-    // Also removes the test's own Transactions, which a delete may have left Uncategorized or in Other.
-    public async Task DisposeAsync()
+    public async Task InitializeAsync()
     {
-        using var scope = _factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var created = db.Categories.Where(c => c.Name.ToLower().Contains(_token));
-        await db.Transactions
-            .Where(t => created.Any(c => c.Id == t.CategoryId) || t.Description.ToLower().Contains(_token))
-            .ExecuteDeleteAsync();
-        await db.CategorizationRules.Where(r => created.Any(c => c.Id == r.CategoryId)).ExecuteDeleteAsync();
-        await created.ExecuteDeleteAsync();
+        _client = await _factory.CreateSignedInClientAsync(_email);
+        _categories = await TestCategories.Of(_client);
     }
+
+    public Task DisposeAsync() => Task.CompletedTask;
 
     // Adds a Category straight to the database, and returns its id. Its name must contain the
     // test's token, so that it is removed afterwards.
     private async Task<int> CreateCategory(string name, string description = "Made by a test.", bool builtIn = false)
     {
-        using var scope = _factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        await using var user = await UserDatabase.OfAsync(_factory, _email);
+        var db = user.Db;
         var category = new Category
         {
+            UserId = db.OwnerOfNewRows,
             Name = name,
             Description = description,
             Colour = CategoryColours.Fallback,
@@ -70,14 +54,15 @@ public class CategoryEndpointsTests : IAsyncLifetime
     private async Task<List<CategoryResponse>> ListCategories() =>
         (await _client.GetFromJsonAsync<List<CategoryResponse>>("/api/categories"))!;
 
-    // Other tests add Categories of their own, which these leave out.
-    private async Task<List<CategoryResponse>> ListSeededCategories() =>
-        (await ListCategories()).Where(c => SeedCategories.All.Any(s => s.Id == c.Id)).ToList();
+    // The Categories of a User of its own, which has only the seeds, since this class's User has the
+    // tests' Categories added.
+    private async Task<List<CategoryResponse>> ListCategoriesOfANewUser() =>
+        (await (await _factory.CreateSignedInClientAsync()).GetFromJsonAsync<List<CategoryResponse>>("/api/categories"))!;
 
     [Fact]
     public async Task Get_FreshDatabase_ListsTheSeededCategoriesWithDescriptionsAndBuiltInFlags()
     {
-        var categories = await ListSeededCategories();
+        var categories = await ListCategoriesOfANewUser();
 
         var byName = categories.ToDictionary(c => c.Name);
         Assert.Equal(
@@ -85,18 +70,10 @@ public class CategoryEndpointsTests : IAsyncLifetime
             {
                 ["Housing"] = ("Mortgage, common costs and insurance.", true),
                 ["Groceries"] = ("All groceries.", true),
-                ["Electronics"] = ("All electronics.", false),
-                ["Entertainment"] = ("Movies, video games etc.", false),
-                ["Clothing"] = ("All clothing.", true),
+                ["Clothing"] = ("All clothing, including sportswear.", true),
                 ["Income"] = ("All income.", true),
-                ["Utilities"] = ("Electricity, water, phone, internet etc.", false),
-                ["Health"] = ("Pharmacy etc.", false),
                 ["Transfers"] = ("All private transfers.", true),
-                ["Transport"] = ("All transport.", true),
-                ["Travel"] = ("All travel.", false),
-                ["Restaurants"] = ("Restaurant, takeaway, bakery etc.", false),
-                ["Shopping"] = ("All shopping.", false),
-                ["Subscriptions"] = ("All subscriptions.", false),
+                ["Transport"] = ("All expenses related to car and public transport.", true),
                 ["Other"] = ("Costs that don't belong in any other category.", true),
             },
             byName.ToDictionary(c => c.Key, c => (c.Value.Description, c.Value.BuiltIn)));
@@ -105,26 +82,18 @@ public class CategoryEndpointsTests : IAsyncLifetime
     [Fact]
     public async Task Get_FreshDatabase_GivesTheSeededCategoriesTheirColours()
     {
-        var colours = (await ListSeededCategories()).ToDictionary(c => c.Id, c => c.Colour);
+        var colours = (await ListCategoriesOfANewUser()).ToDictionary(c => c.Name, c => c.Colour);
 
         Assert.Equal(
-            new Dictionary<int, string>
+            new Dictionary<string, string>
             {
-                [1] = "#2a78d6",
-                [2] = "#eb6834",
-                [3] = "#1baf7a",
-                [4] = "#eda100",
-                [5] = "#e87ba4",
-                [6] = "#008300",
-                [7] = "#4a3aa7",
-                [8] = "#e34948",
-                [9] = "#104281",
-                [10] = "#86b6ef",
-                [11] = "#8a5a1c",
-                [12] = "#0f766e",
-                [13] = "#9085e9",
-                [14] = "#b8336a",
-                [15] = "#6b8e23",
+                ["Groceries"] = "#2a78d6",
+                ["Transport"] = "#1baf7a",
+                ["Housing"] = "#eda100",
+                ["Income"] = "#8a5a1c",
+                ["Transfers"] = "#0f766e",
+                ["Other"] = "#9085e9",
+                ["Clothing"] = "#b8336a",
             },
             colours);
     }
@@ -134,7 +103,7 @@ public class CategoryEndpointsTests : IAsyncLifetime
     {
         // Created out of order, and named to sort among each other only: in the Norwegian alphabet,
         // ignoring case, Æ, Ø and Å come last.
-        string[] created = [$"Åa {_token}", $"Zzz {_token}", $"øa {_token}", $"zzy {_token}", $"Æa {_token}"];
+        string[] created = ["Åa", "Zzz", "øa", "zzy", "Æa"];
         foreach (var name in created)
             await CreateCategory(name);
         string[] builtIns = ["Housing", "Groceries", "Clothing", "Transport", "Other", "Income", "Transfers"];
@@ -143,19 +112,19 @@ public class CategoryEndpointsTests : IAsyncLifetime
 
         Assert.Equal(builtIns, categories.Take(builtIns.Length).Select(c => c.Name));
         Assert.Equal(
-            [$"zzy {_token}", $"Zzz {_token}", $"Æa {_token}", $"øa {_token}", $"Åa {_token}"],
+            ["zzy", "Zzz", "Æa", "øa", "Åa"],
             categories.Select(c => c.Name).Where(created.Contains));
         Assert.Equal(
-            ["Electronics", "Entertainment", "Health", "Restaurants", "Shopping", "Subscriptions", "Travel", "Utilities"],
-            categories.Select(c => c.Name).Where(name => SeedCategories.All.Any(s => !s.BuiltIn && s.Name == name)));
+            ["Electronics", "Restaurants", "Shopping", "Travel"],
+            categories.Select(c => c.Name).Where(name => TestCategories.Added.Any(added => added.Name == name)));
     }
 
     [Fact]
     public void BuiltInOrder_NamesEverySeededBuiltInCategoryOnce()
     {
         Assert.Equal(
-            SeedCategories.All.Where(c => c.BuiltIn).Select(c => c.Name).Order(),
-            SeedCategories.BuiltInOrder.Order());
+            Seeds.Categories.Where(c => c.BuiltIn).Select(c => c.Name).Order(),
+            Seeds.BuiltInOrder.Order());
     }
 
     [Fact]
@@ -163,39 +132,37 @@ public class CategoryEndpointsTests : IAsyncLifetime
     {
         var before = (await ListCategories()).ToDictionary(c => c.Id);
 
-        foreach (var description in new[] { $"{_token} Mobil", $"{_token} Lader" })
+        foreach (var description in new[] { "Mobil", "Lader" })
         {
             var transaction = await _client.PostAsJsonAsync("/api/transactions", new
             {
                 date = "2026-08-03",
                 description,
                 amount = -100m,
-                categoryId = ElectronicsId,
+                categoryId = _categories.Electronics,
             });
             Assert.Equal(HttpStatusCode.Created, transaction.StatusCode);
         }
         var rule = await _client.PostAsJsonAsync(
-            "/api/categorization-rules", new { keyword = $"{_token} elektro", categoryId = ElectronicsId });
+            "/api/categorization-rules", new { keyword = "elektro", categoryId = _categories.Electronics });
         Assert.Equal(HttpStatusCode.Created, rule.StatusCode);
 
         var after = (await ListCategories()).ToDictionary(c => c.Id);
-        Assert.Equal(before[ElectronicsId].TransactionCount + 2, after[ElectronicsId].TransactionCount);
-        Assert.Equal(before[ElectronicsId].RuleCount + 1, after[ElectronicsId].RuleCount);
-        Assert.Equal(before[TravelId].TransactionCount, after[TravelId].TransactionCount);
-        Assert.Equal(before[TravelId].RuleCount, after[TravelId].RuleCount);
+        Assert.Equal(before[_categories.Electronics].TransactionCount + 2, after[_categories.Electronics].TransactionCount);
+        Assert.Equal(before[_categories.Electronics].RuleCount + 1, after[_categories.Electronics].RuleCount);
+        Assert.Equal(before[_categories.Travel].TransactionCount, after[_categories.Travel].TransactionCount);
+        Assert.Equal(before[_categories.Travel].RuleCount, after[_categories.Travel].RuleCount);
     }
 
     [Fact]
     public async Task CategoryNames_AreUniqueIgnoringCase()
     {
-        using var scope = _factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        // Rolled back when disposed, so the Categories never reach the other tests.
-        await using var transaction = await db.Database.BeginTransactionAsync();
-        db.Categories.Add(new Category { Name = $"{_token} Hobby", Description = "Hobbies.", Colour = CategoryColours.Fallback });
+        await using var user = await UserDatabase.OfAsync(_factory, _email);
+        var db = user.Db;
+        db.Categories.Add(new Category { UserId = db.OwnerOfNewRows, Name = "Hobby", Description = "Hobbies.", Colour = CategoryColours.Fallback });
         await db.SaveChangesAsync();
 
-        db.Categories.Add(new Category { Name = $"{_token.ToUpperInvariant()} HOBBY", Description = "Hobbies.", Colour = CategoryColours.Fallback });
+        db.Categories.Add(new Category { UserId = db.OwnerOfNewRows, Name = "HOBBY", Description = "Hobbies.", Colour = CategoryColours.Fallback });
 
         await Assert.ThrowsAsync<DbUpdateException>(() => db.SaveChangesAsync());
     }
@@ -203,7 +170,7 @@ public class CategoryEndpointsTests : IAsyncLifetime
     [Fact]
     public async Task Delete_UnusedCategory_DeletesItAndChangesNoTransactions()
     {
-        var id = await CreateCategory($"{_token} Hobby");
+        var id = await CreateCategory("Hobby");
 
         var response = await _client.DeleteAsync($"/api/categories/{id}");
 
@@ -224,22 +191,22 @@ public class CategoryEndpointsTests : IAsyncLifetime
     [Fact]
     public async Task Delete_BuiltInCategory_IsAValidationProblem()
     {
-        var id = await CreateCategory($"{_token} Pets", builtIn: true);
+        var id = await CreateCategory("Pets", builtIn: true);
 
         var response = await _client.DeleteAsync($"/api/categories/{id}");
 
-        await AssertCategoryProblem(response, $"{_token} Pets is a Built-in Category, so it can't be deleted.");
+        await AssertCategoryProblem(response, "Pets is a Built-in Category, so it can't be deleted.");
         Assert.Contains(await ListCategories(), c => c.Id == id);
     }
 
     [Fact]
     public async Task Delete_CategoryATransactionUses_IsAValidationProblem()
     {
-        var id = await CreateCategory($"{_token} Garden");
+        var id = await CreateCategory("Garden");
         var transaction = await _client.PostAsJsonAsync("/api/transactions", new
         {
             date = "2026-08-03",
-            description = $"{_token} Plantasjen",
+            description = "Plantasjen",
             amount = -100m,
             categoryId = id,
         });
@@ -247,21 +214,21 @@ public class CategoryEndpointsTests : IAsyncLifetime
 
         var response = await _client.DeleteAsync($"/api/categories/{id}");
 
-        await AssertCategoryProblem(response, $"{_token} Garden is in use, so it can't be deleted.");
+        await AssertCategoryProblem(response, "Garden is in use, so it can't be deleted.");
         Assert.Contains(await ListCategories(), c => c.Id == id);
     }
 
     [Fact]
     public async Task Delete_CategoryARuleUses_IsAValidationProblem()
     {
-        var id = await CreateCategory($"{_token} Garden");
+        var id = await CreateCategory("Garden");
         var rule = await _client.PostAsJsonAsync(
-            "/api/categorization-rules", new { keyword = $"{_token} plantasjen", categoryId = id });
+            "/api/categorization-rules", new { keyword = "plantasjen", categoryId = id });
         Assert.Equal(HttpStatusCode.Created, rule.StatusCode);
 
         var response = await _client.DeleteAsync($"/api/categories/{id}");
 
-        await AssertCategoryProblem(response, $"{_token} Garden is in use, so it can't be deleted.");
+        await AssertCategoryProblem(response, "Garden is in use, so it can't be deleted.");
         Assert.Contains(await ListCategories(), c => c.Id == id);
     }
 
@@ -287,17 +254,18 @@ public class CategoryEndpointsTests : IAsyncLifetime
 
     private async Task<int[]> ImportedOn(DateOnly postedDate, params string[] descriptions)
     {
-        using var scope = _factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        await using var user = await UserDatabase.OfAsync(_factory, _email);
+        var db = user.Db;
         var statement = new BankStatement
         {
+            UserId = db.OwnerOfNewRows,
             AccountNumber = Guid.NewGuid().ToString("N")[..AppDbContext.AccountNumberMaxLength],
             PeriodStart = new DateOnly(2026, 8, 1),
             PeriodEnd = new DateOnly(2026, 8, 31),
             ImportedAt = DateTimeOffset.UtcNow,
         };
         var transactions = descriptions
-            .Select(d => new Transaction { PostedDate = postedDate, Description = d, Amount = -100m })
+            .Select(d => new Transaction { UserId = db.OwnerOfNewRows, PostedDate = postedDate, Description = d, Amount = -100m })
             .ToList();
         statement.Transactions.AddRange(transactions);
         db.BankStatements.Add(statement);
@@ -307,8 +275,8 @@ public class CategoryEndpointsTests : IAsyncLifetime
 
     private async Task<int?[]> CategoriesOf(params int[] transactionIds)
     {
-        using var scope = _factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        await using var user = await UserDatabase.OfAsync(_factory, _email);
+        var db = user.Db;
         var categories = await db.Transactions
             .Where(t => transactionIds.Contains(t.Id))
             .ToDictionaryAsync(t => t.Id, t => t.CategoryId);
@@ -325,8 +293,8 @@ public class CategoryEndpointsTests : IAsyncLifetime
     // The rule endpoints never set the mark, so the tests set it directly in the database.
     private async Task MarkAiGenerated(int ruleId)
     {
-        using var scope = _factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        await using var user = await UserDatabase.OfAsync(_factory, _email);
+        var db = user.Db;
         var rule = await db.CategorizationRules.SingleAsync(r => r.Id == ruleId);
         rule.AiGenerated = true;
         await db.SaveChangesAsync();
@@ -352,11 +320,11 @@ public class CategoryEndpointsTests : IAsyncLifetime
     [Fact]
     public async Task Delete_WithReplacement_RuleCategorizedTransactionsFollowTheirRule()
     {
-        var id = await CreateCategory($"{_token} Garden");
-        var replacementId = await CreateCategory($"{_token} Home");
-        var laterId = await CreateCategory($"{_token} Hobby");
-        var transactionIds = await Imported($"{_token} Plantasjen Oslo", $"{_token} Plantasjen Bergen");
-        var ruleId = await AddedRuleId($"{_token} plantasjen", id);
+        var id = await CreateCategory("Garden");
+        var replacementId = await CreateCategory("Home");
+        var laterId = await CreateCategory("Hobby");
+        var transactionIds = await Imported("Plantasjen Oslo", "Plantasjen Bergen");
+        var ruleId = await AddedRuleId("plantasjen", id);
 
         var changed = await TransactionsChangedByDeleting(id, replacementId);
 
@@ -367,7 +335,7 @@ public class CategoryEndpointsTests : IAsyncLifetime
 
         // Still categorized by the rule, so they follow it when it changes.
         var edited = await _client.PutAsJsonAsync(
-            $"/api/categorization-rules/{ruleId}", new { keyword = $"{_token} plantasjen", categoryId = laterId });
+            $"/api/categorization-rules/{ruleId}", new { keyword = "plantasjen", categoryId = laterId });
         Assert.Equal(HttpStatusCode.OK, edited.StatusCode);
         Assert.Equal([laterId, laterId], await CategoriesOf(transactionIds));
     }
@@ -375,10 +343,10 @@ public class CategoryEndpointsTests : IAsyncLifetime
     [Fact]
     public async Task Delete_WithReplacement_ManuallyCategorizedTransactionsStayManual()
     {
-        var id = await CreateCategory($"{_token} Garden");
-        var replacementId = await CreateCategory($"{_token} Home");
-        var laterId = await CreateCategory($"{_token} Hobby");
-        var transactionId = (await Imported($"{_token} Plantasjen"))[0];
+        var id = await CreateCategory("Garden");
+        var replacementId = await CreateCategory("Home");
+        var laterId = await CreateCategory("Hobby");
+        var transactionId = (await Imported("Plantasjen"))[0];
         var categorized = await _client.PutAsJsonAsync(
             $"/api/transactions/{transactionId}/category", new { categoryId = id });
         Assert.Equal(HttpStatusCode.OK, categorized.StatusCode);
@@ -389,16 +357,16 @@ public class CategoryEndpointsTests : IAsyncLifetime
         Assert.Equal([replacementId], await CategoriesOf(transactionId));
 
         // A later rule change leaves it alone.
-        await AddedRuleId($"{_token} plantasjen", laterId);
+        await AddedRuleId("plantasjen", laterId);
         Assert.Equal([replacementId], await CategoriesOf(transactionId));
     }
 
     [Fact]
     public async Task Delete_WithReplacement_MovesManuallyEnteredTransactions()
     {
-        var id = await CreateCategory($"{_token} Garden");
-        var replacementId = await CreateCategory($"{_token} Home");
-        var transactionId = await ManuallyEntered($"{_token} Plantasjen", id);
+        var id = await CreateCategory("Garden");
+        var replacementId = await CreateCategory("Home");
+        var transactionId = await ManuallyEntered("Plantasjen", id);
 
         var changed = await TransactionsChangedByDeleting(id, replacementId);
 
@@ -409,14 +377,14 @@ public class CategoryEndpointsTests : IAsyncLifetime
     [Fact]
     public async Task Delete_WithReplacement_CountsEveryMovedTransaction()
     {
-        var id = await CreateCategory($"{_token} Garden");
-        var replacementId = await CreateCategory($"{_token} Home");
-        var ruleCategorized = await Imported($"{_token} Plantasjen Oslo");
-        await AddedRuleId($"{_token} plantasjen", id);
-        var manual = (await Imported($"{_token} Hageland"))[0];
+        var id = await CreateCategory("Garden");
+        var replacementId = await CreateCategory("Home");
+        var ruleCategorized = await Imported("Plantasjen Oslo");
+        await AddedRuleId("plantasjen", id);
+        var manual = (await Imported("Hageland"))[0];
         await _client.PutAsJsonAsync($"/api/transactions/{manual}/category", new { categoryId = id });
-        await ManuallyEntered($"{_token} Felleskjøpet", id);
-        var untouched = await ManuallyEntered($"{_token} Mester Grønn", replacementId);
+        await ManuallyEntered("Felleskjøpet", id);
+        var untouched = await ManuallyEntered("Mester Grønn", replacementId);
 
         var changed = await TransactionsChangedByDeleting(id, replacementId);
 
@@ -427,29 +395,29 @@ public class CategoryEndpointsTests : IAsyncLifetime
     [Fact]
     public async Task Delete_WithReplacementOtherThanOther_KeepsTheAiMarkOnMovedRules()
     {
-        var id = await CreateCategory($"{_token} Garden");
-        var replacementId = await CreateCategory($"{_token} Home");
-        var ruleId = await AddedRuleId($"{_token} plantasjen", id);
+        var id = await CreateCategory("Garden");
+        var replacementId = await CreateCategory("Home");
+        var ruleId = await AddedRuleId("plantasjen", id);
         await MarkAiGenerated(ruleId);
 
         await TransactionsChangedByDeleting(id, replacementId);
 
-        Assert.Equal(new CategorizationRuleResponse(ruleId, $"{_token} plantasjen", replacementId, AiGenerated: true, IsNew: false), await Rule(ruleId));
+        Assert.Equal(new CategorizationRuleResponse(ruleId, "plantasjen", replacementId, AiGenerated: true, IsNew: false), await Rule(ruleId));
     }
 
     [Fact]
     public async Task Delete_WithOtherAsReplacement_KeepsTheAiMarkOnMovedRules()
     {
-        var id = await CreateCategory($"{_token} Garden");
-        var aiRuleId = await AddedRuleId($"{_token} plantasjen", id);
+        var id = await CreateCategory("Garden");
+        var aiRuleId = await AddedRuleId("plantasjen", id);
         await MarkAiGenerated(aiRuleId);
-        var ordinaryRuleId = await AddedRuleId($"{_token} hageland", id);
+        var ordinaryRuleId = await AddedRuleId("hageland", id);
         try
         {
-            await TransactionsChangedByDeleting(id, OtherId);
+            await TransactionsChangedByDeleting(id, _categories.Other);
 
-            Assert.Equal(new CategorizationRuleResponse(aiRuleId, $"{_token} plantasjen", OtherId, AiGenerated: true, IsNew: false), await Rule(aiRuleId));
-            Assert.Equal(new CategorizationRuleResponse(ordinaryRuleId, $"{_token} hageland", OtherId, AiGenerated: false, IsNew: false), await Rule(ordinaryRuleId));
+            Assert.Equal(new CategorizationRuleResponse(aiRuleId, "plantasjen", _categories.Other, AiGenerated: true, IsNew: false), await Rule(aiRuleId));
+            Assert.Equal(new CategorizationRuleResponse(ordinaryRuleId, "hageland", _categories.Other, AiGenerated: false, IsNew: false), await Rule(ordinaryRuleId));
         }
         finally
         {
@@ -462,8 +430,8 @@ public class CategoryEndpointsTests : IAsyncLifetime
     [Fact]
     public async Task Delete_WithReplacementOfAnUnusedCategory_DeletesItAndChangesNoTransactions()
     {
-        var id = await CreateCategory($"{_token} Garden");
-        var replacementId = await CreateCategory($"{_token} Home");
+        var id = await CreateCategory("Garden");
+        var replacementId = await CreateCategory("Home");
 
         Assert.Equal(0, await TransactionsChangedByDeleting(id, replacementId));
         Assert.DoesNotContain(await ListCategories(), c => c.Id == id);
@@ -472,8 +440,8 @@ public class CategoryEndpointsTests : IAsyncLifetime
     [Fact]
     public async Task Delete_ReplacementIsTheCategoryItself_IsAValidationProblem()
     {
-        var id = await CreateCategory($"{_token} Garden");
-        var transactionId = await ManuallyEntered($"{_token} Plantasjen", id);
+        var id = await CreateCategory("Garden");
+        var transactionId = await ManuallyEntered("Plantasjen", id);
 
         var response = await DeleteWithReplacement(id, id);
 
@@ -486,8 +454,8 @@ public class CategoryEndpointsTests : IAsyncLifetime
     [Fact]
     public async Task Delete_ReplacementDoesNotExist_IsAValidationProblem()
     {
-        var id = await CreateCategory($"{_token} Garden");
-        var transactionId = await ManuallyEntered($"{_token} Plantasjen", id);
+        var id = await CreateCategory("Garden");
+        var transactionId = await ManuallyEntered("Plantasjen", id);
 
         var response = await DeleteWithReplacement(id, int.MaxValue);
 
@@ -500,12 +468,12 @@ public class CategoryEndpointsTests : IAsyncLifetime
     [Fact]
     public async Task Delete_BuiltInCategoryWithReplacement_IsAValidationProblem()
     {
-        var id = await CreateCategory($"{_token} Pets", builtIn: true);
-        var replacementId = await CreateCategory($"{_token} Home");
+        var id = await CreateCategory("Pets", builtIn: true);
+        var replacementId = await CreateCategory("Home");
 
         var response = await DeleteWithReplacement(id, replacementId);
 
-        await AssertCategoryProblem(response, $"{_token} Pets is a Built-in Category, so it can't be deleted.");
+        await AssertCategoryProblem(response, "Pets is a Built-in Category, so it can't be deleted.");
         Assert.Contains(await ListCategories(), c => c.Id == id);
     }
 
@@ -529,8 +497,8 @@ public class CategoryEndpointsTests : IAsyncLifetime
     [Fact]
     public async Task Delete_WithItsRules_DeletesTheRulesAndTheCategory()
     {
-        var id = await CreateCategory($"{_token} Garden");
-        var ruleId = await AddedRuleId($"{_token} plantasjen", id);
+        var id = await CreateCategory("Garden");
+        var ruleId = await AddedRuleId("plantasjen", id);
 
         await TransactionsChangedByDeletingWithItsRules(id);
 
@@ -543,11 +511,11 @@ public class CategoryEndpointsTests : IAsyncLifetime
     [Fact]
     public async Task Delete_WithItsRules_AShorterRemainingRuleForAnotherCategoryPicksUpItsTransactions()
     {
-        var id = await CreateCategory($"{_token} Garden");
-        var otherCategoryId = await CreateCategory($"{_token} Home");
-        var transactionIds = await Imported($"{_token} Plantasjen Oslo", $"{_token} Plant Shop");
-        await AddedRuleId($"{_token} plant", otherCategoryId);
-        await AddedRuleId($"{_token} plantasjen", id);
+        var id = await CreateCategory("Garden");
+        var otherCategoryId = await CreateCategory("Home");
+        var transactionIds = await Imported("Plantasjen Oslo", "Plant Shop");
+        await AddedRuleId("plant", otherCategoryId);
+        await AddedRuleId("plantasjen", id);
         Assert.Equal([id, otherCategoryId], await CategoriesOf(transactionIds));
 
         var changed = await TransactionsChangedByDeletingWithItsRules(id);
@@ -559,9 +527,9 @@ public class CategoryEndpointsTests : IAsyncLifetime
     [Fact]
     public async Task Delete_WithItsRules_ImportedTransactionsNoRemainingRuleMatchesBecomeUncategorized()
     {
-        var id = await CreateCategory($"{_token} Garden");
-        var transactionIds = await Imported($"{_token} Plantasjen Oslo", $"{_token} Plantasjen Bergen");
-        await AddedRuleId($"{_token} plantasjen", id);
+        var id = await CreateCategory("Garden");
+        var transactionIds = await Imported("Plantasjen Oslo", "Plantasjen Bergen");
+        await AddedRuleId("plantasjen", id);
 
         var changed = await TransactionsChangedByDeletingWithItsRules(id);
 
@@ -572,11 +540,11 @@ public class CategoryEndpointsTests : IAsyncLifetime
     [Fact]
     public async Task Delete_WithItsRules_ManuallyCategorizedAndManuallyEnteredTransactionsBecomeUncategorized()
     {
-        var id = await CreateCategory($"{_token} Garden");
-        var laterId = await CreateCategory($"{_token} Hobby");
-        var manual = (await Imported($"{_token} Hageland"))[0];
+        var id = await CreateCategory("Garden");
+        var laterId = await CreateCategory("Hobby");
+        var manual = (await Imported("Hageland"))[0];
         await CategorizeManually(manual, id);
-        var manuallyEntered = await ManuallyEntered($"{_token} Hageland", id);
+        var manuallyEntered = await ManuallyEntered("Hageland", id);
 
         var changed = await TransactionsChangedByDeletingWithItsRules(id);
 
@@ -585,17 +553,17 @@ public class CategoryEndpointsTests : IAsyncLifetime
 
         // The imported one is no longer categorized manually, so a matching rule takes it; rules
         // never apply to the manually-entered one.
-        await AddedRuleId($"{_token} hageland", laterId);
+        await AddedRuleId("hageland", laterId);
         Assert.Equal([laterId, null], await CategoriesOf(manual, manuallyEntered));
     }
 
     [Fact]
     public async Task Delete_WithItsRules_ARemainingRulePicksUpAManuallyCategorizedImportedTransaction()
     {
-        var id = await CreateCategory($"{_token} Garden");
-        var otherCategoryId = await CreateCategory($"{_token} Home");
-        await AddedRuleId($"{_token} plant", otherCategoryId);
-        var manual = (await Imported($"{_token} Plantasjen"))[0];
+        var id = await CreateCategory("Garden");
+        var otherCategoryId = await CreateCategory("Home");
+        await AddedRuleId("plant", otherCategoryId);
+        var manual = (await Imported("Plantasjen"))[0];
         await CategorizeManually(manual, id);
 
         var changed = await TransactionsChangedByDeletingWithItsRules(id);
@@ -607,10 +575,10 @@ public class CategoryEndpointsTests : IAsyncLifetime
     [Fact]
     public async Task Delete_WithItsRules_ManuallyCategorizedImportedTransactionsStopBeingLockedButManuallyEnteredOnesDoNot()
     {
-        var id = await CreateCategory($"{_token} Garden");
-        var manual = (await Imported($"{_token} Plantasjen"))[0];
+        var id = await CreateCategory("Garden");
+        var manual = (await Imported("Plantasjen"))[0];
         await CategorizeManually(manual, id);
-        var manuallyEntered = await ManuallyEntered($"{_token} Felleskjøpet", id);
+        var manuallyEntered = await ManuallyEntered("Felleskjøpet", id);
         var before = await LockedOf(manual, manuallyEntered);
 
         await TransactionsChangedByDeletingWithItsRules(id);
@@ -631,16 +599,16 @@ public class CategoryEndpointsTests : IAsyncLifetime
     [Fact]
     public async Task Delete_WithItsRules_CountsEveryTransactionThatChangedCategoryOnce()
     {
-        var id = await CreateCategory($"{_token} Garden");
-        var otherCategoryId = await CreateCategory($"{_token} Home");
-        await AddedRuleId($"{_token} plant", otherCategoryId);
-        var untouched = await Imported($"{_token} Plant Shop");
-        var ruleCategorized = await Imported($"{_token} Plantasjen Oslo", $"{_token} Mester Grønn");
-        await AddedRuleId($"{_token} plantasjen", id);
-        await AddedRuleId($"{_token} mester", id);
-        var manual = (await Imported($"{_token} Hageland"))[0];
+        var id = await CreateCategory("Garden");
+        var otherCategoryId = await CreateCategory("Home");
+        await AddedRuleId("plant", otherCategoryId);
+        var untouched = await Imported("Plant Shop");
+        var ruleCategorized = await Imported("Plantasjen Oslo", "Mester Grønn");
+        await AddedRuleId("plantasjen", id);
+        await AddedRuleId("mester", id);
+        var manual = (await Imported("Hageland"))[0];
         await CategorizeManually(manual, id);
-        await ManuallyEntered($"{_token} Felleskjøpet", id);
+        await ManuallyEntered("Felleskjøpet", id);
 
         var changed = await TransactionsChangedByDeletingWithItsRules(id);
 
@@ -653,7 +621,7 @@ public class CategoryEndpointsTests : IAsyncLifetime
     [Fact]
     public async Task Delete_WithItsRulesOfAnUnusedCategory_DeletesItAndChangesNoTransactions()
     {
-        var id = await CreateCategory($"{_token} Garden");
+        var id = await CreateCategory("Garden");
 
         Assert.Equal(0, await TransactionsChangedByDeletingWithItsRules(id));
         Assert.DoesNotContain(await ListCategories(), c => c.Id == id);
@@ -662,11 +630,10 @@ public class CategoryEndpointsTests : IAsyncLifetime
     [Fact]
     public async Task Delete_WithItsRules_SpendingCountsItsTransactionsAsUncategorized()
     {
-        // Spending adds up every Transaction of a month, so this uses a year no other test uses.
-        var id = await CreateCategory($"{_token} Garden");
-        var manual = (await ImportedOn(new DateOnly(2091, 5, 3), $"{_token} Hageland"))[0];
+        var id = await CreateCategory("Garden");
+        var manual = (await ImportedOn(new DateOnly(2091, 5, 3), "Hageland"))[0];
         await CategorizeManually(manual, id);
-        await ManuallyEntered($"{_token} Felleskjøpet", id, date: "2091-05-04");
+        await ManuallyEntered("Felleskjøpet", id, date: "2091-05-04");
 
         await TransactionsChangedByDeletingWithItsRules(id);
 
@@ -677,24 +644,24 @@ public class CategoryEndpointsTests : IAsyncLifetime
     [Fact]
     public async Task Delete_WithItsRules_AnUncategorizedManuallyEnteredTransactionIsListedAndCanBeGivenACategory()
     {
-        var id = await CreateCategory($"{_token} Garden");
-        var transactionId = await ManuallyEntered($"{_token} Felleskjøpet", id);
+        var id = await CreateCategory("Garden");
+        var transactionId = await ManuallyEntered("Felleskjøpet", id);
 
         await TransactionsChangedByDeletingWithItsRules(id);
 
         var listed = (await _client.GetFromJsonAsync<List<TransactionResponse>>("/api/transactions?year=2026&month=8"))!
             .Single(t => t.Id == transactionId);
         Assert.Null(listed.CategoryId);
-        await CategorizeManually(transactionId, GroceriesId);
-        Assert.Equal([GroceriesId], await CategoriesOf(transactionId));
+        await CategorizeManually(transactionId, _categories.Groceries);
+        Assert.Equal([_categories.Groceries], await CategoriesOf(transactionId));
     }
 
     [Fact]
     public async Task Delete_WithBothAReplacementAndItsRules_IsAValidationProblem()
     {
-        var id = await CreateCategory($"{_token} Garden");
-        var replacementId = await CreateCategory($"{_token} Home");
-        var transactionId = await ManuallyEntered($"{_token} Plantasjen", id);
+        var id = await CreateCategory("Garden");
+        var replacementId = await CreateCategory("Home");
+        var transactionId = await ManuallyEntered("Plantasjen", id);
 
         var response = await _client.DeleteAsync(
             $"/api/categories/{id}?replacementCategoryId={replacementId}&deleteRules=true");
@@ -708,12 +675,12 @@ public class CategoryEndpointsTests : IAsyncLifetime
     [Fact]
     public async Task Delete_BuiltInCategoryWithItsRules_IsAValidationProblem()
     {
-        var id = await CreateCategory($"{_token} Pets", builtIn: true);
-        var ruleId = await AddedRuleId($"{_token} dyrebutikk", id);
+        var id = await CreateCategory("Pets", builtIn: true);
+        var ruleId = await AddedRuleId("dyrebutikk", id);
 
         var response = await DeleteWithItsRules(id);
 
-        await AssertCategoryProblem(response, $"{_token} Pets is a Built-in Category, so it can't be deleted.");
+        await AssertCategoryProblem(response, "Pets is a Built-in Category, so it can't be deleted.");
         Assert.Contains(await ListCategories(), c => c.Id == id);
         Assert.Equal(id, (await Rule(ruleId)).CategoryId);
     }
@@ -733,16 +700,16 @@ public class CategoryEndpointsTests : IAsyncLifetime
     [Fact]
     public async Task Put_NewNameAndDescription_RenamesAndRedescribesTheCategory()
     {
-        var id = await CreateCategory($"{_token} Hobby", "Hobbies.");
+        var id = await CreateCategory("Hobby", "Hobbies.");
         var rule = await _client.PostAsJsonAsync(
-            "/api/categorization-rules", new { keyword = $"{_token} hobby", categoryId = id });
+            "/api/categorization-rules", new { keyword = "hobby", categoryId = id });
         Assert.Equal(HttpStatusCode.Created, rule.StatusCode);
 
-        var response = await EditCategory(id, $" {_token} Fritid ", " Hobbies and sports. ");
+        var response = await EditCategory(id, " Fritid ", " Hobbies and sports. ");
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var expected = new CategoryResponse(
-            id, $"{_token} Fritid", "Hobbies and sports.", CategoryColours.Fallback, BuiltIn: false, TransactionCount: 0, RuleCount: 1);
+            id, "Fritid", "Hobbies and sports.", CategoryColours.Fallback, BuiltIn: false, TransactionCount: 0, RuleCount: 1);
         Assert.Equal(expected, await response.Content.ReadFromJsonAsync<CategoryResponse>());
         Assert.Contains(expected, await ListCategories());
     }
@@ -750,20 +717,20 @@ public class CategoryEndpointsTests : IAsyncLifetime
     [Fact]
     public async Task Put_OnlyTheNamesCase_IsAllowed()
     {
-        var id = await CreateCategory($"{_token} Hobby", "Hobbies.");
+        var id = await CreateCategory("Hobby", "Hobbies.");
 
-        var response = await EditCategory(id, $"{_token.ToUpperInvariant()} HOBBY", "Hobbies.");
+        var response = await EditCategory(id, "HOBBY", "Hobbies.");
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal(
-            $"{_token.ToUpperInvariant()} HOBBY",
+            "HOBBY",
             (await response.Content.ReadFromJsonAsync<CategoryResponse>())!.Name);
     }
 
     [Fact]
     public async Task Put_MissingNameAndDescription_IsRejectedWithErrorPerField()
     {
-        var id = await CreateCategory($"{_token} Hobby", "Hobbies.");
+        var id = await CreateCategory("Hobby", "Hobbies.");
 
         var errors = await EditCategoryExpectingValidationErrors(id, "  ", null);
 
@@ -774,23 +741,23 @@ public class CategoryEndpointsTests : IAsyncLifetime
     [Fact]
     public async Task Put_TooLongNameAndDescription_IsRejectedWithErrorPerField()
     {
-        var id = await CreateCategory($"{_token} Hobby", "Hobbies.");
+        var id = await CreateCategory("Hobby", "Hobbies.");
 
         var errors = await EditCategoryExpectingValidationErrors(
-            id, $"{_token} " + new string('x', 50), new string('x', 201));
+            id, new string('x', 51), new string('x', 201));
 
         Assert.Equal(["Name must be at most 50 characters."], errors["name"]);
         Assert.Equal(["Description must be at most 200 characters."], errors["description"]);
         Assert.Contains(
-            new CategoryResponse(id, $"{_token} Hobby", "Hobbies.", CategoryColours.Fallback, BuiltIn: false, 0, 0),
+            new CategoryResponse(id, "Hobby", "Hobbies.", CategoryColours.Fallback, BuiltIn: false, 0, 0),
             await ListCategories());
     }
 
     [Fact]
     public async Task Put_NameAndDescriptionAtTheirMaximumLength_AreAllowed()
     {
-        var id = await CreateCategory($"{_token} Hobby", "Hobbies.");
-        var name = $"{_token} ".PadRight(50, 'x');
+        var id = await CreateCategory("Hobby", "Hobbies.");
+        var name = "".PadRight(50, 'x');
 
         var response = await EditCategory(id, name, new string('x', 200));
 
@@ -800,48 +767,40 @@ public class CategoryEndpointsTests : IAsyncLifetime
     [Fact]
     public async Task Put_NameOfAnotherCategoryInDifferentCase_IsRejected()
     {
-        await CreateCategory($"{_token} Hobby", "Hobbies.");
-        var id = await CreateCategory($"{_token} Sport", "Sports.");
+        await CreateCategory("Hobby", "Hobbies.");
+        var id = await CreateCategory("Sport", "Sports.");
 
         var errors = await EditCategoryExpectingValidationErrors(
-            id, $"{_token.ToUpperInvariant()} HOBBY", "Sports.");
+            id, "HOBBY", "Sports.");
 
-        Assert.Equal([$"A category named '{_token} Hobby' already exists."], errors["name"]);
+        Assert.Equal(["A category named 'Hobby' already exists."], errors["name"]);
     }
 
     [Fact]
     public async Task Put_BuiltInCategoryRenamed_IsRejected()
     {
-        var errors = await EditCategoryExpectingValidationErrors(GroceriesId, $"{_token} Food", "All groceries.");
+        var errors = await EditCategoryExpectingValidationErrors(_categories.Groceries, "Food", "All groceries.");
 
         Assert.Equal(["A Built-in Category can't be renamed."], errors["name"]);
         Assert.Contains(
             (await ListCategories()),
-            c => c.Id == GroceriesId && c.Name == "Groceries");
+            c => c.Id == _categories.Groceries && c.Name == "Groceries");
     }
 
     [Fact]
     public async Task Put_BuiltInCategoryWithItsNameUnchanged_ChangesItsDescription()
     {
-        try
-        {
-            var response = await EditCategory(GroceriesId, "Groceries", $"{_token} Food and drink.");
+        var response = await EditCategory(_categories.Groceries, "Groceries", "Food and drink.");
 
-            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            var edited = await response.Content.ReadFromJsonAsync<CategoryResponse>();
-            Assert.Equal(("Groceries", $"{_token} Food and drink.", true), (edited!.Name, edited.Description, edited.BuiltIn));
-        }
-        finally
-        {
-            // Other tests assert the seeded description.
-            await EditCategory(GroceriesId, "Groceries", "All groceries.");
-        }
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var edited = await response.Content.ReadFromJsonAsync<CategoryResponse>();
+        Assert.Equal(("Groceries", "Food and drink.", true), (edited!.Name, edited.Description, edited.BuiltIn));
     }
 
     [Fact]
     public async Task Put_UnknownCategory_ReturnsNotFound()
     {
-        var response = await EditCategory(int.MaxValue, $"{_token} Hobby", "Hobbies.");
+        var response = await EditCategory(int.MaxValue, "Hobby", "Hobbies.");
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
@@ -876,12 +835,12 @@ public class CategoryEndpointsTests : IAsyncLifetime
     [Fact]
     public async Task Post_ValidCategory_AddsItAsNotBuiltInAndReturnsCreated()
     {
-        var response = await AddCategory($"  {_token} Hobby  ", "  Hobby supplies.  ");
+        var response = await AddCategory("  Hobby  ", "  Hobby supplies.  ");
 
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         var added = await response.Content.ReadFromJsonAsync<CategoryResponse>();
         Assert.Equal($"/api/categories/{added!.Id}", response.Headers.Location?.ToString());
-        Assert.Equal((Name: $"{_token} Hobby", Description: "Hobby supplies.", BuiltIn: false), (added.Name, added.Description, added.BuiltIn));
+        Assert.Equal((Name: "Hobby", Description: "Hobby supplies.", BuiltIn: false), (added.Name, added.Description, added.BuiltIn));
         Assert.Equal((0, 0), (added.TransactionCount, added.RuleCount));
         Assert.Equivalent(added, (await ListCategories()).Single(c => c.Id == added.Id));
     }
@@ -890,9 +849,9 @@ public class CategoryEndpointsTests : IAsyncLifetime
     public async Task Post_NewCategories_EachGetTheFirstPaletteColourNoCategoryUses()
     {
         var expectedFirst = await NextColour();
-        var first = await AddedCategory($"{_token} Hobby");
+        var first = await AddedCategory("Hobby");
         var expectedSecond = await NextColour();
-        var second = await AddedCategory($"{_token} Garden");
+        var second = await AddedCategory("Garden");
 
         Assert.Equal(expectedFirst, first.Colour);
         Assert.Equal(expectedSecond, second.Colour);
@@ -905,10 +864,10 @@ public class CategoryEndpointsTests : IAsyncLifetime
     {
         var added = 0;
         while (await NextColour() != CategoryColours.Fallback)
-            await AddedCategory($"{_token} Filler {added++}");
+            await AddedCategory($"Filler {added++}");
 
-        var first = await AddedCategory($"{_token} Hobby");
-        var second = await AddedCategory($"{_token} Garden");
+        var first = await AddedCategory("Hobby");
+        var second = await AddedCategory("Garden");
 
         Assert.Equal(CategoryColours.Fallback, first.Colour);
         Assert.Equal(CategoryColours.Fallback, second.Colour);
@@ -929,7 +888,7 @@ public class CategoryEndpointsTests : IAsyncLifetime
     public async Task Post_TooLongNameAndDescription_ReturnsErrorPerField()
     {
         var errors = await AddCategoryExpectingValidationErrors(
-            _token + new string('n', 51 - _token.Length), new string('d', 201));
+            new string('n', 51), new string('d', 201));
 
         Assert.Equal(["Name must be at most 50 characters."], errors["name"]);
         Assert.Equal(["Description must be at most 200 characters."], errors["description"]);
@@ -938,7 +897,7 @@ public class CategoryEndpointsTests : IAsyncLifetime
     [Fact]
     public async Task Post_LongestNameAndDescription_AreAccepted()
     {
-        var added = await AddedCategory(_token + new string('n', 50 - _token.Length), new string('d', 200));
+        var added = await AddedCategory(new string('n', 50), new string('d', 200));
 
         Assert.Equal(50, added.Name.Length);
         Assert.Equal(200, added.Description.Length);
@@ -947,11 +906,11 @@ public class CategoryEndpointsTests : IAsyncLifetime
     [Fact]
     public async Task Post_NameOfAnotherCategoryIgnoringCase_IsRejected()
     {
-        await AddedCategory($"{_token} Hobby");
+        await AddedCategory("Hobby");
 
-        var errors = await AddCategoryExpectingValidationErrors($"{_token.ToUpperInvariant()} HOBBY", "Hobbies.");
+        var errors = await AddCategoryExpectingValidationErrors("HOBBY", "Hobbies.");
 
-        Assert.Equal([$"A category named '{_token} Hobby' already exists."], errors["name"]);
+        Assert.Equal(["A category named 'Hobby' already exists."], errors["name"]);
     }
 
     [Fact]

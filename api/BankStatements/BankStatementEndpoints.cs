@@ -1,8 +1,10 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
+using PersonligFinans.Api.AiRequests;
 using PersonligFinans.Api.CategorizationRules;
 using PersonligFinans.Api.Data;
+using PersonligFinans.Api.Users;
 
 namespace PersonligFinans.Api.BankStatements;
 
@@ -13,7 +15,8 @@ public record BankStatementResponse(
     DateOnly PeriodEnd,
     int TransactionCount,
     int UncategorizedCount,
-    bool AiCategorizationUnavailable);
+    bool AiCategorizationUnavailable,
+    bool DailyAiLimitReached);
 
 public static class BankStatementEndpoints
 {
@@ -23,17 +26,22 @@ public static class BankStatementEndpoints
     {
         var api = app.MapGroup("/api");
 
-        // A JSON API without cookie auth, so there is no forgery risk to guard the upload against.
-        api.MapPost("/bank-statements", ImportBankStatement).DisableAntiforgery();
+        api.MapPost("/bank-statements", ImportBankStatement).RequireAntiforgeryToken();
     }
 
     // The form is read by hand rather than bound to an IFormFile, so that a missing or oversized
     // file gets the same validation problem as every other rejected upload.
     // The rule generator is optional: without one, unmatched rows simply stay Uncategorized.
+    // Proposing rules for a Bank Statement with unmatched rows is one AI request. Past the Daily AI
+    // limit the rule generator isn't asked, and its unmatched rows stay Uncategorized too.
     // The form's optional "uploadId" names the Upload the file belongs to; without one, the file is
     // an Upload of its own.
     private static async Task<IResult> ImportBankStatement(
-        HttpRequest request, AppDbContext db, [FromServices] IRuleGenerator? ruleGenerator, ILoggerFactory loggerFactory)
+        HttpRequest request,
+        AppDbContext db,
+        AiRequestLedger ledger,
+        [FromServices] IRuleGenerator? ruleGenerator,
+        ILoggerFactory loggerFactory)
     {
         IFormFile? file;
         string? uploadIdField;
@@ -86,7 +94,8 @@ public static class BankStatementEndpoints
 
         // Asked before the database transaction is opened, since the rule generator may be a slow
         // network call and must not hold the lock while it runs.
-        var (proposals, aiCategorizationUnavailable) = await ProposeRules(parsed.Rows, db, ruleGenerator);
+        var (proposals, aiCategorizationUnavailable, dailyAiLimitReached) =
+            await ProposeRules(parsed.Rows, db, ledger, ruleGenerator);
         if (aiCategorizationUnavailable)
             loggerFactory.CreateLogger(typeof(BankStatementEndpoints)).LogWarning(
                 "AI categorization was unavailable for a Bank Statement of {RowCount} rows; its unmatched rows stay Uncategorized.",
@@ -94,6 +103,7 @@ public static class BankStatementEndpoints
 
         var statement = new BankStatement
         {
+            UserId = db.OwnerOfNewRows,
             AccountNumber = parsed.AccountNumber,
             PeriodStart = parsed.PeriodStart,
             PeriodEnd = parsed.PeriodEnd,
@@ -111,6 +121,7 @@ public static class BankStatementEndpoints
             var rule = Categorizer.ChooseRule(row.Description, rules);
             return new Transaction
             {
+                UserId = db.OwnerOfNewRows,
                 PostedDate = row.BookedDate,
                 Description = row.Description,
                 Amount = row.Amount,
@@ -143,18 +154,19 @@ public static class BankStatementEndpoints
                 statement.PeriodEnd,
                 statement.Transactions.Count,
                 statement.Transactions.Count(t => t.CategoryId is null),
-                aiCategorizationUnavailable));
+                aiCategorizationUnavailable,
+                dailyAiLimitReached));
     }
 
     // The rule generator's proposals for the rows no current rule matches, in row order, each with
-    // the description it was made for. Each distinct description and sign is asked about once. There
-    // are none when there is no rule generator, every row is matched, or the generator is
-    // unavailable; only the last sets Unavailable.
-    private static async Task<(List<(string Description, RuleProposal Proposal)> Proposals, bool Unavailable)> ProposeRules(
-        IReadOnlyList<StatementRow> rows, AppDbContext db, IRuleGenerator? ruleGenerator)
+    // the description it was made for. Each distinct description and sign is asked about once, in one
+    // AI request. There are none when there is no rule generator, every row is matched, the Daily AI
+    // limit is reached, or the generator is unavailable; only the last two say so.
+    private static async Task<(List<(string Description, RuleProposal Proposal)> Proposals, bool Unavailable, bool LimitReached)>
+        ProposeRules(IReadOnlyList<StatementRow> rows, AppDbContext db, AiRequestLedger ledger, IRuleGenerator? ruleGenerator)
     {
         if (ruleGenerator is null)
-            return ([], false);
+            return ([], false, false);
 
         // Not tracked, so the rules loaded again under the lock are the current ones.
         var rules = await db.CategorizationRules.AsNoTracking().ToListAsync();
@@ -164,22 +176,24 @@ public static class BankStatementEndpoints
             .Distinct()
             .ToList();
         if (unmatched.Count == 0)
-            return ([], false);
+            return ([], false, false);
 
         // Read at each import, so an edited description reaches the next prompt.
         var categories = await db.Categories
             .OrderBy(c => c.Name)
             .Select(c => new CategoryChoice(c.Name, c.Description))
             .ToListAsync();
+        if (!await ledger.TryTakeAsync())
+            return ([], false, true);
         return await ruleGenerator.GenerateAsync(unmatched, categories) switch
         {
             RuleGeneration.Generated generated =>
                 (unmatched
                     .Where(generated.Proposals.ContainsKey)
                     .Select(row => (row.Description, generated.Proposals[row]))
-                    .ToList(), false),
+                    .ToList(), false, false),
             // Unavailable: the unmatched rows stay Uncategorized.
-            _ => ([], true),
+            _ => ([], true, false),
         };
     }
 

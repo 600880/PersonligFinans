@@ -74,7 +74,37 @@ let categoriesServed: ServedCategory[] | Response
 let handleSpending: (year: number, month: number | undefined, quarter: number | undefined, includeTransfers: boolean) => Response
 // The Spending of each month of the Span from `from` to `to`.
 let handleMonthlySpending: (from: Month, to: Month, includeTransfers: boolean) => Response
+// Who is signed in: signed in as a User unless a test signs out, or keeps the answer waiting.
+let currentUser: { email: string; isGuest: boolean } | Response | Promise<Response>
+let handleSignIn: PostHandler
+let handleSignUp: PostHandler
+let handleContinueAsGuest: () => Response
+let handleSignOut: () => Response
+// Whether Password reset is available, meaning the server has an email sender: not unless a test
+// says so, as when developing locally.
+let passwordResetAvailability: { available: boolean; linkHours: number } | Response
+let handleRequestPasswordReset: PostHandler
+let handleChooseNewPassword: PostHandler
+// How many antiforgery tokens the server has given. Each is new: token-1, token-2 and so on.
+let antiforgeryTokensGiven: number
 const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+  if (url === '/api/user') {
+    return currentUser instanceof Response || currentUser instanceof Promise ? currentUser : Response.json(currentUser)
+  }
+  if (url === '/api/user/sign-in' && init?.method === 'POST') return handleSignIn(JSON.parse(init.body as string))
+  if (url === '/api/user/sign-up' && init?.method === 'POST') return handleSignUp(JSON.parse(init.body as string))
+  if (url === '/api/user/continue-as-guest' && init?.method === 'POST') return handleContinueAsGuest()
+  if (url === '/api/user/sign-out' && init?.method === 'POST') return handleSignOut()
+  if (url === '/api/user/password-reset/availability') {
+    return passwordResetAvailability instanceof Response ? passwordResetAvailability : Response.json(passwordResetAvailability)
+  }
+  if (url === '/api/user/password-reset/request' && init?.method === 'POST') {
+    return handleRequestPasswordReset(JSON.parse(init.body as string))
+  }
+  if (url === '/api/user/password-reset/new-password' && init?.method === 'POST') {
+    return handleChooseNewPassword(JSON.parse(init.body as string))
+  }
+  if (url === '/api/antiforgery-token') return Response.json({ token: `token-${++antiforgeryTokensGiven}` })
   const monthlyUrl =
     /^\/api\/spending\/monthly\?fromYear=(\d+)&fromMonth=(\d+)&toYear=(\d+)&toMonth=(\d+)(&includeTransfers=true)?$/.exec(url)
   if (monthlyUrl) {
@@ -168,6 +198,15 @@ beforeEach(() => {
   handleSpending = () => Response.json({ total: 0, slices: [] })
   handleMonthlySpending = (from, to) => Response.json(monthlySpending(from, to))
   categoriesServed = categories
+  currentUser = { email: 'me@example.com', isGuest: false }
+  handleSignIn = (body) => Response.json({ email: (body as { email: string }).email, isGuest: false })
+  handleSignUp = (body) => Response.json({ email: (body as { email: string }).email, isGuest: false })
+  handleContinueAsGuest = () => Response.json(guest)
+  handleSignOut = () => new Response(null, { status: 204 })
+  antiforgeryTokensGiven = 0
+  passwordResetAvailability = { available: false, linkHours: 1 }
+  handleRequestPasswordReset = () => new Response(null, { status: 204 })
+  handleChooseNewPassword = (body) => Response.json({ email: (body as { email: string }).email, isGuest: false })
   vi.stubGlobal('fetch', fetchMock)
 })
 
@@ -184,6 +223,13 @@ const importedStatement = {
   transactionCount: 38,
   uncategorizedCount: 7,
   aiCategorizationUnavailable: false,
+  dailyAiLimitReached: false,
+}
+
+// Renders the app for a signed-in User, once it has asked who is signed in and shows the app.
+async function renderApp() {
+  render(<App />)
+  await screen.findByRole('navigation')
 }
 
 // The ways to add Transactions, rather than the Add transactions button that opens them as a menu on
@@ -192,11 +238,14 @@ function addActions() {
   return within(screen.getByRole('group', { name: 'Ways to add transactions' }))
 }
 
+// The Guest as the API reports it.
+const guest = { email: 'guest@personligfinans.invalid', isGuest: true }
+
 const statementPdf = new File(['%PDF-1.7'], 'kontoutskrift.pdf', { type: 'application/pdf' })
 
 async function openModal() {
   const user = userEvent.setup()
-  render(<App />)
+  await renderApp()
   await user.click(screen.getByRole('button', { name: 'Add transaction' }))
   await screen.findByRole('option', { name: 'Groceries' })
   return user
@@ -209,8 +258,8 @@ async function fillValidForm(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe('App', () => {
-  it('shows the Add transaction button with no modal open', () => {
-    render(<App />)
+  it('shows the Add transaction button with no modal open', async () => {
+    await renderApp()
     expect(screen.getByRole('button', { name: 'Add transaction' })).toBeInTheDocument()
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
@@ -309,8 +358,8 @@ describe('App', () => {
     expect(screen.getByLabelText(/description/i)).toHaveValue('')
   })
 
-  it('shows Upload transactions to the left of Add transaction', () => {
-    render(<App />)
+  it('shows Upload transactions to the left of Add transaction', async () => {
+    await renderApp()
 
     const buttons = addActions()
       .getAllByRole('button')
@@ -325,7 +374,7 @@ describe('App', () => {
       return Response.json(importedStatement, { status: 201 })
     }
     const user = userEvent.setup()
-    render(<App />)
+    await renderApp()
 
     await user.upload(screen.getByLabelText(/bank statement pdf/i), statementPdf)
 
@@ -339,7 +388,7 @@ describe('App', () => {
     handleUpload = () =>
       Response.json({ ...importedStatement, aiCategorizationUnavailable: true }, { status: 201 })
     const user = userEvent.setup()
-    render(<App />)
+    await renderApp()
 
     await user.upload(screen.getByLabelText(/bank statement pdf/i), statementPdf)
 
@@ -350,8 +399,8 @@ describe('App', () => {
     expect(status).toHaveTextContent('AI categorization unavailable — 7 rows left Uncategorized')
   })
 
-  it('only accepts PDF files', () => {
-    render(<App />)
+  it('only accepts PDF files', async () => {
+    await renderApp()
 
     expect(screen.getByLabelText(/bank statement pdf/i)).toHaveAttribute('accept', 'application/pdf')
   })
@@ -360,7 +409,7 @@ describe('App', () => {
     let respond: (response: Response) => void = () => {}
     handleUpload = () => new Promise((resolve) => (respond = resolve))
     const user = userEvent.setup()
-    render(<App />)
+    await renderApp()
 
     await user.upload(screen.getByLabelText(/bank statement pdf/i), statementPdf)
 
@@ -384,7 +433,7 @@ describe('App', () => {
     const julyPdf = new File(['%PDF-1.7'], 'juli.pdf', { type: 'application/pdf' })
     const septemberPdf = new File(['%PDF-1.7'], 'september.pdf', { type: 'application/pdf' })
     const user = userEvent.setup()
-    render(<App />)
+    await renderApp()
 
     await user.upload(screen.getByLabelText(/bank statement pdf/i), [julyPdf, statementPdf, septemberPdf])
 
@@ -412,7 +461,7 @@ describe('App', () => {
     }
     const julyPdf = new File(['%PDF-1.7'], 'juli.pdf', { type: 'application/pdf' })
     const user = userEvent.setup()
-    render(<App />)
+    await renderApp()
 
     await user.upload(screen.getByLabelText(/bank statement pdf/i), [julyPdf, statementPdf])
     await screen.findByRole('button', { name: /upload transactions/i })
@@ -429,7 +478,7 @@ describe('App', () => {
     handleUpload = () => new Promise((resolve) => responders.push(resolve))
     const monthsRequests = () => fetchMock.mock.calls.filter(([url]) => url === '/api/transactions/months').length
     const user = userEvent.setup()
-    render(<App />)
+    await renderApp()
     await waitFor(() => expect(monthsRequests()).toBe(1))
 
     await user.upload(screen.getByLabelText(/bank statement pdf/i), [statementPdf, statementPdf])
@@ -452,7 +501,7 @@ describe('App', () => {
     let call = 0
     handleUpload = () => Response.json(statements[call++], { status: 201 })
     const user = userEvent.setup()
-    render(<App />)
+    await renderApp()
 
     await user.upload(screen.getByLabelText(/bank statement pdf/i), [statementPdf, statementPdf, statementPdf])
 
@@ -467,7 +516,7 @@ describe('App', () => {
     handleUpload = () =>
       Response.json({ ...importedStatement, aiCategorizationUnavailable: call++ === 0 }, { status: 201 })
     const user = userEvent.setup()
-    render(<App />)
+    await renderApp()
 
     await user.upload(screen.getByLabelText(/bank statement pdf/i), [statementPdf, statementPdf])
 
@@ -476,15 +525,66 @@ describe('App', () => {
     )
   })
 
+  it('says when the daily AI limit was reached during the import', async () => {
+    handleUpload = () => Response.json({ ...importedStatement, dailyAiLimitReached: true }, { status: 201 })
+    const user = userEvent.setup()
+    await renderApp()
+
+    await user.upload(screen.getByLabelText(/bank statement pdf/i), statementPdf)
+
+    const status = await screen.findByRole('status')
+    expect(status).toHaveTextContent(
+      'Imported 38 transactions from statement 01.08.2026–31.08.2026: 31 categorized, 7 Uncategorized. ' +
+        'Daily AI limit reached until midnight Norwegian time — 7 rows left Uncategorized',
+    )
+    expect(status).not.toHaveTextContent('AI categorization unavailable')
+  })
+
+  it('sums several imported statements into one line, saying how many reached the daily AI limit', async () => {
+    const statements = [
+      { ...importedStatement, transactionCount: 38, uncategorizedCount: 7, aiCategorizationUnavailable: true },
+      { ...importedStatement, id: 8, transactionCount: 40, uncategorizedCount: 3, dailyAiLimitReached: true },
+      { ...importedStatement, id: 9, transactionCount: 22, uncategorizedCount: 5, dailyAiLimitReached: true },
+    ]
+    let call = 0
+    handleUpload = () => Response.json(statements[call++], { status: 201 })
+    const user = userEvent.setup()
+    await renderApp()
+
+    await user.upload(screen.getByLabelText(/bank statement pdf/i), [statementPdf, statementPdf, statementPdf])
+
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      'Imported 3 Bank Statements, 100 transactions: 85 categorized, 15 Uncategorized. ' +
+        'AI categorization unavailable for 1 Bank Statement. ' +
+        'Daily AI limit reached until midnight Norwegian time for 2 Bank Statements',
+    )
+  })
+
+  it('says Bank Statement in the singular when the daily AI limit was reached for one of them', async () => {
+    let call = 0
+    handleUpload = () => Response.json({ ...importedStatement, dailyAiLimitReached: call++ === 1 }, { status: 201 })
+    const user = userEvent.setup()
+    await renderApp()
+
+    await user.upload(screen.getByLabelText(/bank statement pdf/i), [statementPdf, statementPdf])
+
+    const status = await screen.findByRole('status')
+    expect(status).toHaveTextContent(
+      /14 Uncategorized\. Daily AI limit reached until midnight Norwegian time for 1 Bank Statement$/,
+    )
+    expect(status).not.toHaveTextContent('AI categorization unavailable')
+  })
+
   it('says nothing about AI categorization when it was available for every imported statement', async () => {
     const user = userEvent.setup()
-    render(<App />)
+    await renderApp()
 
     await user.upload(screen.getByLabelText(/bank statement pdf/i), [statementPdf, statementPdf])
 
     const status = await screen.findByRole('status')
     expect(status).toHaveTextContent('Imported 2 Bank Statements, 76 transactions: 62 categorized, 14 Uncategorized')
     expect(status).not.toHaveTextContent('AI categorization')
+    expect(status).not.toHaveTextContent('Daily AI limit')
   })
 
   it('keeps uploading after a rejected statement and lists it by filename under the summary', async () => {
@@ -498,7 +598,7 @@ describe('App', () => {
     const scanPdf = new File(['%PDF-1.7'], 'scan.pdf', { type: 'application/pdf' })
     const septemberPdf = new File(['%PDF-1.7'], 'september.pdf', { type: 'application/pdf' })
     const user = userEvent.setup()
-    render(<App />)
+    await renderApp()
 
     await user.upload(screen.getByLabelText(/bank statement pdf/i), [julyPdf, scanPdf, septemberPdf])
     responders[0](Response.json(importedStatement, { status: 201 }))
@@ -525,7 +625,7 @@ describe('App', () => {
     const augustPdf = new File(['%PDF-1.7'], 'august.pdf', { type: 'application/pdf' })
     const notesPdf = new File(['notes'], 'notes.pdf', { type: 'application/pdf' })
     const user = userEvent.setup()
-    render(<App />)
+    await renderApp()
 
     await user.upload(screen.getByLabelText(/bank statement pdf/i), [augustPdf, notesPdf])
 
@@ -552,7 +652,7 @@ describe('App', () => {
             { status: 409 },
           )
     const user = userEvent.setup()
-    render(<App />)
+    await renderApp()
 
     await user.upload(screen.getByLabelText(/bank statement pdf/i), [statementPdf, statementPdf])
 
@@ -571,7 +671,7 @@ describe('App', () => {
         { status: 400 },
       )
     const user = userEvent.setup()
-    render(<App />)
+    await renderApp()
 
     await user.upload(screen.getByLabelText(/bank statement pdf/i), statementPdf)
 
@@ -592,7 +692,7 @@ describe('App', () => {
         { status: 409 },
       )
     const user = userEvent.setup()
-    render(<App />)
+    await renderApp()
 
     await user.upload(screen.getByLabelText(/bank statement pdf/i), statementPdf)
 
@@ -606,7 +706,7 @@ describe('App', () => {
       throw new TypeError('Failed to fetch')
     }
     const user = userEvent.setup()
-    render(<App />)
+    await renderApp()
 
     await user.upload(screen.getByLabelText(/bank statement pdf/i), statementPdf)
 
@@ -617,7 +717,7 @@ describe('App', () => {
   it('clears an upload error once a later upload succeeds', async () => {
     handleUpload = () => new Response(null, { status: 500 })
     const user = userEvent.setup()
-    render(<App />)
+    await renderApp()
     await user.upload(screen.getByLabelText(/bank statement pdf/i), statementPdf)
     expect(await screen.findByRole('alert')).toHaveTextContent('kontoutskrift.pdf: Upload failed (500).')
 
@@ -633,7 +733,7 @@ describe('App', () => {
   describe('leaving home', () => {
     it('clears the import summary', async () => {
       const user = userEvent.setup()
-      render(<App />)
+      await renderApp()
       await user.upload(screen.getByLabelText(/bank statement pdf/i), statementPdf)
       expect(await screen.findByRole('status')).toHaveTextContent('Imported 38 transactions')
 
@@ -646,7 +746,7 @@ describe('App', () => {
     it('clears the rejected PDFs', async () => {
       handleUpload = () => new Response(null, { status: 500 })
       const user = userEvent.setup()
-      render(<App />)
+      await renderApp()
       await user.upload(screen.getByLabelText(/bank statement pdf/i), statementPdf)
       expect(await screen.findByRole('alert')).toHaveTextContent('kontoutskrift.pdf: Upload failed (500).')
 
@@ -672,7 +772,7 @@ describe('App', () => {
       let respond: (response: Response) => void = () => {}
       handleUpload = () => new Promise((resolve) => (respond = resolve))
       const user = userEvent.setup()
-      render(<App />)
+      await renderApp()
       await user.upload(screen.getByLabelText(/bank statement pdf/i), statementPdf)
 
       await user.click(screen.getByRole('button', { name: 'Transactions' }))
@@ -691,7 +791,7 @@ describe('App', () => {
 
     it('is not clicking the title while on home, which keeps the messages', async () => {
       const user = userEvent.setup()
-      render(<App />)
+      await renderApp()
       await user.upload(screen.getByLabelText(/bank statement pdf/i), statementPdf)
       expect(await screen.findByRole('status')).toHaveTextContent('Imported 38 transactions')
 
@@ -922,7 +1022,7 @@ describe('Possible duplicate notice', () => {
 describe('Categories page', () => {
   async function openCategoriesPage() {
     const user = userEvent.setup()
-    render(<App />)
+    await renderApp()
     await user.click(screen.getByRole('button', { name: 'Categories' }))
     await screen.findByRole('heading', { name: 'Categories' })
     return user
@@ -1477,7 +1577,7 @@ describe('Categories page', () => {
 describe('Rules page', () => {
   async function openRulesPage() {
     const user = userEvent.setup()
-    render(<App />)
+    await renderApp()
     await user.click(screen.getByRole('button', { name: 'Rules' }))
     await screen.findByRole('cell', { name: 'kiwi' })
     return user
@@ -1548,7 +1648,7 @@ describe('Rules page', () => {
   it('says when the rules could not be loaded', async () => {
     rules = new Response(null, { status: 500 })
     const user = userEvent.setup()
-    render(<App />)
+    await renderApp()
 
     await user.click(screen.getByRole('button', { name: 'Rules' }))
 
@@ -1770,16 +1870,16 @@ describe('Header', () => {
       .map((item) => item.textContent)
   }
 
-  it('shows Transactions, Categories then Rules, with no Back button', () => {
-    render(<App />)
+  it('shows Transactions, Categories, Rules then User, with no Back button', async () => {
+    await renderApp()
 
-    expect(navItems().map((item) => item.textContent)).toEqual(['Transactions', 'Categories', 'Rules'])
+    expect(navItems().map((item) => item.textContent)).toEqual(['Transactions', 'Categories', 'Rules', 'User'])
     expect(screen.queryByRole('button', { name: 'Back' })).not.toBeInTheDocument()
   })
 
   it('highlights the page being shown', async () => {
     const user = userEvent.setup()
-    render(<App />)
+    await renderApp()
     expect(currentPage()).toEqual([])
 
     await user.click(screen.getByRole('button', { name: 'Transactions' }))
@@ -1795,7 +1895,7 @@ describe('Header', () => {
 
   it('goes to the home page when the app name is clicked', async () => {
     const user = userEvent.setup()
-    render(<App />)
+    await renderApp()
     await user.click(screen.getByRole('button', { name: 'Rules' }))
 
     await user.click(screen.getByRole('button', { name: 'PersonligFinans' }))
@@ -1812,7 +1912,7 @@ describe('Header', () => {
 
     it('opens and closes with its button', async () => {
       const user = userEvent.setup()
-      render(<App />)
+      await renderApp()
       expect(menuButton()).toHaveAttribute('aria-expanded', 'false')
       expect(menuButton()).toHaveAttribute('aria-controls', screen.getByRole('navigation').id)
 
@@ -1825,7 +1925,7 @@ describe('Header', () => {
 
     it('closes once a page is chosen', async () => {
       const user = userEvent.setup()
-      render(<App />)
+      await renderApp()
 
       await user.click(menuButton())
       await user.click(screen.getByRole('button', { name: 'Rules' }))
@@ -1836,7 +1936,7 @@ describe('Header', () => {
 
     it('closes when the app name is clicked', async () => {
       const user = userEvent.setup()
-      render(<App />)
+      await renderApp()
 
       await user.click(menuButton())
       await user.click(screen.getByRole('button', { name: 'PersonligFinans' }))
@@ -1846,7 +1946,7 @@ describe('Header', () => {
 
     it('closes on Escape, or on a press outside it', async () => {
       const user = userEvent.setup()
-      render(<App />)
+      await renderApp()
 
       await user.click(menuButton())
       await user.keyboard('{Escape}')
@@ -1866,7 +1966,7 @@ describe('Add transactions menu on a narrow screen', () => {
 
   it('opens and closes the ways to add Transactions with its button', async () => {
     const user = userEvent.setup()
-    render(<App />)
+    await renderApp()
     expect(menuButton()).toHaveAttribute('aria-controls', screen.getByRole('group', { name: 'Ways to add transactions' }).id)
 
     await user.click(menuButton())
@@ -1878,7 +1978,7 @@ describe('Add transactions menu on a narrow screen', () => {
 
   it('closes once a way is chosen', async () => {
     const user = userEvent.setup()
-    render(<App />)
+    await renderApp()
 
     await user.click(menuButton())
     await user.click(addActions().getByRole('button', { name: 'Add transaction' }))
@@ -1889,7 +1989,7 @@ describe('Add transactions menu on a narrow screen', () => {
 
   it('closes on Escape, or on a press outside it', async () => {
     const user = userEvent.setup()
-    render(<App />)
+    await renderApp()
 
     await user.click(menuButton())
     await user.keyboard('{Escape}')
@@ -1904,7 +2004,7 @@ describe('Add transactions menu on a narrow screen', () => {
     let respond: (response: Response) => void = () => {}
     handleUpload = () => new Promise((resolve) => (respond = resolve))
     const user = userEvent.setup()
-    render(<App />)
+    await renderApp()
 
     await user.upload(screen.getByLabelText(/bank statement pdf/i), statementPdf)
 
@@ -1991,7 +2091,7 @@ describe('Transactions page', () => {
 
   async function openTransactionsPage() {
     const user = userEvent.setup()
-    render(<App />)
+    await renderApp()
     await user.click(screen.getByRole('button', { name: 'Transactions' }))
     return user
   }
@@ -2615,7 +2715,7 @@ describe('Dashboard', () => {
     handleSpending = (year, month) =>
       Response.json(year === 2026 && month === 9 ? septemberSpending : { total: 0, slices: [] })
 
-    render(<App />)
+    await renderApp()
 
     await waitFor(() => expect(legendRows()).toHaveLength(3))
     expect(legendRows()).toEqual([
@@ -2630,7 +2730,7 @@ describe('Dashboard', () => {
   })
 
   it('sits below the upload and Add transaction buttons', async () => {
-    render(<App />)
+    await renderApp()
 
     const addTransaction = screen.getByRole('button', { name: 'Add transaction' })
     expect(addTransaction.compareDocumentPosition(dashboard())).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
@@ -2638,7 +2738,7 @@ describe('Dashboard', () => {
   })
 
   it('opens on the current month with an empty chart and a total of 0 when there are no Transactions', async () => {
-    render(<App />)
+    await renderApp()
 
     await waitFor(() => expect(centreTotal()).toBe('Total 0,00 kr'))
     const today = new Date()
@@ -2658,7 +2758,7 @@ describe('Dashboard', () => {
     handleSpending = (_year, month) =>
       Response.json(month === 8 ? { total: 80, slices: [{ categoryId: 1, amount: 80 }] } : septemberSpending)
     const user = userEvent.setup()
-    render(<App />)
+    await renderApp()
     await waitFor(() => expect(legendRows()).toHaveLength(3))
 
     await user.selectOptions(screen.getByLabelText('Period'), 'August 2026')
@@ -2682,7 +2782,7 @@ describe('Dashboard', () => {
     handleSpending = (_year, month) =>
       Response.json(month === 8 ? { total: 80, slices: [{ categoryId: 1, amount: 80 }] } : septemberSpending)
     const user = userEvent.setup()
-    render(<App />)
+    await renderApp()
     await waitFor(() => expect(legendRows()).toHaveLength(3))
     const groceries = swatchColour('Groceries')
 
@@ -2698,7 +2798,7 @@ describe('Dashboard', () => {
     categoriesServed = [{ ...categories[0], colour: '#123456' }, { ...categories[1], colour: '#abcdef' }]
     months = [{ year: 2026, month: 9 }]
     handleSpending = () => Response.json(septemberSpending)
-    render(<App />)
+    await renderApp()
     await waitFor(() => expect(legendRows()).toHaveLength(3))
 
     expect(swatchColour('Groceries')).toBe('rgb(18, 52, 86)')
@@ -2722,7 +2822,7 @@ describe('Dashboard', () => {
           : { total: 500, slices: [{ categoryId: 1, amount: 500 }] },
       )
     const user = userEvent.setup()
-    render(<App />)
+    await renderApp()
     await waitFor(() => expect(legendRows()).toEqual([['Groceries', '500,00 kr', '100,0 %']]))
     const toggle = within(dashboard()).getByRole('checkbox', { name: 'Include transfers' })
     expect(toggle).not.toBeChecked()
@@ -2758,7 +2858,7 @@ describe('Dashboard', () => {
           : { total: 0, slices: [] },
       )
 
-    render(<App />)
+    await renderApp()
 
     await waitFor(() => expect(centreTotal()).toBe('Total 0,00 kr'))
     expect(legendRows()).toEqual([])
@@ -2769,7 +2869,7 @@ describe('Dashboard', () => {
   it('says when the Spending could not be loaded', async () => {
     handleSpending = () => new Response(null, { status: 500 })
 
-    render(<App />)
+    await renderApp()
 
     expect(await within(dashboard()).findByRole('alert')).toHaveTextContent('Could not load the Spending.')
   })
@@ -2777,14 +2877,14 @@ describe('Dashboard', () => {
   it('says when the months could not be loaded', async () => {
     months = new Response(null, { status: 500 })
 
-    render(<App />)
+    await renderApp()
 
     expect(await within(dashboard()).findByRole('alert')).toHaveTextContent('Could not load the Spending.')
   })
 
   it('reloads after a Bank Statement is uploaded', async () => {
     const user = userEvent.setup()
-    render(<App />)
+    await renderApp()
     await waitFor(() => expect(centreTotal()).toBe('Total 0,00 kr'))
     months = [{ year: 2026, month: 9 }]
     handleSpending = () => Response.json(septemberSpending)
@@ -2801,7 +2901,7 @@ describe('Dashboard', () => {
       { year: 2026, month: 8 },
     ]
     const user = userEvent.setup()
-    render(<App />)
+    await renderApp()
     await waitFor(() => expect(centreTotal()).toBe('Total 0,00 kr'))
     await user.selectOptions(screen.getByLabelText('Period'), 'August 2026')
     await user.click(within(dashboard()).getByRole('checkbox', { name: 'Include transfers' }))
@@ -2835,7 +2935,7 @@ describe('Dashboard', () => {
         { year: 2026, month: 3 },
       ]
       const user = userEvent.setup()
-      render(<App />)
+      await renderApp()
       await waitFor(() => expect(centreTotal()).toBe('Total 0,00 kr'))
       await user.selectOptions(within(dashboard()).getByLabelText('Granularity'), 'Quarter')
       await user.selectOptions(screen.getByLabelText('Period'), 'Q1 2026')
@@ -2859,7 +2959,7 @@ describe('Dashboard', () => {
       months = [{ year: 2026, month: 9 }]
       handleSpending = () => new Response(null, { status: 500 })
       const user = userEvent.setup()
-      render(<App />)
+      await renderApp()
       expect(await within(dashboard()).findByRole('alert')).toHaveTextContent('Could not load the Spending.')
       await user.click(screen.getByRole('button', { name: 'Transactions' }))
       handleSpending = () => Response.json(septemberSpending)
@@ -2895,7 +2995,7 @@ describe('Dashboard', () => {
         return Response.json({ ...transaction, categoryId: 1, locked: true })
       }
       const user = userEvent.setup()
-      render(<App />)
+      await renderApp()
       await waitFor(() => expect(legendRows()).toHaveLength(3))
       await user.click(screen.getByRole('button', { name: 'Transactions' }))
       await user.selectOptions(await screen.findByRole('combobox', { name: 'Category for Rema 1000' }), 'Groceries')
@@ -2918,7 +3018,7 @@ describe('Dashboard', () => {
         { year: 2025, month: 3 },
       ]
       const user = userEvent.setup()
-      render(<App />)
+      await renderApp()
       await waitFor(() => expect(centreTotal()).toBe('Total 0,00 kr'))
       await user.selectOptions(within(dashboard()).getByLabelText('Granularity'), 'Year')
       await user.selectOptions(screen.getByLabelText('Period'), '2025')
@@ -2963,7 +3063,7 @@ describe('Dashboard', () => {
     async function openDashboard() {
       months = monthsWithTransactions
       const user = userEvent.setup()
-      render(<App />)
+      await renderApp()
       await waitFor(() => expect(requestedSpending()).toEqual(['/api/spending?year=2026&month=9']))
       return user
     }
@@ -3117,7 +3217,7 @@ describe('Dashboard', () => {
       handleSpending = () => Response.json(septemberSpending)
       handleListPeriod = () => Response.json(groceriesAndUncategorized)
       const user = userEvent.setup()
-      render(<App />)
+      await renderApp()
       await waitFor(() => expect(legendRows()).toHaveLength(3))
       return user
     }
@@ -3335,7 +3435,7 @@ describe('Dashboard', () => {
         { year: 2026, month: 8 },
       ]
 
-      render(<App />)
+      await renderApp()
 
       await waitFor(() => expect(trendTable()).toHaveLength(2))
       expect(dashboard().compareDocumentPosition(trend())).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
@@ -3359,7 +3459,7 @@ describe('Dashboard', () => {
           }),
         )
 
-      render(<App />)
+      await renderApp()
 
       await waitFor(() =>
         expect(trendTable()).toEqual([
@@ -3390,7 +3490,7 @@ describe('Dashboard', () => {
         { year: 2026, month: 6 },
       ]
 
-      render(<App />)
+      await renderApp()
 
       await waitFor(() => expect(trendTable()).toHaveLength(2))
       expect(selectedMonth('From')).toBe('06.2026')
@@ -3407,7 +3507,7 @@ describe('Dashboard', () => {
     ])('says trends need at least two months with Transactions when there are %s', async (_case, offered) => {
       months = offered
 
-      render(<App />)
+      await renderApp()
 
       expect(await screen.findByText('Trends need at least two months with Transactions')).toBeVisible()
       expect(within(trend()).queryByLabelText('From')).toBeNull()
@@ -3436,7 +3536,7 @@ describe('Dashboard', () => {
           }),
         )
 
-      render(<App />)
+      await renderApp()
 
       await waitFor(() =>
         expect(trendTable()).toEqual([
@@ -3455,7 +3555,7 @@ describe('Dashboard', () => {
           { year: 2025, month: 1 },
         ]
         const user = userEvent.setup()
-        render(<App />)
+        await renderApp()
         await waitFor(() => expect(trendTable()).toHaveLength(2))
         return user
       }
@@ -3562,7 +3662,7 @@ describe('Dashboard', () => {
             }),
           )
         const user = userEvent.setup()
-        render(<App />)
+        await renderApp()
         await waitFor(() => expect(trendTable()[1]?.[0]).toBe('Total'))
         return user
       }
@@ -3620,7 +3720,7 @@ describe('Dashboard', () => {
           { year: 2026, month: 9 },
           { year: 2026, month: 8 },
         ]
-        render(<App />)
+        await renderApp()
         await waitFor(() => expect(trendTable()).toHaveLength(2))
 
         expect(
@@ -3651,7 +3751,7 @@ describe('Dashboard', () => {
           { year: 2023, month: 1 },
         ]
         const user = userEvent.setup()
-        render(<App />)
+        await renderApp()
         await waitFor(() => expect(trendTable()).toHaveLength(2))
 
         for (const [label, value] of choices) {
@@ -3669,7 +3769,7 @@ describe('Dashboard', () => {
       ])('moves %s', async (_case, offered, choices, from, to) => {
         months = offered
         const user = userEvent.setup()
-        render(<App />)
+        await renderApp()
         await waitFor(() => expect(trendTable()).toHaveLength(2))
 
         for (const [label, value] of choices) {
@@ -3686,7 +3786,7 @@ describe('Dashboard', () => {
           { year: 2025, month: 1 },
         ]
         const user = userEvent.setup()
-        render(<App />)
+        await renderApp()
         await waitFor(() => expect(trendTable()[0]).toEqual(['', 'October 2025', 'September 2026', 'Change']))
         const requestsBefore = requestedMonthlySpending().length
 
@@ -3702,7 +3802,7 @@ describe('Dashboard', () => {
       ])('says when the Transactions all fall in one Period at %s, and comes back at Month', async (granularity, offered, message) => {
         months = offered
         const user = userEvent.setup()
-        render(<App />)
+        await renderApp()
         await waitFor(() => expect(trendTable()).toHaveLength(2))
 
         await user.selectOptions(within(trend()).getByLabelText('Granularity'), granularity)
@@ -3723,7 +3823,7 @@ describe('Dashboard', () => {
           { year: 2025, month: 1 },
         ]
         const user = userEvent.setup()
-        render(<App />)
+        await renderApp()
         await waitFor(() => expect(trendTable()).toHaveLength(2))
         await user.selectOptions(within(trend()).getByLabelText('Granularity'), 'Quarter')
         await waitFor(() => expect(trendTable()[0]).toEqual(['', 'Q4 2025', 'Q3 2026', 'Change']))
@@ -3748,7 +3848,7 @@ describe('Dashboard', () => {
       handleSpending = () => Response.json(septemberSpending)
       handleMonthlySpending = () => new Response(null, { status: 500 })
 
-      render(<App />)
+      await renderApp()
 
       await waitFor(() =>
         expect(within(trend()).getByRole('alert')).toHaveTextContent('Could not load the Spending trend.'),
@@ -3765,7 +3865,7 @@ describe('Dashboard', () => {
       ]
       categoriesServed = new Response(null, { status: 500 })
 
-      render(<App />)
+      await renderApp()
 
       await waitFor(() =>
         expect(within(dashboard()).getByRole('alert')).toHaveTextContent('Could not load the Spending.'),
@@ -3813,7 +3913,7 @@ describe('Dashboard', () => {
 
       it('keeps the Span, Include transfers and switched-on lines after a Transaction is added, and fetches the Spending again', async () => {
         const user = userEvent.setup()
-        render(<App />)
+        await renderApp()
         await chooseView(user)
         const requestsBefore = requestedMonthlySpending().length
         await user.click(screen.getByRole('button', { name: 'Add transaction' }))
@@ -3851,7 +3951,7 @@ describe('Dashboard', () => {
 
       it('keeps the Span after a Bank Statement is uploaded, and fetches its Spending again', async () => {
         const user = userEvent.setup()
-        render(<App />)
+        await renderApp()
         await chooseView(user)
         const requestsBefore = requestedMonthlySpending().length
         handleMonthlySpending = (from, to) =>
@@ -3869,7 +3969,7 @@ describe('Dashboard', () => {
 
       it('keeps the default Span when it is still offered', async () => {
         const user = userEvent.setup()
-        render(<App />)
+        await renderApp()
         await waitFor(() => expect(trendTable()).toHaveLength(2))
         months = [
           { year: 2026, month: 10 },
@@ -3889,7 +3989,7 @@ describe('Dashboard', () => {
 
       it('falls back to the 12 months ending at the latest month with Transactions when the Span is no longer offered', async () => {
         const user = userEvent.setup()
-        render(<App />)
+        await renderApp()
         await chooseView(user)
         months = [
           { year: 2026, month: 10 },
@@ -3910,7 +4010,7 @@ describe('Dashboard', () => {
 
       it('keeps the Granularity, Span, Include transfers and switched-on lines when coming back to the home view, and fetches the Spending again', async () => {
         const user = userEvent.setup()
-        render(<App />)
+        await renderApp()
         await chooseView(user)
         await user.selectOptions(within(trend()).getByLabelText('Granularity'), 'Quarter')
         await waitFor(() => expect(trendTable()[0]).toEqual(['', 'Q1 2025', 'Q2 2025', 'Change']))
@@ -3945,7 +4045,7 @@ describe('Dashboard', () => {
 
       it('falls back to the months with Transactions when the kept Span ends on a month no longer offered', async () => {
         const user = userEvent.setup()
-        render(<App />)
+        await renderApp()
         await chooseView(user)
         await user.click(screen.getByRole('button', { name: 'Transactions' }))
         months = [
@@ -4000,7 +4100,7 @@ describe('Dashboard', () => {
             }),
           )
 
-        render(<App />)
+        await renderApp()
 
         await waitFor(() =>
           expect(trendTable()).toEqual([
@@ -4029,7 +4129,7 @@ describe('Dashboard', () => {
         handleMonthlySpending = (from, to) =>
           Response.json(monthlySpending(from, to, { '2026-9': septemberSpending.slices }))
 
-        render(<App />)
+        await renderApp()
 
         await waitFor(() => expect(trendTable()).toHaveLength(5))
         await waitFor(() => expect(legendRows()).toHaveLength(3))
@@ -4048,7 +4148,7 @@ describe('Dashboard', () => {
         handleMonthlySpending = (from, to) =>
           Response.json(monthlySpending(from, to, { '2026-9': septemberSpending.slices }))
 
-        render(<App />)
+        await renderApp()
 
         await waitFor(() => expect(trendTable()).toHaveLength(5))
         expect(rowSwatch(trend(), 'Groceries')).toBe('rgb(18, 52, 86)')
@@ -4064,7 +4164,7 @@ describe('Dashboard', () => {
         handleMonthlySpending = (from, to) =>
           Response.json(monthlySpending(from, to, { '2026-9': septemberSpending.slices }))
         const user = userEvent.setup()
-        render(<App />)
+        await renderApp()
         await waitFor(() => expect(trendTable()).toHaveLength(5))
         expect(switchedOn()).toEqual(['Total'])
 
@@ -4090,7 +4190,7 @@ describe('Dashboard', () => {
             }),
           )
         const user = userEvent.setup()
-        render(<App />)
+        await renderApp()
         await waitFor(() => expect(trendTable()).toHaveLength(4))
         await user.click(toggle('Total'))
         await user.click(toggle('Other'))
@@ -4133,7 +4233,7 @@ describe('Dashboard', () => {
             }),
           )
         const user = userEvent.setup()
-        render(<App />)
+        await renderApp()
         await waitFor(() => expect(trendTable()).toHaveLength(3))
         await user.click(toggle('Groceries'))
 
@@ -4184,7 +4284,7 @@ describe('Dashboard', () => {
 
       it('counts Transfers in the Total for the same Span while ticked', async () => {
         const user = userEvent.setup()
-        render(<App />)
+        await renderApp()
         await waitFor(() => expect(trendTable()[1]).toEqual(['Total', '400,00 kr', '500,00 kr', '▲ +25,0 %']))
         expect(trendToggle()).not.toBeChecked()
 
@@ -4209,7 +4309,7 @@ describe('Dashboard', () => {
           { year: 2026, month: 7 },
         ]
         const user = userEvent.setup()
-        render(<App />)
+        await renderApp()
         await waitFor(() => expect(trendTable()).toHaveLength(3))
         await user.click(trendToggle())
         await waitFor(() => expect(trendTable()[1][2]).toBe('2 000,00 kr'))
@@ -4225,7 +4325,7 @@ describe('Dashboard', () => {
 
       it("is left alone by the donut's Include transfers", async () => {
         const user = userEvent.setup()
-        render(<App />)
+        await renderApp()
         await waitFor(() => expect(trendTable()).toHaveLength(3))
         await waitFor(() => expect(requestedSpending()).toHaveLength(1))
 
@@ -4242,7 +4342,7 @@ describe('Dashboard', () => {
 
       it("leaves the donut's Include transfers alone", async () => {
         const user = userEvent.setup()
-        render(<App />)
+        await renderApp()
         await waitFor(() => expect(trendTable()).toHaveLength(3))
         await waitFor(() => expect(requestedSpending()).toHaveLength(1))
 
@@ -4324,7 +4424,7 @@ describe('Dashboard', () => {
       // Waits for the trend, then switches the named lines on, or Total off.
       async function openTrend(...lines: string[]) {
         const user = userEvent.setup()
-        render(<App />)
+        await renderApp()
         await waitFor(() => expect(trendTable()).toHaveLength(5))
         for (const line of lines) await user.click(within(trend()).getByRole('checkbox', { name: line }))
         return user
@@ -4440,12 +4540,15 @@ describe('Scan receipts', () => {
 
   // The file of each read-a-Receipt request, in the order they were sent.
   let readRequests: (FormDataEntryValue | null)[]
+  // The antiforgery token sent with each read-a-Receipt request, in the order they were sent.
+  let readTokens: (string | undefined)[]
   let handleReadReceipt: (body: FormData) => Response | Promise<Response>
   // The preview URLs released so far. Each is named after its Receipt's file.
   let releasedUrls: string[]
 
   beforeEach(() => {
     readRequests = []
+    readTokens = []
     handleReadReceipt = () => Response.json(unavailable)
     releasedUrls = []
     vi.stubGlobal(
@@ -4454,6 +4557,7 @@ describe('Scan receipts', () => {
         if (url === '/api/receipts/read' && init?.method === 'POST') {
           const body = init.body as FormData
           readRequests.push(body.get('file'))
+          readTokens.push((init.headers as Record<string, string> | undefined)?.['X-CSRF-TOKEN'])
           return handleReadReceipt(body)
         }
         return fetchMock(url, init)
@@ -4483,7 +4587,7 @@ describe('Scan receipts', () => {
   // wrong-type files can be picked too.
   async function scan(files: File[]) {
     const user = userEvent.setup({ applyAccept: false })
-    render(<App />)
+    await renderApp()
     await user.upload(screen.getByLabelText(/^receipts$/i), files)
     return user
   }
@@ -4505,8 +4609,8 @@ describe('Scan receipts', () => {
     return fetchMock.mock.calls.filter(([url]) => url === '/api/transactions/months').length
   }
 
-  it('sits right after Add transaction, with a picker for several JPEG, PNG, WebP or GIF images', () => {
-    render(<App />)
+  it('sits right after Add transaction, with a picker for several JPEG, PNG, WebP or GIF images', async () => {
+    await renderApp()
 
     const buttons = addActions()
       .getAllByRole('button')
@@ -4537,6 +4641,13 @@ describe('Scan receipts', () => {
 
     await waitFor(() => expect(readRequests).toEqual([kiwi, rema, narvesen]))
     expect(screen.getByRole('dialog', { name: 'Receipt 1 of 3' })).toBeInTheDocument()
+  })
+
+  it('sends the antiforgery token with every Receipt, fetching it once for them all', async () => {
+    await scan([kiwi, rema, narvesen])
+
+    await waitFor(() => expect(readTokens).toEqual(['token-1', 'token-1', 'token-1']))
+    expect(antiforgeryTokensGiven).toBe(1)
   })
 
   it('saves the entered values as a manually-entered Transaction and moves on to the next Receipt', async () => {
@@ -4876,10 +4987,26 @@ describe('Scan receipts', () => {
       expect(within(dialog()).getByText("Couldn't read this receipt")).toBeInTheDocument()
     })
 
+    it("says the daily AI limit is reached above an empty form with today's date when the limit was reached", async () => {
+      answer({ 'kiwi.jpg': { outcome: 'limitReached', date: null, description: null, amount: null, categoryId: null } })
+
+      await scanUntilFormIsReady([kiwi])
+
+      expect(
+        within(dialog()).getByText('Daily AI limit reached until midnight Norwegian time — enter this receipt by hand'),
+      ).toBeInTheDocument()
+      expect(within(dialog()).queryByText("Couldn't read this receipt")).not.toBeInTheDocument()
+      expect(within(dialog()).getByLabelText(/date/i)).toHaveValue(todayIsoDate())
+      expect(within(dialog()).getByLabelText(/description/i)).toHaveValue('')
+      expect(within(dialog()).getByLabelText(/^out$/i)).toHaveValue(null)
+      expect(within(dialog()).getByLabelText(/category/i)).toHaveValue('')
+    })
+
     it('shows no notice when no receipt reader is configured', async () => {
       await scanUntilFormIsReady([kiwi])
 
       expect(within(dialog()).queryByText("Couldn't read this receipt")).not.toBeInTheDocument()
+      expect(within(dialog()).queryByText(/Daily AI limit/)).not.toBeInTheDocument()
       expect(within(dialog()).queryByText('Reading…')).not.toBeInTheDocument()
     })
   })
@@ -5121,5 +5248,702 @@ describe('Scan receipts', () => {
       expect(items[0]).toHaveTextContent('Rema 1000')
       expect(items[0]).toHaveTextContent('-249,90 kr')
     })
+  })
+})
+
+describe('Signing in', () => {
+  const signedOut = () => new Response(null, { status: 401 })
+
+  function landingPage(heading: 'Sign in' | 'Sign up' = 'Sign in') {
+    return screen.findByRole('heading', { name: heading })
+  }
+
+  async function fillIn(user: ReturnType<typeof userEvent.setup>, email: string, password: string) {
+    await user.type(screen.getByLabelText(/^email/i), email)
+    await user.type(screen.getByLabelText(/^password/i), password)
+  }
+
+  async function confirmPassword(user: ReturnType<typeof userEvent.setup>, password: string) {
+    await user.type(screen.getByLabelText(/^confirm password/i), password)
+  }
+
+  it('shows the landing page, not the app, when nobody is signed in', async () => {
+    currentUser = signedOut()
+    render(<App />)
+
+    expect(await landingPage()).toBeInTheDocument()
+    expect(screen.queryByText(/bank statements and receipts/i)).not.toBeInTheDocument()
+    expect(screen.getByText('New user?', { exact: false })).toContainElement(screen.getByRole('button', { name: 'Sign up' }))
+    expect(screen.getByText('Or try the app first, without signing up.')).toBeInTheDocument()
+    expect(screen.queryByRole('navigation')).not.toBeInTheDocument()
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(['/api/user', '/api/user/password-reset/availability']),
+    )
+  })
+
+  it('shows neither the landing page nor the app while asking who is signed in', async () => {
+    let respond: (response: Response) => void = () => {}
+    currentUser = new Promise((resolve) => (respond = resolve))
+    render(<App />)
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/user'))
+    expect(screen.queryByRole('heading', { name: 'Sign in' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('navigation')).not.toBeInTheDocument()
+
+    respond(Response.json({ email: 'me@example.com', isGuest: false }))
+    expect(await screen.findByRole('navigation')).toBeInTheDocument()
+  })
+
+  it('logs in and shows the app', async () => {
+    currentUser = signedOut()
+    const user = userEvent.setup()
+    render(<App />)
+    await landingPage()
+
+    await fillIn(user, 'me@example.com', 'my long passphrase')
+    await user.click(screen.getByRole('button', { name: 'Sign in' }))
+
+    expect(await screen.findByRole('navigation')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Add transaction' })).toBeInTheDocument()
+    const signIn = fetchMock.mock.calls.find(([url]) => url === '/api/user/sign-in')
+    expect(JSON.parse(signIn?.[1]?.body as string)).toEqual({ email: 'me@example.com', password: 'my long passphrase' })
+  })
+
+  it.each([
+    [401, 'Wrong email or password.'],
+    [429, 'Too many failed sign-ins, so this email is locked for a few minutes. Try again later.'],
+  ])('stays on the landing page with the error of a sign-in refused with %i', async (status, detail) => {
+    currentUser = signedOut()
+    handleSignIn = () => Response.json({ detail }, { status })
+    const user = userEvent.setup()
+    render(<App />)
+    await landingPage()
+
+    await fillIn(user, 'me@example.com', 'wrong password')
+    await user.click(screen.getByRole('button', { name: 'Sign in' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(detail)
+    expect(screen.getByRole('heading', { name: 'Sign in' })).toBeInTheDocument()
+    expect(screen.queryByRole('navigation')).not.toBeInTheDocument()
+  })
+
+  it('signs up and shows the app', async () => {
+    currentUser = signedOut()
+    const user = userEvent.setup()
+    render(<App />)
+    await landingPage()
+
+    await user.click(screen.getByRole('button', { name: 'Sign up' }))
+    await landingPage('Sign up')
+    await fillIn(user, 'new@example.com', 'my long passphrase')
+    await confirmPassword(user, 'my long passphrase')
+    await user.click(screen.getByRole('button', { name: 'Sign up' }))
+
+    expect(await screen.findByRole('navigation')).toBeInTheDocument()
+    const signUp = fetchMock.mock.calls.find(([url]) => url === '/api/user/sign-up')
+    expect(JSON.parse(signUp?.[1]?.body as string)).toEqual({ email: 'new@example.com', password: 'my long passphrase' })
+    await user.click(screen.getByRole('button', { name: 'User' }))
+    expect(screen.getByText('new@example.com')).toBeInTheDocument()
+  })
+
+  it('asks to confirm the password only when signing up', async () => {
+    currentUser = signedOut()
+    const user = userEvent.setup()
+    render(<App />)
+    await landingPage()
+    expect(screen.queryByLabelText(/^confirm password/i)).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Sign up' }))
+
+    expect(await screen.findByLabelText(/^confirm password/i)).toHaveAttribute('autocomplete', 'new-password')
+  })
+
+  it("refuses to sign up, sending nothing, when the passwords don't match", async () => {
+    currentUser = signedOut()
+    const user = userEvent.setup()
+    render(<App />)
+    await landingPage()
+
+    await user.click(screen.getByRole('button', { name: 'Sign up' }))
+    await fillIn(user, 'new@example.com', 'my long passphrase')
+    await confirmPassword(user, 'my long passphrse')
+    await user.click(screen.getByRole('button', { name: 'Sign up' }))
+
+    expect(await screen.findByText("Passwords don't match")).toBeInTheDocument()
+    expect(fetchMock.mock.calls.map(([url]) => url)).not.toContain('/api/user/sign-up')
+    expect(screen.queryByRole('navigation')).not.toBeInTheDocument()
+  })
+
+  it('hides and clears the confirm field when switching to Sign in', async () => {
+    currentUser = signedOut()
+    const user = userEvent.setup()
+    render(<App />)
+    await landingPage()
+    await user.click(screen.getByRole('button', { name: 'Sign up' }))
+    await fillIn(user, 'new@example.com', 'my long passphrase')
+    await confirmPassword(user, 'my long passphrse')
+    await user.click(screen.getByRole('button', { name: 'Sign up' }))
+    await screen.findByText("Passwords don't match")
+
+    await user.click(screen.getByRole('button', { name: 'Sign in' }))
+
+    expect(await landingPage()).toBeInTheDocument()
+    expect(screen.queryByLabelText(/^confirm password/i)).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Sign up' }))
+    expect(await screen.findByLabelText(/^confirm password/i)).toHaveValue('')
+    expect(screen.queryByText("Passwords don't match")).not.toBeInTheDocument()
+  })
+
+  it('shows each field error of a refused sign-up under its field', async () => {
+    currentUser = signedOut()
+    handleSignUp = () =>
+      Response.json(
+        { errors: { email: ['This email is already in use.'], password: ['Password must be at least 8 characters.'] } },
+        { status: 400 },
+      )
+    const user = userEvent.setup()
+    render(<App />)
+    await landingPage()
+
+    await user.click(screen.getByRole('button', { name: 'Sign up' }))
+    await fillIn(user, 'me@example.com', 'short')
+    await confirmPassword(user, 'short')
+    await user.click(screen.getByRole('button', { name: 'Sign up' }))
+
+    expect(await screen.findByText('This email is already in use.')).toBeInTheDocument()
+    expect(screen.getByText('Password must be at least 8 characters.')).toBeInTheDocument()
+    expect(screen.getByLabelText(/^email/i)).toHaveValue('me@example.com')
+    expect(screen.queryByRole('navigation')).not.toBeInTheDocument()
+  })
+
+  it('continues as the Guest and shows the app, signed in as Guest', async () => {
+    currentUser = signedOut()
+    const user = userEvent.setup()
+    render(<App />)
+    await landingPage()
+
+    await user.click(screen.getByRole('button', { name: 'Continue as Guest' }))
+
+    expect(await screen.findByRole('navigation')).toBeInTheDocument()
+    const continueAsGuest = fetchMock.mock.calls.find(([url]) => url === '/api/user/continue-as-guest')
+    expect(continueAsGuest?.[1]?.headers).toEqual({ 'Content-Type': 'application/json' })
+    await user.click(screen.getByRole('button', { name: 'User' }))
+    expect(screen.getByText(/signed in as/i)).toHaveTextContent('Signed in as Guest')
+  })
+
+  it('stays on the landing page, saying so, when continuing as the Guest fails', async () => {
+    currentUser = signedOut()
+    handleContinueAsGuest = () => new Response(null, { status: 500 })
+    const user = userEvent.setup()
+    render(<App />)
+    await landingPage()
+
+    await user.click(screen.getByRole('button', { name: 'Continue as Guest' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Continuing as Guest failed (500).')
+    expect(screen.queryByRole('navigation')).not.toBeInTheDocument()
+  })
+
+  it('keeps the email but not the errors when switching between Sign in and Sign up', async () => {
+    currentUser = signedOut()
+    handleSignIn = () => Response.json({ detail: 'Wrong email or password.' }, { status: 401 })
+    const user = userEvent.setup()
+    render(<App />)
+    await landingPage()
+    await fillIn(user, 'me@example.com', 'wrong password')
+    await user.click(screen.getByRole('button', { name: 'Sign in' }))
+    await screen.findByRole('alert')
+
+    await user.click(screen.getByRole('button', { name: 'Sign up' }))
+
+    expect(await landingPage('Sign up')).toBeInTheDocument()
+    expect(screen.getByText('Already signed up?', { exact: false })).toContainElement(
+      screen.getByRole('button', { name: 'Sign in' }),
+    )
+    expect(screen.getByLabelText(/^email/i)).toHaveValue('me@example.com')
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+})
+
+describe('User menu', () => {
+  function userButton() {
+    return screen.getByRole('button', { name: 'User' })
+  }
+
+  it('shows who is signed in, and closes on Escape or a press outside it', async () => {
+    const user = userEvent.setup()
+    await renderApp()
+    expect(screen.queryByText(/signed in as/i)).not.toBeInTheDocument()
+
+    await user.click(userButton())
+    expect(userButton()).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByText(/signed in as/i)).toHaveTextContent('Signed in as me@example.com')
+    expect(screen.getByRole('button', { name: 'Sign out' })).toBeInTheDocument()
+
+    await user.keyboard('{Escape}')
+    expect(screen.queryByText(/signed in as/i)).not.toBeInTheDocument()
+
+    await user.click(userButton())
+    await user.click(screen.getByRole('main'))
+    expect(screen.queryByText(/signed in as/i)).not.toBeInTheDocument()
+  })
+
+  it('signs out to the landing page, and signing in again starts afresh', async () => {
+    const user = userEvent.setup()
+    await renderApp()
+    await user.click(screen.getByRole('button', { name: 'Rules' }))
+
+    await user.click(userButton())
+    await user.click(screen.getByRole('button', { name: 'Sign out' }))
+
+    expect(await screen.findByRole('heading', { name: 'Sign in' })).toBeInTheDocument()
+    expect(screen.queryByRole('navigation')).not.toBeInTheDocument()
+    expect(fetchMock).toHaveBeenCalledWith('/api/user/sign-out', { method: 'POST' })
+
+    await user.type(screen.getByLabelText(/^email/i), 'me@example.com')
+    await user.type(screen.getByLabelText(/^password/i), 'my long passphrase')
+    await user.click(screen.getByRole('button', { name: 'Sign in' }))
+    await screen.findByRole('navigation')
+    expect(screen.getByRole('button', { name: 'Rules' })).not.toHaveAttribute('aria-current')
+    expect(screen.getByRole('button', { name: 'Add transaction' })).toBeVisible()
+  })
+
+  it('sends none of the remaining Bank Statements of an Upload after signing out', async () => {
+    const responders: ((response: Response) => void)[] = []
+    handleUpload = () => new Promise((resolve) => responders.push(resolve))
+    const user = userEvent.setup()
+    await renderApp()
+
+    await user.upload(screen.getByLabelText(/bank statement pdf/i), [statementPdf, statementPdf])
+    await waitFor(() => expect(responders).toHaveLength(1))
+    await user.click(userButton())
+    await user.click(screen.getByRole('button', { name: 'Sign out' }))
+    await screen.findByRole('heading', { name: 'Sign in' })
+
+    responders[0](Response.json(importedStatement, { status: 201 }))
+    // Lets the finished upload's continuation run, which would send the next one.
+    await act(async () => {})
+    expect(responders).toHaveLength(1)
+  })
+
+  it('stays signed in, saying so, when signing out fails', async () => {
+    handleSignOut = () => new Response(null, { status: 500 })
+    const user = userEvent.setup()
+    await renderApp()
+
+    await user.click(userButton())
+    await user.click(screen.getByRole('button', { name: 'Sign out' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Signing out failed. Try again.')
+    expect(screen.getByRole('navigation')).toBeInTheDocument()
+  })
+})
+
+describe('Guest notice', () => {
+  function guestNotice() {
+    return screen.queryByRole('note', { name: 'Guest' })
+  }
+
+  it('tells the Guest to use only test data, on every page', async () => {
+    currentUser = guest
+    const user = userEvent.setup()
+    await renderApp()
+
+    expect(guestNotice()).toHaveTextContent('Demo mode: only use test data.')
+    await user.click(screen.getByRole('button', { name: 'Rules' }))
+    expect(guestNotice()).toBeInTheDocument()
+  })
+
+  it('is not shown to a User who signed up', async () => {
+    await renderApp()
+
+    expect(guestNotice()).not.toBeInTheDocument()
+  })
+
+  it('goes with the Guest when the Guest signs out and a User signs in', async () => {
+    currentUser = guest
+    const user = userEvent.setup()
+    await renderApp()
+
+    await user.click(screen.getByRole('button', { name: 'User' }))
+    await user.click(screen.getByRole('button', { name: 'Sign out' }))
+    await user.type(await screen.findByLabelText(/^email/i), 'me@example.com')
+    await user.type(screen.getByLabelText(/^password/i), 'my long passphrase')
+    await user.click(screen.getByRole('button', { name: 'Sign in' }))
+    await screen.findByRole('navigation')
+
+    expect(guestNotice()).not.toBeInTheDocument()
+  })
+})
+
+describe('Password reset', () => {
+  const ANSWER = "If that email is in use, we've sent a link to it. It works for 1 hour."
+
+  async function renderLandingPage() {
+    currentUser = new Response(null, { status: 401 })
+    render(<App />)
+    await screen.findByRole('heading', { name: 'Sign in' })
+  }
+
+  function passwordResetLink() {
+    return screen.queryByRole('button', { name: 'Forgot your password?' })
+  }
+
+  // The form that asks for a link to choose a new password.
+  function resetForm() {
+    return screen.getByRole('region', { name: 'Reset your password' })
+  }
+
+  it('offers "Forgot your password?" under Sign in when Password reset is available', async () => {
+    passwordResetAvailability = { available: true, linkHours: 1 }
+    await renderLandingPage()
+
+    expect(await screen.findByRole('button', { name: 'Forgot your password?' })).toBeInTheDocument()
+  })
+
+  it.each([
+    ['unavailable', { available: false, linkHours: 1 }],
+    ['unknown', new Response(null, { status: 500 })],
+  ])('offers no "Forgot your password?" when Password reset is %s', async (_, availability) => {
+    passwordResetAvailability = availability
+    await renderLandingPage()
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/user/password-reset/availability'))
+    await act(async () => {})
+    expect(passwordResetLink()).not.toBeInTheDocument()
+  })
+
+  it('offers "Forgot your password?" under Sign in only, not Sign up', async () => {
+    passwordResetAvailability = { available: true, linkHours: 1 }
+    const user = userEvent.setup()
+    await renderLandingPage()
+    await screen.findByRole('button', { name: 'Forgot your password?' })
+
+    await user.click(screen.getByRole('button', { name: 'Sign up' }))
+
+    expect(await screen.findByRole('heading', { name: 'Sign up' })).toBeInTheDocument()
+    expect(passwordResetLink()).not.toBeInTheDocument()
+  })
+
+  it('asks for a link to the email typed into Sign in, and gives the same answer whatever the email', async () => {
+    passwordResetAvailability = { available: true, linkHours: 1 }
+    const user = userEvent.setup()
+    await renderLandingPage()
+    await user.type(screen.getByLabelText(/^email/i), 'me@example.com')
+
+    await user.click(await screen.findByRole('button', { name: 'Forgot your password?' }))
+
+    expect(screen.queryByRole('heading', { name: 'Sign in' })).not.toBeInTheDocument()
+    expect(within(resetForm()).getByLabelText(/^email/i)).toHaveValue('me@example.com')
+    expect(within(resetForm()).queryByLabelText(/^password/i)).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Send link' }))
+
+    expect(await screen.findByRole('status')).toHaveTextContent(ANSWER)
+    const request = fetchMock.mock.calls.find(([url]) => url === '/api/user/password-reset/request')
+    expect(request?.[1]?.headers).toEqual({ 'Content-Type': 'application/json' })
+    expect(JSON.parse(request?.[1]?.body as string)).toEqual({ email: 'me@example.com' })
+  })
+
+  it('says how long the link works as the server says it', async () => {
+    passwordResetAvailability = { available: true, linkHours: 2 }
+    const user = userEvent.setup()
+    await renderLandingPage()
+    await user.click(await screen.findByRole('button', { name: 'Forgot your password?' }))
+
+    await user.click(screen.getByRole('button', { name: 'Send link' }))
+
+    expect(await screen.findByRole('status')).toHaveTextContent('It works for 2 hours.')
+  })
+
+  it('shows the field error of a refused request under the email', async () => {
+    passwordResetAvailability = { available: true, linkHours: 1 }
+    handleRequestPasswordReset = () => Response.json({ errors: { email: ['Email is required.'] } }, { status: 400 })
+    const user = userEvent.setup()
+    await renderLandingPage()
+    await user.click(await screen.findByRole('button', { name: 'Forgot your password?' }))
+
+    await user.click(screen.getByRole('button', { name: 'Send link' }))
+
+    expect(await screen.findByText('Email is required.')).toBeInTheDocument()
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+  })
+
+  it('goes back to Sign in with the email typed in', async () => {
+    passwordResetAvailability = { available: true, linkHours: 1 }
+    const user = userEvent.setup()
+    await renderLandingPage()
+    await user.click(await screen.findByRole('button', { name: 'Forgot your password?' }))
+    await user.type(within(resetForm()).getByLabelText(/^email/i), 'me@example.com')
+
+    await user.click(screen.getByRole('button', { name: 'Back to Sign in' }))
+
+    expect(screen.getByRole('heading', { name: 'Sign in' })).toBeInTheDocument()
+    expect(screen.getByLabelText(/^email/i)).toHaveValue('me@example.com')
+    expect(screen.getByLabelText(/^password/i)).toBeInTheDocument()
+  })
+
+  it.each([
+    [true, 'Too many failed sign-ins, so this email is locked for a few minutes. Try again later, or reset your password.'],
+    [false, 'Too many failed sign-ins, so this email is locked for a few minutes. Try again later.'],
+  ])('says a locked email can be reset only when Password reset is available (%s)', async (available, message) => {
+    passwordResetAvailability = { available, linkHours: 1 }
+    handleSignIn = () =>
+      Response.json(
+        { detail: 'Too many failed sign-ins, so this email is locked for a few minutes. Try again later.' },
+        { status: 429 },
+      )
+    const user = userEvent.setup()
+    await renderLandingPage()
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/user/password-reset/availability'))
+    await act(async () => {})
+
+    await user.type(screen.getByLabelText(/^email/i), 'me@example.com')
+    await user.type(screen.getByLabelText(/^password/i), 'wrong password')
+    await user.click(screen.getByRole('button', { name: 'Sign in' }))
+
+    expect((await screen.findByRole('alert')).textContent).toBe(message)
+  })
+
+  it('says nothing about resetting for a wrong password, even when Password reset is available', async () => {
+    passwordResetAvailability = { available: true, linkHours: 1 }
+    handleSignIn = () => Response.json({ detail: 'Wrong email or password.' }, { status: 401 })
+    const user = userEvent.setup()
+    await renderLandingPage()
+    await screen.findByRole('button', { name: 'Forgot your password?' })
+
+    await user.type(screen.getByLabelText(/^email/i), 'me@example.com')
+    await user.type(screen.getByLabelText(/^password/i), 'wrong password')
+    await user.click(screen.getByRole('button', { name: 'Sign in' }))
+
+    expect((await screen.findByRole('alert')).textContent).toBe('Wrong email or password.')
+  })
+
+  describe('choosing a new password from the link', () => {
+    const EXPIRED = 'This link has expired or was already used.'
+
+    // Opens the app at the link from a reset email, as following it in the email does.
+    function followLink(query = '?email=me%40example.com&token=dG9rZW4') {
+      window.history.replaceState(null, '', `/reset-password${query}`)
+      render(<App />)
+    }
+
+    afterEach(() => {
+      window.history.replaceState(null, '', '/')
+    })
+
+    function choosePage() {
+      return screen.findByRole('heading', { name: 'Choose a new password' })
+    }
+
+    async function choose(user: ReturnType<typeof userEvent.setup>, password: string, confirmPassword = password) {
+      await user.type(screen.getByLabelText(/^new password/i), password)
+      await user.type(screen.getByLabelText(/^confirm password/i), confirmPassword)
+      await user.click(screen.getByRole('button', { name: 'Set new password' }))
+    }
+
+    function newPasswordRequests() {
+      return fetchMock.mock.calls.filter(([url]) => url === '/api/user/password-reset/new-password')
+    }
+
+    // Who is signed in makes no difference, so the page never asks.
+    it.each([
+      ['signed out', new Response(null, { status: 401 })],
+      ['signed in', { email: 'someone-else@example.com', isGuest: false }],
+      ['signed in as the Guest', guest],
+    ])('shows the Choose a new password page when %s', async (_, signedIn) => {
+      currentUser = signedIn
+      followLink()
+
+      expect(await choosePage()).toBeInTheDocument()
+      expect(screen.getByText('me@example.com', { exact: false })).toBeInTheDocument()
+      expect(screen.getByLabelText(/^new password/i)).toHaveAttribute('autocomplete', 'new-password')
+      expect(screen.getByLabelText(/^confirm password/i)).toHaveAttribute('autocomplete', 'new-password')
+      expect(screen.queryByRole('heading', { name: 'Sign in' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('navigation')).not.toBeInTheDocument()
+      expect(fetchMock).not.toHaveBeenCalledWith('/api/user')
+    })
+
+    it("says the passwords don't match and sends nothing", async () => {
+      const user = userEvent.setup()
+      followLink()
+      await choosePage()
+
+      await choose(user, 'my new passphrase', 'my new passphrse')
+
+      expect(screen.getByText("Passwords don't match")).toBeInTheDocument()
+      expect(newPasswordRequests()).toHaveLength(0)
+    })
+
+    it('sets the new password with the email and token from the link, and shows the app as the User at /', async () => {
+      currentUser = new Response(null, { status: 401 })
+      const user = userEvent.setup()
+      followLink()
+      await choosePage()
+
+      await choose(user, 'my new passphrase')
+
+      expect(await screen.findByRole('navigation')).toBeInTheDocument()
+      expect(window.location.pathname).toBe('/')
+      expect(window.location.search).toBe('')
+      const [request] = newPasswordRequests()
+      expect(request[1]?.headers).toEqual({ 'Content-Type': 'application/json' })
+      expect(JSON.parse(request[1]?.body as string)).toEqual({
+        email: 'me@example.com',
+        token: 'dG9rZW4',
+        password: 'my new passphrase',
+      })
+      await user.click(screen.getByRole('button', { name: 'User' }))
+      expect(screen.getByText(/signed in as/i)).toHaveTextContent('Signed in as me@example.com')
+      expect(fetchMock).not.toHaveBeenCalledWith('/api/user')
+    })
+
+    it('shows a refused password under the field, and the link still works', async () => {
+      handleChooseNewPassword = () =>
+        Response.json({ errors: { password: ['Password must be at least 8 characters.'] } }, { status: 400 })
+      const user = userEvent.setup()
+      followLink()
+      await choosePage()
+
+      await choose(user, 'short')
+
+      expect(await screen.findByText('Password must be at least 8 characters.')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Set new password' })).toBeEnabled()
+    })
+
+    it('offers to send a new link to the email from an expired link, and sends it', async () => {
+      passwordResetAvailability = { available: true, linkHours: 1 }
+      handleChooseNewPassword = () => Response.json({ detail: EXPIRED }, { status: 410 })
+      const user = userEvent.setup()
+      followLink()
+      await choosePage()
+
+      await choose(user, 'my new passphrase')
+
+      expect(await screen.findByText(EXPIRED)).toBeInTheDocument()
+      expect(screen.queryByLabelText(/^new password/i)).not.toBeInTheDocument()
+      await user.click(await screen.findByRole('button', { name: 'Send a new link' }))
+
+      expect(await screen.findByRole('status')).toHaveTextContent(ANSWER)
+      const request = fetchMock.mock.calls.find(([url]) => url === '/api/user/password-reset/request')
+      expect(JSON.parse(request?.[1]?.body as string)).toEqual({ email: 'me@example.com' })
+    })
+
+    it.each([
+      ['no token', '?email=me%40example.com'],
+      ['an empty token', '?email=me%40example.com&token='],
+    ])('treats a link with %s as expired, and offers a new one', async (_, query) => {
+      passwordResetAvailability = { available: true, linkHours: 1 }
+      const user = userEvent.setup()
+      followLink(query)
+
+      expect(await screen.findByText(EXPIRED)).toBeInTheDocument()
+      expect(screen.queryByLabelText(/^new password/i)).not.toBeInTheDocument()
+      await user.click(await screen.findByRole('button', { name: 'Send a new link' }))
+
+      expect(await screen.findByRole('status')).toHaveTextContent(ANSWER)
+      expect(newPasswordRequests()).toHaveLength(0)
+    })
+
+    // With no email to send it to, a new link is asked for from Sign in.
+    it('treats a link with no email as expired, and goes to Sign in for a new one', async () => {
+      passwordResetAvailability = { available: true, linkHours: 1 }
+      currentUser = new Response(null, { status: 401 })
+      const user = userEvent.setup()
+      followLink('?token=dG9rZW4')
+
+      expect(await screen.findByText(EXPIRED)).toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: 'Send a new link' })).not.toBeInTheDocument()
+      await user.click(screen.getByRole('button', { name: 'Back to Sign in' }))
+
+      expect(await screen.findByRole('heading', { name: 'Sign in' })).toBeInTheDocument()
+      expect(window.location.pathname).toBe('/')
+      expect(await screen.findByRole('button', { name: 'Forgot your password?' })).toBeInTheDocument()
+    })
+  })
+})
+
+describe('Signed out mid-session', () => {
+  it('returns to the landing page when a call answers 401, and signing in again starts afresh', async () => {
+    const user = userEvent.setup()
+    await renderApp()
+    await user.click(screen.getByRole('button', { name: 'Rules' }))
+    categoriesServed = new Response(null, { status: 401 })
+
+    await user.click(screen.getByRole('button', { name: 'Categories' }))
+
+    expect(await screen.findByRole('heading', { name: 'Sign in' })).toBeInTheDocument()
+    expect(screen.queryByRole('navigation')).not.toBeInTheDocument()
+
+    categoriesServed = categories
+    await user.type(screen.getByLabelText(/^email/i), 'me@example.com')
+    await user.type(screen.getByLabelText(/^password/i), 'my long passphrase')
+    await user.click(screen.getByRole('button', { name: 'Sign in' }))
+    await screen.findByRole('navigation')
+    expect(screen.getByRole('button', { name: 'Categories' })).not.toHaveAttribute('aria-current')
+    expect(screen.getByRole('button', { name: 'Add transaction' })).toBeVisible()
+  })
+})
+
+describe('Antiforgery token', () => {
+  // The antiforgery token sent with each request to the URL, in the order they were sent.
+  function tokensSentTo(url: string) {
+    return fetchMock.mock.calls
+      .filter(([calledUrl]) => calledUrl === url)
+      .map(([, init]) => (init?.headers as Record<string, string> | undefined)?.['X-CSRF-TOKEN'])
+  }
+
+  it('is fetched after signing in and sent with each Bank Statement of an Upload', async () => {
+    const user = userEvent.setup()
+    await renderApp()
+    expect(fetchMock).not.toHaveBeenCalledWith('/api/antiforgery-token', undefined)
+
+    await user.upload(screen.getByLabelText(/bank statement pdf/i), [statementPdf, statementPdf])
+
+    await screen.findByRole('status')
+    expect(tokensSentTo('/api/bank-statements')).toEqual(['token-1', 'token-1'])
+    expect(antiforgeryTokensGiven).toBe(1)
+  })
+
+  it('is fetched afresh, and the Upload sent once more, when the server refuses it', async () => {
+    let uploads = 0
+    handleUpload = () =>
+      ++uploads === 1 ? new Response(null, { status: 403 }) : Response.json(importedStatement, { status: 201 })
+    const user = userEvent.setup()
+    await renderApp()
+
+    await user.upload(screen.getByLabelText(/bank statement pdf/i), statementPdf)
+
+    expect(await screen.findByRole('status')).toHaveTextContent('Imported 38 transactions')
+    expect(tokensSentTo('/api/bank-statements')).toEqual(['token-1', 'token-2'])
+  })
+
+  it('sends the Upload only once more when the fresh token is refused too', async () => {
+    handleUpload = () => new Response(null, { status: 403 })
+    const user = userEvent.setup()
+    await renderApp()
+
+    await user.upload(screen.getByLabelText(/bank statement pdf/i), statementPdf)
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Upload failed (403).')
+    expect(tokensSentTo('/api/bank-statements')).toEqual(['token-1', 'token-2'])
+  })
+
+  it('is fetched afresh for the User who signs in next', async () => {
+    const user = userEvent.setup()
+    await renderApp()
+    await user.upload(screen.getByLabelText(/bank statement pdf/i), statementPdf)
+    await screen.findByRole('status')
+
+    await user.click(screen.getByRole('button', { name: 'User' }))
+    await user.click(screen.getByRole('button', { name: 'Sign out' }))
+    await user.type(await screen.findByLabelText(/^email/i), 'other@example.com')
+    await user.type(screen.getByLabelText(/^password/i), 'my long passphrase')
+    await user.click(screen.getByRole('button', { name: 'Sign in' }))
+    await screen.findByRole('navigation')
+    await user.upload(screen.getByLabelText(/bank statement pdf/i), statementPdf)
+    await screen.findByRole('status')
+
+    expect(tokensSentTo('/api/bank-statements')).toEqual(['token-1', 'token-2'])
   })
 })

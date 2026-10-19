@@ -14,36 +14,31 @@ using Xunit;
 namespace PersonligFinans.Api.Tests;
 
 [Collection(ApiCollection.Name)]
-public class TransactionEndpointsTests
+public class TransactionEndpointsTests : IAsyncLifetime
 {
-    private const int GroceriesCategoryId = 1;
-    private const int RestaurantsCategoryId = 2;
-    private const int ShoppingCategoryId = 8;
-    private const int OtherCategoryId = 13;
-    private const int ClothingCategoryId = 14;
-    private const int ElectronicsCategoryId = 15;
-
     private readonly PostgresApiFactory _factory;
-    private readonly HttpClient _client;
-
-    // The tests share one database, so the listing tests use years no other test uses and put a
-    // token of their own in each description. The correction tests also put it in each rule's
-    // keyword, so their rules match only their own Transactions.
-    private readonly string _token = "t" + Guid.NewGuid().ToString("N")[..8];
+    private readonly string _email = SignedInClient.UniqueEmail();
+    private HttpClient _client = null!;
+    private TestCategories _categories = null!;
 
     public TransactionEndpointsTests(PostgresApiFactory factory)
     {
         _factory = factory;
-        _client = factory.CreateClient();
     }
 
-    private static object ValidRequest(
-        string? date = "2026-09-24",
-        string? description = "Rema 1000",
-        decimal? amount = -249.90m,
-        string? note = null,
-        int? categoryId = OtherCategoryId) =>
-        new { date, description, amount, note, categoryId };
+    public async Task InitializeAsync()
+    {
+        _client = await _factory.CreateSignedInClientAsync(_email);
+        _categories = await TestCategories.Of(_client);
+    }
+
+    public Task DisposeAsync() => Task.CompletedTask;
+
+    private sealed record TransactionRequest(
+        string? Date, string? Description, decimal? Amount, string? Note, int? CategoryId);
+
+    // A valid manually-entered Transaction in Other, of which each test changes only what it is about.
+    private TransactionRequest ValidRequest => new("2026-09-24", "Rema 1000", -249.90m, Note: null, _categories.Other);
 
     private async Task<Dictionary<string, string[]>> PostExpectingValidationErrors(object request)
     {
@@ -54,15 +49,11 @@ public class TransactionEndpointsTests
     }
 
     [Fact]
-    public async Task Get_Categories_ReturnsSeededList()
+    public async Task Get_Categories_ReturnsTheUsersCategories()
     {
         var categories = (await _client.GetFromJsonAsync<List<CategoryResponse>>("/api/categories"))!;
 
-        // Other tests add Categories of their own, so only the seeded ones are checked.
-        Assert.Contains(categories, c => c.Name == "Groceries");
-        Assert.Contains(categories, c => c is { Id: OtherCategoryId, Name: "Other" });
-        Assert.Contains(categories, c => c is { Id: ClothingCategoryId, Name: "Clothing" });
-        Assert.Contains(categories, c => c is { Id: ElectronicsCategoryId, Name: "Electronics" });
+        Assert.Equal(TestCategories.All.Select(c => c.Name).Order(), categories.Select(c => c.Name).Order());
     }
 
     [Fact]
@@ -70,26 +61,26 @@ public class TransactionEndpointsTests
     {
         var response = await _client.PostAsJsonAsync(
             "/api/transactions",
-            ValidRequest(description: "  Invoice 42 paid  ", amount: 1500m, note: "INV-42"));
+            ValidRequest with { Description = "  Invoice 42 paid  ", Amount = 1500m, Note = "INV-42" });
 
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         var created = await response.Content.ReadFromJsonAsync<TransactionResponse>();
 
-        using var scope = _factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        await using var user = await UserDatabase.OfAsync(_factory, _email);
+        var db = user.Db;
         var stored = await db.Transactions.SingleAsync(t => t.Id == created!.Id);
         Assert.Equal(new DateOnly(2026, 9, 24), stored.PostedDate);
         Assert.Equal("Invoice 42 paid", stored.Description);
         Assert.Equal(1500m, stored.Amount);
         Assert.Equal("INV-42", stored.Note);
-        Assert.Equal(OtherCategoryId, stored.CategoryId);
+        Assert.Equal(_categories.Other, stored.CategoryId);
         Assert.Null(stored.BankStatementId);
     }
 
     [Fact]
     public async Task Post_BlankNote_IsStoredAsNull()
     {
-        var response = await _client.PostAsJsonAsync("/api/transactions", ValidRequest(note: "   "));
+        var response = await _client.PostAsJsonAsync("/api/transactions", ValidRequest with { Note = "   " });
 
         var created = await response.Content.ReadFromJsonAsync<TransactionResponse>();
         Assert.Null(created!.Note);
@@ -99,7 +90,7 @@ public class TransactionEndpointsTests
     public async Task Post_MissingFields_ReturnsErrorPerField()
     {
         var errors = await PostExpectingValidationErrors(
-            ValidRequest(date: null, description: " ", amount: null, categoryId: null));
+            ValidRequest with { Date = null, Description = " ", Amount = null, CategoryId = null });
 
         Assert.Equal(["amount", "categoryId", "date", "description"], errors.Keys.Order());
     }
@@ -107,7 +98,7 @@ public class TransactionEndpointsTests
     [Fact]
     public async Task Post_ZeroAmount_IsRejected()
     {
-        var errors = await PostExpectingValidationErrors(ValidRequest(amount: 0m));
+        var errors = await PostExpectingValidationErrors(ValidRequest with { Amount = 0m });
 
         Assert.Contains("amount", errors.Keys);
     }
@@ -115,7 +106,7 @@ public class TransactionEndpointsTests
     [Fact]
     public async Task Post_AmountWithMoreThanTwoDecimals_IsRejected()
     {
-        var errors = await PostExpectingValidationErrors(ValidRequest(amount: 10.005m));
+        var errors = await PostExpectingValidationErrors(ValidRequest with { Amount = 10.005m });
 
         Assert.Contains("amount", errors.Keys);
     }
@@ -123,7 +114,7 @@ public class TransactionEndpointsTests
     [Fact]
     public async Task Post_UnknownCategory_IsRejected()
     {
-        var errors = await PostExpectingValidationErrors(ValidRequest(categoryId: 9999));
+        var errors = await PostExpectingValidationErrors(ValidRequest with { CategoryId = 9999 });
 
         Assert.Contains("categoryId", errors.Keys);
     }
@@ -132,7 +123,7 @@ public class TransactionEndpointsTests
     public async Task Post_TooLongDescriptionAndNote_AreRejected()
     {
         var errors = await PostExpectingValidationErrors(
-            ValidRequest(description: new string('x', 201), note: new string('x', 257)));
+            ValidRequest with { Description = new string('x', 201), Note = new string('x', 257) });
 
         Assert.Contains("description", errors.Keys);
         Assert.Contains("note", errors.Keys);
@@ -142,7 +133,7 @@ public class TransactionEndpointsTests
     {
         var response = await _client.PostAsJsonAsync(
             "/api/transactions",
-            ValidRequest(date: date, description: description));
+            ValidRequest with { Date = date, Description = description });
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
     }
 
@@ -157,7 +148,7 @@ public class TransactionEndpointsTests
     {
         await using var api = _factory.WithWebHostBuilder(builder =>
             builder.ConfigureTestServices(services => services.AddSingleton(ruleGenerator)));
-        using var client = api.CreateClient();
+        using var client = await api.CreateClientSignedInAsAsync(_email);
         await ImportStatement(client, period, rows);
     }
 
@@ -179,19 +170,15 @@ public class TransactionEndpointsTests
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
     }
 
-    private async Task<List<TransactionResponse>> OwnTransactionsOf(int year, int month)
-    {
-        var transactions = await _client.GetFromJsonAsync<List<TransactionResponse>>(
-            $"/api/transactions?year={year}&month={month}");
-        return transactions!.Where(t => t.Description.StartsWith(_token)).ToList();
-    }
+    private async Task<List<TransactionResponse>> TransactionsOf(int year, int month) =>
+        (await _client.GetFromJsonAsync<List<TransactionResponse>>($"/api/transactions?year={year}&month={month}"))!;
 
     [Fact]
     public async Task Get_Months_ListsEachMonthWithTransactionsOnceNewestFirst()
     {
-        await AddManualTransaction("2041-03-05", $"{_token} manual");
-        await AddManualTransaction("2041-03-20", $"{_token} manual again");
-        await ImportStatement("01.05.2041 - 31.05.2041", ("0405", $"{_token} imported"));
+        await AddManualTransaction("2041-03-05", "manual");
+        await AddManualTransaction("2041-03-20", "manual again");
+        await ImportStatement("01.05.2041 - 31.05.2041", ("0405", "imported"));
 
         var months = (await _client.GetFromJsonAsync<List<TransactionMonthResponse>>("/api/transactions/months"))!;
 
@@ -205,24 +192,24 @@ public class TransactionEndpointsTests
     [Fact]
     public async Task Get_Month_ListsImportedAndManualTransactionsOfThatMonthNewestFirst()
     {
-        await AddManualTransaction("2042-01-31", $"{_token} day before");
-        await AddManualTransaction("2042-02-01", $"{_token} first day");
-        await AddManualTransaction("2042-02-14", $"{_token} manual mid");
-        await AddManualTransaction("2042-03-01", $"{_token} day after");
+        await AddManualTransaction("2042-01-31", "day before");
+        await AddManualTransaction("2042-02-01", "first day");
+        await AddManualTransaction("2042-02-14", "manual mid");
+        await AddManualTransaction("2042-03-01", "day after");
         // Imported after the manual one on the same date, so it has the higher id.
         await ImportStatement(
             "01.02.2042 - 28.02.2042",
-            ("1402", $"{_token} imported mid"),
-            ("2802", $"{_token} last day"));
+            ("1402", "imported mid"),
+            ("2802", "last day"));
 
-        var transactions = await OwnTransactionsOf(2042, 2);
+        var transactions = await TransactionsOf(2042, 2);
 
         Assert.Equal(
             [
-                (new DateOnly(2042, 2, 28), $"{_token} last day", -10m, (int?)null),
-                (new DateOnly(2042, 2, 14), $"{_token} imported mid", -10m, null),
-                (new DateOnly(2042, 2, 14), $"{_token} manual mid", -249.90m, OtherCategoryId),
-                (new DateOnly(2042, 2, 1), $"{_token} first day", -249.90m, OtherCategoryId),
+                (new DateOnly(2042, 2, 28), "last day", -10m, (int?)null),
+                (new DateOnly(2042, 2, 14), "imported mid", -10m, null),
+                (new DateOnly(2042, 2, 14), "manual mid", -249.90m, _categories.Other),
+                (new DateOnly(2042, 2, 1), "first day", -249.90m, _categories.Other),
             ],
             transactions.Select(t => (t.Date, t.Description, t.Amount, t.CategoryId)));
     }
@@ -239,17 +226,17 @@ public class TransactionEndpointsTests
     [Fact]
     public async Task Get_YearWithoutMonth_ListsTheWholeYearsTransactionsNewestFirst()
     {
-        await AddManualTransaction("2045-12-31", $"{_token} last day");
-        await AddManualTransaction("2044-12-31", $"{_token} day before");
-        await AddManualTransaction("2045-06-15", $"{_token} mid");
-        await AddManualTransaction("2045-01-01", $"{_token} first day");
-        await AddManualTransaction("2046-01-01", $"{_token} day after");
+        await AddManualTransaction("2045-12-31", "last day");
+        await AddManualTransaction("2044-12-31", "day before");
+        await AddManualTransaction("2045-06-15", "mid");
+        await AddManualTransaction("2045-01-01", "first day");
+        await AddManualTransaction("2046-01-01", "day after");
 
         var transactions = await _client.GetFromJsonAsync<List<TransactionResponse>>("/api/transactions?year=2045");
 
         Assert.Equal(
-            [$"{_token} last day", $"{_token} mid", $"{_token} first day"],
-            transactions!.Where(t => t.Description.StartsWith(_token)).Select(t => t.Description));
+            ["last day", "mid", "first day"],
+            transactions!.Select(t => t.Description));
     }
 
     [Theory]
@@ -269,18 +256,17 @@ public class TransactionEndpointsTests
         Assert.Contains(field, problem!.Errors.Keys);
     }
 
-    // The correction tests import into a month no other test uses.
     private const string CorrectionPeriod = "01.01.2044 - 31.01.2044";
 
     private Task ImportForCorrection(params string[] descriptions) =>
-        ImportStatement(CorrectionPeriod, descriptions.Select(d => ("1501", $"{_token} {d}")).ToArray());
+        ImportStatement(CorrectionPeriod, descriptions.Select(d => ("1501", d)).ToArray());
 
     private Task ImportForCorrection(IRuleGenerator ruleGenerator, params string[] descriptions) =>
-        ImportStatement(ruleGenerator, CorrectionPeriod, descriptions.Select(d => ("1501", $"{_token} {d}")).ToArray());
+        ImportStatement(ruleGenerator, CorrectionPeriod, descriptions.Select(d => ("1501", d)).ToArray());
 
     // This test's Transaction with the given description, as the month's list shows it.
     private async Task<TransactionResponse> Own(string description) =>
-        (await OwnTransactionsOf(2044, 1)).Single(t => t.Description == $"{_token} {description}");
+        (await TransactionsOf(2044, 1)).Single(t => t.Description == description);
 
     private Task<HttpResponseMessage> ChangeCategory(int transactionId, int? categoryId) =>
         _client.PutAsJsonAsync($"/api/transactions/{transactionId}/category", new { categoryId });
@@ -308,50 +294,50 @@ public class TransactionEndpointsTests
         await ImportForCorrection("Kafé");
         var imported = await Own("Kafé");
 
-        var changed = await CategoryChanged(imported.Id, RestaurantsCategoryId);
+        var changed = await CategoryChanged(imported.Id, _categories.Restaurants);
 
-        Assert.Equal(imported with { CategoryId = RestaurantsCategoryId, Locked = true }, changed);
-        Assert.Equal(RestaurantsCategoryId, (await Own("Kafé")).CategoryId);
+        Assert.Equal(imported with { CategoryId = _categories.Restaurants, Locked = true }, changed);
+        Assert.Equal(_categories.Restaurants, (await Own("Kafé")).CategoryId);
     }
 
     [Fact]
     public async Task Put_Category_CorrectedImportedTransactionKeepsItWhenAMatchingRuleIsAdded()
     {
         await ImportForCorrection("Kafé Nord", "Kafé Sør");
-        await CategoryChanged((await Own("Kafé Nord")).Id, RestaurantsCategoryId);
+        await CategoryChanged((await Own("Kafé Nord")).Id, _categories.Restaurants);
 
-        await AddRule($"{_token} kafé", GroceriesCategoryId);
+        await AddRule("kafé", _categories.Groceries);
 
-        Assert.Equal(RestaurantsCategoryId, (await Own("Kafé Nord")).CategoryId);
-        Assert.Equal(GroceriesCategoryId, (await Own("Kafé Sør")).CategoryId);
+        Assert.Equal(_categories.Restaurants, (await Own("Kafé Nord")).CategoryId);
+        Assert.Equal(_categories.Groceries, (await Own("Kafé Sør")).CategoryId);
     }
 
     [Fact]
     public async Task Put_Category_CorrectedImportedTransactionKeepsItWhenTheRuleThatCategorizedItIsEdited()
     {
-        var ruleId = await AddRule($"{_token} kafé", GroceriesCategoryId);
+        var ruleId = await AddRule("kafé", _categories.Groceries);
         await ImportForCorrection("Kafé Nord", "Kafé Sør");
-        await CategoryChanged((await Own("Kafé Nord")).Id, RestaurantsCategoryId);
+        await CategoryChanged((await Own("Kafé Nord")).Id, _categories.Restaurants);
 
         var response = await _client.PutAsJsonAsync(
-            $"/api/categorization-rules/{ruleId}", new { keyword = $"{_token} kafé", categoryId = ShoppingCategoryId });
+            $"/api/categorization-rules/{ruleId}", new { keyword = "kafé", categoryId = _categories.Shopping });
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.Equal(RestaurantsCategoryId, (await Own("Kafé Nord")).CategoryId);
-        Assert.Equal(ShoppingCategoryId, (await Own("Kafé Sør")).CategoryId);
+        Assert.Equal(_categories.Restaurants, (await Own("Kafé Nord")).CategoryId);
+        Assert.Equal(_categories.Shopping, (await Own("Kafé Sør")).CategoryId);
     }
 
     [Fact]
     public async Task Put_Category_CorrectedImportedTransactionKeepsItWhenTheRuleThatCategorizedItIsDeleted()
     {
-        var ruleId = await AddRule($"{_token} kafé", GroceriesCategoryId);
+        var ruleId = await AddRule("kafé", _categories.Groceries);
         await ImportForCorrection("Kafé Nord", "Kafé Sør");
-        await CategoryChanged((await Own("Kafé Nord")).Id, RestaurantsCategoryId);
+        await CategoryChanged((await Own("Kafé Nord")).Id, _categories.Restaurants);
 
         var response = await _client.DeleteAsync($"/api/categorization-rules/{ruleId}");
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.Equal(RestaurantsCategoryId, (await Own("Kafé Nord")).CategoryId);
+        Assert.Equal(_categories.Restaurants, (await Own("Kafé Nord")).CategoryId);
         Assert.Null((await Own("Kafé Sør")).CategoryId);
     }
 
@@ -359,26 +345,26 @@ public class TransactionEndpointsTests
     public async Task Put_Category_CorrectedImportedTransactionKeepsItWhenALaterImportsAiGeneratedRuleMatchesIt()
     {
         await ImportForCorrection("Kafé Nord");
-        await CategoryChanged((await Own("Kafé Nord")).Id, ShoppingCategoryId);
-        var generator = new FakeRuleGenerator().Proposing($"{_token} Kafé Sør", $"{_token} kafé", "Restaurants");
+        await CategoryChanged((await Own("Kafé Nord")).Id, _categories.Shopping);
+        var generator = new FakeRuleGenerator().Proposing("Kafé Sør", "kafé", "Restaurants");
 
         await ImportForCorrection(generator, "Kafé Sør");
 
-        var rule = Assert.Single(await Rules(), r => r.Keyword == $"{_token} kafé");
+        var rule = Assert.Single(await Rules(), r => r.Keyword == "kafé");
         Assert.True(rule.AiGenerated);
-        Assert.Equal(RestaurantsCategoryId, (await Own("Kafé Sør")).CategoryId);
-        Assert.Equal(ShoppingCategoryId, (await Own("Kafé Nord")).CategoryId);
+        Assert.Equal(_categories.Restaurants, (await Own("Kafé Sør")).CategoryId);
+        Assert.Equal(_categories.Shopping, (await Own("Kafé Nord")).CategoryId);
     }
 
     [Fact]
     public async Task Put_Category_CreatesNoRuleAndLeavesTheRulesUnchanged()
     {
-        await AddRule($"{_token} kafé", GroceriesCategoryId);
+        await AddRule("kafé", _categories.Groceries);
         await ImportForCorrection("Kafé Nord", "Frisør");
         var before = await Rules();
 
-        await CategoryChanged((await Own("Kafé Nord")).Id, RestaurantsCategoryId);
-        await CategoryChanged((await Own("Frisør")).Id, ShoppingCategoryId);
+        await CategoryChanged((await Own("Kafé Nord")).Id, _categories.Restaurants);
+        await CategoryChanged((await Own("Frisør")).Id, _categories.Shopping);
 
         Assert.Equal(before, await Rules());
     }
@@ -386,16 +372,16 @@ public class TransactionEndpointsTests
     [Fact]
     public async Task Put_Category_OfTransactionCategorizedByAnAiGeneratedRule_ChangesItAndLeavesTheRuleUnchanged()
     {
-        var generator = new FakeRuleGenerator().Proposing($"{_token} Kafé", $"{_token} kafé", "Restaurants");
+        var generator = new FakeRuleGenerator().Proposing("Kafé", "kafé", "Restaurants");
         await ImportForCorrection(generator, "Kafé");
-        var rule = Assert.Single(await Rules(), r => r.Keyword == $"{_token} kafé");
+        var rule = Assert.Single(await Rules(), r => r.Keyword == "kafé");
         Assert.True(rule.AiGenerated);
-        Assert.Equal(RestaurantsCategoryId, (await Own("Kafé")).CategoryId);
+        Assert.Equal(_categories.Restaurants, (await Own("Kafé")).CategoryId);
 
-        await CategoryChanged((await Own("Kafé")).Id, GroceriesCategoryId);
+        await CategoryChanged((await Own("Kafé")).Id, _categories.Groceries);
 
-        Assert.Equal(GroceriesCategoryId, (await Own("Kafé")).CategoryId);
-        Assert.Equal(rule, Assert.Single(await Rules(), r => r.Keyword == $"{_token} kafé"));
+        Assert.Equal(_categories.Groceries, (await Own("Kafé")).CategoryId);
+        Assert.Equal(rule, Assert.Single(await Rules(), r => r.Keyword == "kafé"));
     }
 
     [Fact]
@@ -403,13 +389,13 @@ public class TransactionEndpointsTests
     {
         var response = await _client.PostAsJsonAsync(
             "/api/transactions",
-            ValidRequest(date: "2044-01-20", description: $"{_token} Lunsj", note: "INV-7"));
+            ValidRequest with { Date = "2044-01-20", Description = "Lunsj", Note = "INV-7" });
         var manual = (await response.Content.ReadFromJsonAsync<TransactionResponse>())!;
 
-        await CategoryChanged(manual.Id, GroceriesCategoryId);
-        var changed = await CategoryChanged(manual.Id, RestaurantsCategoryId);
+        await CategoryChanged(manual.Id, _categories.Groceries);
+        var changed = await CategoryChanged(manual.Id, _categories.Restaurants);
 
-        Assert.Equal(manual with { CategoryId = RestaurantsCategoryId }, changed);
+        Assert.Equal(manual with { CategoryId = _categories.Restaurants }, changed);
         Assert.Equal(changed, await Own("Lunsj"));
     }
 
@@ -418,10 +404,10 @@ public class TransactionEndpointsTests
     {
         await ImportForCorrection("Kafé");
 
-        var changed = await CategoryChanged((await Own("Kafé")).Id, OtherCategoryId);
+        var changed = await CategoryChanged((await Own("Kafé")).Id, _categories.Other);
 
-        Assert.Equal(OtherCategoryId, changed.CategoryId);
-        Assert.Equal(OtherCategoryId, (await Own("Kafé")).CategoryId);
+        Assert.Equal(_categories.Other, changed.CategoryId);
+        Assert.Equal(_categories.Other, (await Own("Kafé")).CategoryId);
     }
 
     [Fact]
@@ -437,19 +423,19 @@ public class TransactionEndpointsTests
     [Fact]
     public async Task Get_Month_ShowsATransactionCategorizedByARuleAsNotLocked()
     {
-        await AddRule($"{_token} kafé", RestaurantsCategoryId);
+        await AddRule("kafé", _categories.Restaurants);
         await ImportForCorrection("Kafé");
 
         var categorized = await Own("Kafé");
 
-        Assert.Equal((RestaurantsCategoryId, false), (categorized.CategoryId, categorized.Locked));
+        Assert.Equal((_categories.Restaurants, false), (categorized.CategoryId, categorized.Locked));
     }
 
     [Fact]
     public async Task Post_ManuallyEnteredTransaction_IsLocked()
     {
         var response = await _client.PostAsJsonAsync(
-            "/api/transactions", ValidRequest(date: "2044-01-20", description: $"{_token} Lunsj"));
+            "/api/transactions", ValidRequest with { Date = "2044-01-20", Description = "Lunsj" });
 
         var created = (await response.Content.ReadFromJsonAsync<TransactionResponse>())!;
         Assert.True(created.Locked);
@@ -459,10 +445,10 @@ public class TransactionEndpointsTests
     [Fact]
     public async Task Put_Category_OfTransactionCategorizedByARule_LocksIt()
     {
-        await AddRule($"{_token} kafé", RestaurantsCategoryId);
+        await AddRule("kafé", _categories.Restaurants);
         await ImportForCorrection("Kafé");
 
-        var changed = await CategoryChanged((await Own("Kafé")).Id, GroceriesCategoryId);
+        var changed = await CategoryChanged((await Own("Kafé")).Id, _categories.Groceries);
 
         Assert.True(changed.Locked);
         Assert.Equal(changed, await Own("Kafé"));
@@ -471,7 +457,7 @@ public class TransactionEndpointsTests
     [Fact]
     public async Task Put_Category_OfUnknownTransaction_ReturnsNotFound()
     {
-        var response = await ChangeCategory(int.MaxValue, GroceriesCategoryId);
+        var response = await ChangeCategory(int.MaxValue, _categories.Groceries);
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
@@ -494,7 +480,7 @@ public class TransactionEndpointsTests
     [Fact]
     public async Task Get_Month_ShowsWhichTransactionsWereImported()
     {
-        await AddManualTransaction("2044-01-10", $"{_token} manual");
+        await AddManualTransaction("2044-01-10", "manual");
         await ImportForCorrection("imported");
 
         Assert.False((await Own("manual")).Imported);
@@ -504,12 +490,12 @@ public class TransactionEndpointsTests
     [Fact]
     public async Task Delete_ManualTransaction_RemovesIt()
     {
-        await AddManualTransaction("2044-01-10", $"{_token} manual");
+        await AddManualTransaction("2044-01-10", "manual");
 
         var response = await _client.DeleteAsync($"/api/transactions/{(await Own("manual")).Id}");
 
         Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
-        Assert.Empty(await OwnTransactionsOf(2044, 1));
+        Assert.Empty(await TransactionsOf(2044, 1));
     }
 
     [Fact]
@@ -539,7 +525,7 @@ public class TransactionEndpointsTests
     public async Task Put_Note_OnManualTransaction_SetsItAndReturnsUpdatedTransaction()
     {
         var response = await _client.PostAsJsonAsync(
-            "/api/transactions", ValidRequest(date: "2044-01-20", description: $"{_token} Kvittering"));
+            "/api/transactions", ValidRequest with { Date = "2044-01-20", Description = "Kvittering" });
         var manual = (await response.Content.ReadFromJsonAsync<TransactionResponse>())!;
 
         var noteResponse = await ChangeNote(manual.Id, "Reimbursed by work");
@@ -566,7 +552,7 @@ public class TransactionEndpointsTests
     public async Task Put_Note_BlankOrNull_ClearsIt()
     {
         var response = await _client.PostAsJsonAsync(
-            "/api/transactions", ValidRequest(date: "2044-01-20", description: $"{_token} Med notat", note: "Old note"));
+            "/api/transactions", ValidRequest with { Date = "2044-01-20", Description = "Med notat", Note = "Old note" });
         var transaction = (await response.Content.ReadFromJsonAsync<TransactionResponse>())!;
 
         await ChangeNote(transaction.Id, "   ");
@@ -578,7 +564,7 @@ public class TransactionEndpointsTests
     public async Task Put_Note_ThatIsTooLong_IsRejected()
     {
         var response = await _client.PostAsJsonAsync(
-            "/api/transactions", ValidRequest(date: "2044-01-20", description: $"{_token} Notat for langt"));
+            "/api/transactions", ValidRequest with { Date = "2044-01-20", Description = "Notat for langt" });
         var transaction = (await response.Content.ReadFromJsonAsync<TransactionResponse>())!;
 
         var noteResponse = await ChangeNote(transaction.Id, new string('x', 257));
@@ -596,31 +582,26 @@ public class TransactionEndpointsTests
         Assert.Equal(HttpStatusCode.NotFound, noteResponse.StatusCode);
     }
 
-    // The Possible duplicate tests use dates in 2047, which no other test uses, and only look at
-    // their own Transactions, except for the one asking about an Amount no test enters.
-    private async Task<List<PossibleDuplicateResponse>> OwnPossibleDuplicates(string date, string amount)
-    {
-        var duplicates = await _client.GetFromJsonAsync<List<PossibleDuplicateResponse>>(
-            $"/api/transactions/possible-duplicates?date={date}&amount={amount}");
-        return duplicates!.Where(d => d.Description.StartsWith(_token)).ToList();
-    }
+    private async Task<List<PossibleDuplicateResponse>> PossibleDuplicates(string date, string amount) =>
+        (await _client.GetFromJsonAsync<List<PossibleDuplicateResponse>>(
+            $"/api/transactions/possible-duplicates?date={date}&amount={amount}"))!;
 
     [Fact]
     public async Task Get_PossibleDuplicates_AreThoseUpToThreeDaysEitherWayOrderedByDate()
     {
-        await AddManualTransaction("2047-03-06", $"{_token} four days after");
-        await AddManualTransaction("2047-03-05", $"{_token} three days after");
-        await AddManualTransaction("2047-03-02", $"{_token} same day");
-        await AddManualTransaction("2047-02-27", $"{_token} three days before");
-        await AddManualTransaction("2047-02-26", $"{_token} four days before");
+        await AddManualTransaction("2047-03-06", "four days after");
+        await AddManualTransaction("2047-03-05", "three days after");
+        await AddManualTransaction("2047-03-02", "same day");
+        await AddManualTransaction("2047-02-27", "three days before");
+        await AddManualTransaction("2047-02-26", "four days before");
 
-        var duplicates = await OwnPossibleDuplicates("2047-03-02", "-249.90");
+        var duplicates = await PossibleDuplicates("2047-03-02", "-249.90");
 
         Assert.Equal(
             [
-                (new DateOnly(2047, 2, 27), $"{_token} three days before", -249.90m),
-                (new DateOnly(2047, 3, 2), $"{_token} same day", -249.90m),
-                (new DateOnly(2047, 3, 5), $"{_token} three days after", -249.90m),
+                (new DateOnly(2047, 2, 27), "three days before", -249.90m),
+                (new DateOnly(2047, 3, 2), "same day", -249.90m),
+                (new DateOnly(2047, 3, 5), "three days after", -249.90m),
             ],
             duplicates.Select(d => (d.Date, d.Description, d.Amount)));
         Assert.All(duplicates, d => Assert.True(d.Id > 0));
@@ -630,27 +611,27 @@ public class TransactionEndpointsTests
     public async Task Get_PossibleDuplicates_IncludeImportedAndManuallyEnteredTransactions()
     {
         // Each imported row is a purchase of 10,00.
-        await ImportStatement("01.05.2047 - 31.05.2047", ("0905", $"{_token} imported"));
+        await ImportStatement("01.05.2047 - 31.05.2047", ("0905", "imported"));
         await _client.PostAsJsonAsync(
-            "/api/transactions", ValidRequest(date: "2047-05-11", description: $"{_token} manual", amount: -10m));
+            "/api/transactions", ValidRequest with { Date = "2047-05-11", Description = "manual", Amount = -10m });
 
-        var duplicates = await OwnPossibleDuplicates("2047-05-10", "-10");
+        var duplicates = await PossibleDuplicates("2047-05-10", "-10");
 
-        Assert.Equal([$"{_token} imported", $"{_token} manual"], duplicates.Select(d => d.Description));
+        Assert.Equal(["imported", "manual"], duplicates.Select(d => d.Description));
     }
 
     [Fact]
     public async Task Get_PossibleDuplicates_RequiresTheExactSignedAmount()
     {
-        await AddManualTransaction("2047-07-15", $"{_token} spent");
+        await AddManualTransaction("2047-07-15", "spent");
         await _client.PostAsJsonAsync(
-            "/api/transactions", ValidRequest(date: "2047-07-15", description: $"{_token} received", amount: 249.90m));
+            "/api/transactions", ValidRequest with { Date = "2047-07-15", Description = "received", Amount = 249.90m });
         await _client.PostAsJsonAsync(
-            "/api/transactions", ValidRequest(date: "2047-07-15", description: $"{_token} a cent more", amount: -249.91m));
+            "/api/transactions", ValidRequest with { Date = "2047-07-15", Description = "a cent more", Amount = -249.91m });
 
-        var duplicates = await OwnPossibleDuplicates("2047-07-15", "-249.9");
+        var duplicates = await PossibleDuplicates("2047-07-15", "-249.9");
 
-        Assert.Equal([$"{_token} spent"], duplicates.Select(d => d.Description));
+        Assert.Equal(["spent"], duplicates.Select(d => d.Description));
     }
 
     [Fact]

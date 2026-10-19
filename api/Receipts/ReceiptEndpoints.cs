@@ -1,9 +1,11 @@
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using PersonligFinans.Api.AiRequests;
 using PersonligFinans.Api.BankStatements;
 using PersonligFinans.Api.CategorizationRules;
 using PersonligFinans.Api.Data;
+using PersonligFinans.Api.Users;
 
 namespace PersonligFinans.Api.Receipts;
 
@@ -18,6 +20,9 @@ public enum ReceiptOutcome
 
     // No receipt reader is configured.
     [JsonStringEnumMemberName("unavailable")] Unavailable,
+
+    // The Daily AI limit was reached, so the receipt reader wasn't asked.
+    [JsonStringEnumMemberName("limitReached")] LimitReached,
 }
 
 // What a manually-entered Transaction from one Receipt should start from. Amount is signed: negative
@@ -32,6 +37,8 @@ public record ReceiptSuggestion(
     public static readonly ReceiptSuggestion Unreadable = new(ReceiptOutcome.Unreadable, null, null, null, null);
 
     public static readonly ReceiptSuggestion Unavailable = new(ReceiptOutcome.Unavailable, null, null, null, null);
+
+    public static readonly ReceiptSuggestion LimitReached = new(ReceiptOutcome.LimitReached, null, null, null, null);
 }
 
 public static class ReceiptEndpoints
@@ -45,17 +52,18 @@ public static class ReceiptEndpoints
     {
         var api = app.MapGroup("/api");
 
-        // A JSON API without cookie auth, so there is no forgery risk to guard the form against.
-        api.MapPost("/receipts/read", ReadReceipt).DisableAntiforgery();
+        api.MapPost("/receipts/read", ReadReceipt).RequireAntiforgeryToken();
     }
 
     // Suggests a manually-entered Transaction from one Receipt's image. The form is read by hand
     // rather than bound to an IFormFile, so that a missing or oversized file gets the same validation
     // problem as every other rejected file. The image is only passed to the receipt reader, never
-    // stored or logged, and nothing is written to the database.
+    // stored or logged, and nothing but the AI request is written to the database.
     // The receipt reader is optional: without one, every Receipt is answered Unavailable.
+    // Reading a Receipt is one AI request, taken once the image is accepted. Past the Daily AI limit
+    // the reader isn't asked, and the Receipt is answered LimitReached.
     private static async Task<IResult> ReadReceipt(
-        HttpRequest request, AppDbContext db, [FromServices] IReceiptReader? receiptReader)
+        HttpRequest request, AppDbContext db, AiRequestLedger ledger, [FromServices] IReceiptReader? receiptReader)
     {
         IFormFile? file;
         try
@@ -87,6 +95,9 @@ public static class ReceiptEndpoints
             receipt = new Receipt(bytes.ToArray(), mediaType);
         }
 
+        if (!await ledger.TryTakeAsync())
+            return Results.Ok(ReceiptSuggestion.LimitReached);
+
         // Read for each Receipt, so an edited Category description reaches the next reading.
         var categories = await db.Categories.AsNoTracking().OrderBy(c => c.Name).ToListAsync();
         var reading = await receiptReader.ReadAsync(
@@ -102,7 +113,8 @@ public static class ReceiptEndpoints
 
     // The Category of the rule matching the Description, chosen as the import chooses one, so a
     // Receipt gets the Category its merchant's imported Transactions get. Only without one does the
-    // reader's Category count, found by its name, which is unique ignoring case.
+    // reader's Category count, found by its name, which is unique among the User's Categories
+    // ignoring case.
     private static int? CategoryIdOf(
         string? description, ReceiptReading.Read read, List<CategorizationRule> rules, List<Category> categories) =>
         (description is null ? null : Categorizer.ChooseRule(description, rules)?.CategoryId)

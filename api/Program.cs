@@ -1,15 +1,25 @@
+using PersonligFinans.Api.AiRequests;
 using PersonligFinans.Api.BankStatements;
 using PersonligFinans.Api.Categories;
 using PersonligFinans.Api.CategorizationRules;
 using PersonligFinans.Api.Data;
+using PersonligFinans.Api.Emails;
 using PersonligFinans.Api.Receipts;
 using PersonligFinans.Api.Spending;
 using PersonligFinans.Api.Transactions;
+using PersonligFinans.Api.Users;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddDatabase(builder.Configuration);
 builder.Services.AddRuleGenerator(builder.Configuration);
+builder.Services.AddEmail(builder.Configuration);
+builder.Services.AddUsers();
+builder.Services.AddAntiforgeryTokens();
+builder.Services.AddAiRequestLedger(builder.Configuration);
+builder.Services.AddPasswordResetEmailLedger(builder.Configuration);
+// The clock, which the tests replace.
+builder.Services.AddSingleton(TimeProvider.System);
 
 var app = builder.Build();
 
@@ -22,7 +32,17 @@ app.UseHttpsRedirection();
 app.UseDefaultFiles();
 app.UseStaticFiles();
 
-app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
+// After the static files, so the client's files are served to anyone and the landing page can load.
+// Every endpoint then requires signing in unless it allows anonymous access.
+app.UseAuthentication();
+app.UseAuthorization();
+// After signing in is checked, since a token is bound to the signed-in User.
+app.UseAntiforgery();
+
+app.MapGet("/health", () => Results.Ok(new { status = "ok" })).AllowAnonymous();
+app.MapUserEndpoints();
+app.MapPasswordResetEndpoints();
+app.MapAntiforgeryTokenEndpoint();
 app.MapTransactionEndpoints();
 app.MapCategoryEndpoints();
 app.MapBankStatementEndpoints();
@@ -30,7 +50,7 @@ app.MapCategorizationRuleEndpoints();
 app.MapReceiptEndpoints();
 app.MapSpendingEndpoints();
 app.MapFallback("/api/{**path}", () => Results.NotFound());
-app.MapFallbackToFile("index.html");
+app.MapFallbackToFile("index.html").AllowAnonymous();
 
 app.Run();
 

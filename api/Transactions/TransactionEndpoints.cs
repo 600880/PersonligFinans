@@ -171,6 +171,7 @@ public static class TransactionEndpoints
 
         var transaction = new Transaction
         {
+            UserId = db.OwnerOfNewRows,
             PostedDate = request.Date!.Value,
             Description = description,
             Amount = request.Amount!.Value,
