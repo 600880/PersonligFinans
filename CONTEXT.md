@@ -17,8 +17,12 @@ Becoming a new User with an email and a password, which signs you straight in. T
 _Avoid_: Register, create an account
 
 **Sign in**:
-Getting back into your own User with the email and password you signed up with. Being signed in is the state of using the app as a User, however you got there: by signing in, signing up or continuing as the Guest. Signing out ends it.
+Getting back into your own User with its email and password. Being signed in is the state of using the app as a User, however you got there: by signing in, signing up or continuing as the Guest. Signing out ends it.
 _Avoid_: Log in, log out
+
+**Password reset**:
+Choosing a new password for a User through a link sent to its email, for someone who can't sign in. Whoever can read that email can take over the User, since nobody proves they own an email when signing up. A Password reset signs you in, signs the User out everywhere else, and ends any lockout from failed sign-ins. The Guest has no password, so it has no Password reset.
+_Avoid_: Forgot password, account recovery, password recovery
 
 **AI request**:
 One ask of the LLM on a User's behalf, counted whether or not it succeeds: reading one Receipt, or proposing AI-generated rules for one Bank Statement that has rows no Categorization Rule matches. A Bank Statement whose rows all match makes none.
