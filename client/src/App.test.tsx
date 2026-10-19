@@ -5246,6 +5246,10 @@ describe('Signing in', () => {
     await user.type(screen.getByLabelText(/^password/i), password)
   }
 
+  async function confirmPassword(user: ReturnType<typeof userEvent.setup>, password: string) {
+    await user.type(screen.getByLabelText(/^confirm password/i), password)
+  }
+
   it('shows the landing page, not the app, when nobody is signed in', async () => {
     currentUser = signedOut()
     render(<App />)
@@ -5313,6 +5317,7 @@ describe('Signing in', () => {
     await user.click(screen.getByRole('button', { name: 'Sign up' }))
     await landingPage('Sign up')
     await fillIn(user, 'new@example.com', 'my long passphrase')
+    await confirmPassword(user, 'my long passphrase')
     await user.click(screen.getByRole('button', { name: 'Sign up' }))
 
     expect(await screen.findByRole('navigation')).toBeInTheDocument()
@@ -5320,6 +5325,54 @@ describe('Signing in', () => {
     expect(JSON.parse(signUp?.[1]?.body as string)).toEqual({ email: 'new@example.com', password: 'my long passphrase' })
     await user.click(screen.getByRole('button', { name: 'User' }))
     expect(screen.getByText('new@example.com')).toBeInTheDocument()
+  })
+
+  it('asks to confirm the password only when signing up', async () => {
+    currentUser = signedOut()
+    const user = userEvent.setup()
+    render(<App />)
+    await landingPage()
+    expect(screen.queryByLabelText(/^confirm password/i)).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Sign up' }))
+
+    expect(await screen.findByLabelText(/^confirm password/i)).toHaveAttribute('autocomplete', 'new-password')
+  })
+
+  it("refuses to sign up, sending nothing, when the passwords don't match", async () => {
+    currentUser = signedOut()
+    const user = userEvent.setup()
+    render(<App />)
+    await landingPage()
+
+    await user.click(screen.getByRole('button', { name: 'Sign up' }))
+    await fillIn(user, 'new@example.com', 'my long passphrase')
+    await confirmPassword(user, 'my long passphrse')
+    await user.click(screen.getByRole('button', { name: 'Sign up' }))
+
+    expect(await screen.findByText("Passwords don't match")).toBeInTheDocument()
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(['/api/user'])
+    expect(screen.queryByRole('navigation')).not.toBeInTheDocument()
+  })
+
+  it('hides and clears the confirm field when switching to Sign in', async () => {
+    currentUser = signedOut()
+    const user = userEvent.setup()
+    render(<App />)
+    await landingPage()
+    await user.click(screen.getByRole('button', { name: 'Sign up' }))
+    await fillIn(user, 'new@example.com', 'my long passphrase')
+    await confirmPassword(user, 'my long passphrse')
+    await user.click(screen.getByRole('button', { name: 'Sign up' }))
+    await screen.findByText("Passwords don't match")
+
+    await user.click(screen.getByRole('button', { name: 'Sign in' }))
+
+    expect(await landingPage()).toBeInTheDocument()
+    expect(screen.queryByLabelText(/^confirm password/i)).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Sign up' }))
+    expect(await screen.findByLabelText(/^confirm password/i)).toHaveValue('')
+    expect(screen.queryByText("Passwords don't match")).not.toBeInTheDocument()
   })
 
   it('shows each field error of a refused sign-up under its field', async () => {
@@ -5335,6 +5388,7 @@ describe('Signing in', () => {
 
     await user.click(screen.getByRole('button', { name: 'Sign up' }))
     await fillIn(user, 'me@example.com', 'short')
+    await confirmPassword(user, 'short')
     await user.click(screen.getByRole('button', { name: 'Sign up' }))
 
     expect(await screen.findByText('This email is already in use.')).toBeInTheDocument()

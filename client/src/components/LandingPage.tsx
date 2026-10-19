@@ -1,5 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import { continueAsGuest, signIn, signUp, type CredentialsFieldErrors, type User } from '../lib/api'
+import { confirmPasswordError } from '../lib/confirmPassword'
+import { ConfirmPasswordField } from './ConfirmPasswordField'
 import { Field, inputClassName } from './TransactionForm'
 
 // Everything that differs between signing in and signing up. The form's heading and its submit
@@ -35,6 +37,8 @@ export function LandingPage({ onSignedIn }: LandingPageProps) {
   const [mode, setMode] = useState<Mode>('signIn')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [confirmPasswordMismatch, setConfirmPasswordMismatch] = useState<string | undefined>()
   const [fieldErrors, setFieldErrors] = useState<CredentialsFieldErrors>({})
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -44,15 +48,21 @@ export function LandingPage({ onSignedIn }: LandingPageProps) {
 
   function switchMode() {
     setMode(current.other)
+    setConfirmPassword('')
+    setConfirmPasswordMismatch(undefined)
     setFieldErrors({})
     setErrorMessage(null)
   }
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault()
-    setIsSubmitting(true)
     setFieldErrors({})
     setErrorMessage(null)
+    // Signing up sends nothing until the confirm field matches the password.
+    const mismatch = mode === 'signUp' ? confirmPasswordError(password, confirmPassword) : undefined
+    setConfirmPasswordMismatch(mismatch)
+    if (mismatch) return
+    setIsSubmitting(true)
     const result = await current.submit({ email, password })
     if (result.ok) {
       onSignedIn(result.user)
@@ -116,6 +126,13 @@ export function LandingPage({ onSignedIn }: LandingPageProps) {
                 className={inputClassName}
               />
             </Field>
+            {mode === 'signUp' && (
+              <ConfirmPasswordField
+                value={confirmPassword}
+                onChange={setConfirmPassword}
+                error={confirmPasswordMismatch}
+              />
+            )}
             <button
               type="submit"
               disabled={isSubmitting}
