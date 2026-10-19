@@ -10,8 +10,6 @@ namespace PersonligFinans.Api.AiRequests;
 public sealed class AiRequestLedger(
     AppDbContext db, TimeProvider clock, IOptions<DailyAiLimit> limit, ILogger<AiRequestLedger> logger)
 {
-    private static readonly TimeZoneInfo Norway = TimeZoneInfo.FindSystemTimeZoneById("Europe/Oslo");
-
     // Takes one AI request for the current User, to be made right after: records it and answers
     // true, or answers false and records nothing when the User or all Users together have reached
     // their limit today. It is recorded before the LLM is asked, so one that fails still counts.
@@ -22,7 +20,7 @@ public sealed class AiRequestLedger(
         var userId = db.CurrentUserId
             ?? throw new InvalidOperationException("Only a signed-in User can make an AI request.");
         var now = clock.GetUtcNow();
-        var (start, end) = DayAround(now);
+        var (start, end) = NorwegianDay.Around(now);
 
         // Counts and records under a lock that conflicts with itself, so concurrent requests take
         // turns and can't both take the last AI request left. The lock is held only this long, never
@@ -46,23 +44,6 @@ public sealed class AiRequestLedger(
         await db.Database.ExecuteSqlAsync($"INSERT INTO ai_requests (user_id, made_at) VALUES ({userId}, {now})");
         await transaction.CommitAsync();
         return true;
-    }
-
-    // The day in Norway that the instant falls on, from the midnight that starts it to the one that
-    // ends it. Bounded at both ends, so it holds only that day's AI requests whatever else is stored.
-    private static (DateTimeOffset Start, DateTimeOffset End) DayAround(DateTimeOffset instant)
-    {
-        var date = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(instant, Norway).DateTime);
-        return (Midnight(date), Midnight(date.AddDays(1)));
-    }
-
-    // The instant the date starts in Norway, in UTC as Postgres stores it. Its UTC offset, an hour in
-    // winter and two in summer, is the one in force at that midnight. Norway changes its clocks at
-    // 02:00 or 03:00, never at midnight, so midnight always exists and happens once.
-    private static DateTimeOffset Midnight(DateOnly date)
-    {
-        var midnight = date.ToDateTime(TimeOnly.MinValue);
-        return new DateTimeOffset(midnight, Norway.GetUtcOffset(midnight)).ToUniversalTime();
     }
 }
 
