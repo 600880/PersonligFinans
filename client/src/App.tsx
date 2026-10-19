@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { AddTransactionModal } from './components/AddTransactionModal'
 import { CategoriesPage } from './components/CategoriesPage'
+import { ChooseNewPasswordPage } from './components/ChooseNewPasswordPage'
 import { Dashboard } from './components/Dashboard'
 import { LandingPage } from './components/LandingPage'
 import { ErrorMessage, StatusMessage } from './components/Messages'
@@ -17,6 +18,7 @@ import {
   type User,
 } from './lib/api'
 import { formatNorwegianDate } from './lib/date'
+import { resetLinkAt } from './lib/passwordReset'
 import { checkReceiptPick, RECEIPT_IMAGE_TYPES } from './lib/receiptPick'
 import { useDismiss } from './lib/useDismiss'
 
@@ -37,15 +39,50 @@ const NAV_ITEMS: { view: View; label: string }[] = [
 const ADD_ACTION_CLASS =
   'rounded-lg border border-slate-300 bg-white px-5 py-2.5 text-sm font-medium text-slate-900 shadow-sm hover:bg-slate-100 max-sm:w-full max-sm:border-0 max-sm:text-left max-sm:shadow-none'
 
-// Asks who is signed in, and shows the landing page to nobody and the app to a User. Being signed
-// out, by Sign out or by any call answering 401, unmounts the app, so the next User starts from
-// nothing the previous one saw.
+// Opened at the link in a reset email, shows the page to choose a new password, whoever is signed in,
+// so it never asks who is. Otherwise, or once the page is done, the landing page or the app. The
+// app has no router: the reset email's link is the only address besides its own. Leaving the page
+// puts / in the address bar, so reloading doesn't open it again.
 function App() {
+  const [resetLink, setResetLink] = useState(() => resetLinkAt(window.location))
+  // The User the new password signed in as, so the app shows without asking who is signed in.
+  const [signedInByReset, setSignedInByReset] = useState<User | undefined>()
+
+  function leaveResetPage() {
+    window.history.replaceState(null, '', '/')
+    setResetLink(null)
+  }
+
+  if (resetLink) {
+    return (
+      <ChooseNewPasswordPage
+        link={resetLink}
+        onSignedIn={(user) => {
+          setSignedInByReset(user)
+          leaveResetPage()
+        }}
+        onLeave={leaveResetPage}
+      />
+    )
+  }
+  return <LandingPageOrApp signedIn={signedInByReset} />
+}
+
+interface LandingPageOrAppProps {
+  // Who is already known to be signed in; undefined to ask.
+  signedIn?: User
+}
+
+// Asks who is signed in, unless told, and shows the landing page to nobody and the app to a User.
+// Being signed out, by Sign out or by any call answering 401, unmounts the app, so the next User
+// starts from nothing the previous one saw.
+function LandingPageOrApp({ signedIn }: LandingPageOrAppProps) {
   // undefined while asking, null when nobody is signed in.
-  const [user, setUser] = useState<User | null | undefined>(undefined)
+  const [user, setUser] = useState<User | null | undefined>(signedIn)
   const [loadFailed, setLoadFailed] = useState(false)
 
   useEffect(() => {
+    if (signedIn) return
     let ignore = false
     fetchCurrentUser().then(
       (current) => {
@@ -58,7 +95,7 @@ function App() {
     return () => {
       ignore = true
     }
-  }, [])
+  }, [signedIn])
 
   useEffect(() => {
     setSignedOutHandler(() => setUser(null))

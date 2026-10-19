@@ -213,6 +213,42 @@ export async function requestPasswordReset(email: string): Promise<RequestPasswo
   return { ok: false, fieldErrors: {}, message: `Sending the link failed (${response.status}).` }
 }
 
+// The email and token from the link in a reset email, the token as the link holds it, and the new
+// password.
+export interface NewPasswordRequest {
+  email: string
+  token: string
+  password: string
+}
+
+// expired is true for a link that can't reset a password: the server says only that it has expired
+// or was already used, never which, nor whether the email is a User's.
+export type ChooseNewPasswordResult =
+  | { ok: true; user: User }
+  | { ok: false; expired: true }
+  | { ok: false; expired: false; fieldErrors: { password?: string }; message: string | null }
+
+// Sets the new password and signs in as the User, replacing whoever was signed in. Sent as JSON,
+// which the server requires, like Sign in.
+export async function chooseNewPassword(request: NewPasswordRequest): Promise<ChooseNewPasswordResult> {
+  const response = await postSignIn('/api/user/password-reset/new-password', request)
+  if (!response) return { ok: false, expired: false, fieldErrors: {}, message: UNREACHABLE }
+  if (response.ok) return { ok: true, user: (await response.json()) as User }
+
+  // 410 is a link that has expired or was already used. 400 is a validation problem, which for a
+  // link's email and token can only be a password the server refused, and 503 means Password reset
+  // is unavailable.
+  if (response.status === 410) return { ok: false, expired: true }
+  if (response.status === 400) {
+    const { fieldErrors } = await readProblem<{ password: string }>(response)
+    if (fieldErrors.password) return { ok: false, expired: false, fieldErrors, message: null }
+  }
+  if (response.status === 503) {
+    return { ok: false, expired: false, fieldErrors: {}, message: 'Password reset is unavailable.' }
+  }
+  return { ok: false, expired: false, fieldErrors: {}, message: `Setting the new password failed (${response.status}).` }
+}
+
 // Ends the sign-in. Resolves false when the server couldn't be told, so the User is still signed in.
 export async function signOut(): Promise<boolean> {
   try {

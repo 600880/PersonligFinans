@@ -156,7 +156,8 @@ public static class UserEndpoints
     }
 
     // Identity's errors as the app's own messages, keyed on the request's fields, one per field.
-    private static Dictionary<string, string[]> FieldErrors(IEnumerable<IdentityError> identityErrors)
+    // Choosing a new password after a Password reset gives the same messages for a password.
+    internal static Dictionary<string, string[]> FieldErrors(IEnumerable<IdentityError> identityErrors)
     {
         var errors = new Dictionary<string, string[]>();
         foreach (var error in identityErrors)

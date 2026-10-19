@@ -84,6 +84,7 @@ let handleSignOut: () => Response
 // says so, as when developing locally.
 let passwordResetAvailability: { available: boolean; linkHours: number } | Response
 let handleRequestPasswordReset: PostHandler
+let handleChooseNewPassword: PostHandler
 // How many antiforgery tokens the server has given. Each is new: token-1, token-2 and so on.
 let antiforgeryTokensGiven: number
 const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
@@ -99,6 +100,9 @@ const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
   }
   if (url === '/api/user/password-reset/request' && init?.method === 'POST') {
     return handleRequestPasswordReset(JSON.parse(init.body as string))
+  }
+  if (url === '/api/user/password-reset/new-password' && init?.method === 'POST') {
+    return handleChooseNewPassword(JSON.parse(init.body as string))
   }
   if (url === '/api/antiforgery-token') return Response.json({ token: `token-${++antiforgeryTokensGiven}` })
   const monthlyUrl =
@@ -202,6 +206,7 @@ beforeEach(() => {
   antiforgeryTokensGiven = 0
   passwordResetAvailability = { available: false, linkHours: 1 }
   handleRequestPasswordReset = () => new Response(null, { status: 204 })
+  handleChooseNewPassword = (body) => Response.json({ email: (body as { email: string }).email, isGuest: false })
   vi.stubGlobal('fetch', fetchMock)
 })
 
@@ -5712,6 +5717,149 @@ describe('Password reset', () => {
     await user.click(screen.getByRole('button', { name: 'Sign in' }))
 
     expect((await screen.findByRole('alert')).textContent).toBe('Wrong email or password.')
+  })
+
+  describe('choosing a new password from the link', () => {
+    const EXPIRED = 'This link has expired or was already used.'
+
+    // Opens the app at the link from a reset email, as following it in the email does.
+    function followLink(query = '?email=me%40example.com&token=dG9rZW4') {
+      window.history.replaceState(null, '', `/reset-password${query}`)
+      render(<App />)
+    }
+
+    afterEach(() => {
+      window.history.replaceState(null, '', '/')
+    })
+
+    function choosePage() {
+      return screen.findByRole('heading', { name: 'Choose a new password' })
+    }
+
+    async function choose(user: ReturnType<typeof userEvent.setup>, password: string, confirmPassword = password) {
+      await user.type(screen.getByLabelText(/^new password/i), password)
+      await user.type(screen.getByLabelText(/^confirm password/i), confirmPassword)
+      await user.click(screen.getByRole('button', { name: 'Set new password' }))
+    }
+
+    function newPasswordRequests() {
+      return fetchMock.mock.calls.filter(([url]) => url === '/api/user/password-reset/new-password')
+    }
+
+    // Who is signed in makes no difference, so the page never asks.
+    it.each([
+      ['signed out', new Response(null, { status: 401 })],
+      ['signed in', { email: 'someone-else@example.com', isGuest: false }],
+      ['signed in as the Guest', guest],
+    ])('shows the Choose a new password page when %s', async (_, signedIn) => {
+      currentUser = signedIn
+      followLink()
+
+      expect(await choosePage()).toBeInTheDocument()
+      expect(screen.getByText('me@example.com', { exact: false })).toBeInTheDocument()
+      expect(screen.getByLabelText(/^new password/i)).toHaveAttribute('autocomplete', 'new-password')
+      expect(screen.getByLabelText(/^confirm password/i)).toHaveAttribute('autocomplete', 'new-password')
+      expect(screen.queryByRole('heading', { name: 'Sign in' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('navigation')).not.toBeInTheDocument()
+      expect(fetchMock).not.toHaveBeenCalledWith('/api/user')
+    })
+
+    it("says the passwords don't match and sends nothing", async () => {
+      const user = userEvent.setup()
+      followLink()
+      await choosePage()
+
+      await choose(user, 'my new passphrase', 'my new passphrse')
+
+      expect(screen.getByText("Passwords don't match")).toBeInTheDocument()
+      expect(newPasswordRequests()).toHaveLength(0)
+    })
+
+    it('sets the new password with the email and token from the link, and shows the app as the User at /', async () => {
+      currentUser = new Response(null, { status: 401 })
+      const user = userEvent.setup()
+      followLink()
+      await choosePage()
+
+      await choose(user, 'my new passphrase')
+
+      expect(await screen.findByRole('navigation')).toBeInTheDocument()
+      expect(window.location.pathname).toBe('/')
+      expect(window.location.search).toBe('')
+      const [request] = newPasswordRequests()
+      expect(request[1]?.headers).toEqual({ 'Content-Type': 'application/json' })
+      expect(JSON.parse(request[1]?.body as string)).toEqual({
+        email: 'me@example.com',
+        token: 'dG9rZW4',
+        password: 'my new passphrase',
+      })
+      await user.click(screen.getByRole('button', { name: 'User' }))
+      expect(screen.getByText(/signed in as/i)).toHaveTextContent('Signed in as me@example.com')
+      expect(fetchMock).not.toHaveBeenCalledWith('/api/user')
+    })
+
+    it('shows a refused password under the field, and the link still works', async () => {
+      handleChooseNewPassword = () =>
+        Response.json({ errors: { password: ['Password must be at least 8 characters.'] } }, { status: 400 })
+      const user = userEvent.setup()
+      followLink()
+      await choosePage()
+
+      await choose(user, 'short')
+
+      expect(await screen.findByText('Password must be at least 8 characters.')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Set new password' })).toBeEnabled()
+    })
+
+    it('offers to send a new link to the email from an expired link, and sends it', async () => {
+      passwordResetAvailability = { available: true, linkHours: 1 }
+      handleChooseNewPassword = () => Response.json({ detail: EXPIRED }, { status: 410 })
+      const user = userEvent.setup()
+      followLink()
+      await choosePage()
+
+      await choose(user, 'my new passphrase')
+
+      expect(await screen.findByText(EXPIRED)).toBeInTheDocument()
+      expect(screen.queryByLabelText(/^new password/i)).not.toBeInTheDocument()
+      await user.click(await screen.findByRole('button', { name: 'Send a new link' }))
+
+      expect(await screen.findByRole('status')).toHaveTextContent(ANSWER)
+      const request = fetchMock.mock.calls.find(([url]) => url === '/api/user/password-reset/request')
+      expect(JSON.parse(request?.[1]?.body as string)).toEqual({ email: 'me@example.com' })
+    })
+
+    it.each([
+      ['no token', '?email=me%40example.com'],
+      ['an empty token', '?email=me%40example.com&token='],
+    ])('treats a link with %s as expired, and offers a new one', async (_, query) => {
+      passwordResetAvailability = { available: true, linkHours: 1 }
+      const user = userEvent.setup()
+      followLink(query)
+
+      expect(await screen.findByText(EXPIRED)).toBeInTheDocument()
+      expect(screen.queryByLabelText(/^new password/i)).not.toBeInTheDocument()
+      await user.click(await screen.findByRole('button', { name: 'Send a new link' }))
+
+      expect(await screen.findByRole('status')).toHaveTextContent(ANSWER)
+      expect(newPasswordRequests()).toHaveLength(0)
+    })
+
+    // With no email to send it to, a new link is asked for from Sign in.
+    it('treats a link with no email as expired, and goes to Sign in for a new one', async () => {
+      passwordResetAvailability = { available: true, linkHours: 1 }
+      currentUser = new Response(null, { status: 401 })
+      const user = userEvent.setup()
+      followLink('?token=dG9rZW4')
+
+      expect(await screen.findByText(EXPIRED)).toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: 'Send a new link' })).not.toBeInTheDocument()
+      await user.click(screen.getByRole('button', { name: 'Back to Sign in' }))
+
+      expect(await screen.findByRole('heading', { name: 'Sign in' })).toBeInTheDocument()
+      expect(window.location.pathname).toBe('/')
+      expect(await screen.findByRole('button', { name: 'Forgot your password?' })).toBeInTheDocument()
+    })
   })
 })
 
