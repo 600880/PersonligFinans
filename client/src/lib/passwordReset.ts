@@ -19,5 +19,5 @@ export function resetLinkAt(location: Location): ResetLink | null {
 // link. The same for every email, whether or not it is a User's, as the server's answer is, so nobody
 // can find out which emails are in use. "1 hour" or, say, "2 hours", as the email says it.
 export function linkSent(linkHours: number) {
-  return `If that email is in use, we've sent a link to it. It works for ${linkHours === 1 ? '1 hour' : `${linkHours} hours`}.`
+  return `Email sent. The link is active for ${linkHours === 1 ? '1 hour' : `${linkHours} hours`}.`
 }

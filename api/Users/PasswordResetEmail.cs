@@ -11,8 +11,8 @@ public static class PasswordResetEmail
     public const string Subject = "Reset your PersonligFinans password";
 
     private const string Request =
-        "Someone asked to reset the PersonligFinans password for this email, so here is a link to choose a new one:";
-    private static readonly string Lifespan = $"It works for {LinkLifespan(UserSetup.PasswordResetLinkHours)}.";
+        "Someone asked to reset the PersonligFinans password for this email. Click the link to choose a new one:";
+    private static readonly string Lifespan = $"The link is active for {LinkLifespan(UserSetup.PasswordResetLinkHours)}.";
     private const string Ignore = "If you didn't ask for this, ignore this email.";
 
     // The email to the User's email, with a link holding that email and the reset token.

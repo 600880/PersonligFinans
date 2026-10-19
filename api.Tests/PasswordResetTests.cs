@@ -173,11 +173,11 @@ public class PasswordResetTests
         Assert.StartsWith($"{AppUrl}/reset-password?email=", link);
         Assert.Equal("Reset your PersonligFinans password", sent.Subject);
         Assert.Equal(
-            "Someone asked to reset the PersonligFinans password for this email, so here is a link to choose a new one:\n\n" +
-            $"{link}\n\nIt works for 1 hour.\n\nIf you didn't ask for this, ignore this email.\n",
+            "Someone asked to reset the PersonligFinans password for this email. Click the link to choose a new one:\n\n" +
+            $"{link}\n\nThe link is active for 1 hour.\n\nIf you didn't ask for this, ignore this email.\n",
             sent.PlainText);
         Assert.Contains($"<a href=\"{link.Replace("&", "&amp;")}\">", sent.Html);
-        Assert.Contains("<p>It works for 1 hour.</p>", sent.Html);
+        Assert.Contains("<p>The link is active for 1 hour.</p>", sent.Html);
         Assert.Contains("<p>If you didn&#39;t ask for this, ignore this email.</p>", sent.Html);
         Assert.DoesNotContain("attacker.example", sent.PlainText + sent.Html);
     }

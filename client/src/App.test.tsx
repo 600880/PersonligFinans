@@ -5577,7 +5577,7 @@ describe('Guest notice', () => {
 })
 
 describe('Password reset', () => {
-  const ANSWER = "If that email is in use, we've sent a link to it. It works for 1 hour."
+  const ANSWER = "Email sent. The link is active for 1 hour."
 
   async function renderLandingPage() {
     currentUser = new Response(null, { status: 401 })
@@ -5653,7 +5653,7 @@ describe('Password reset', () => {
 
     await user.click(screen.getByRole('button', { name: 'Send link' }))
 
-    expect(await screen.findByRole('status')).toHaveTextContent('It works for 2 hours.')
+    expect(await screen.findByRole('status')).toHaveTextContent('The link is active for 2 hours.')
   })
 
   it('shows the field error of a refused request under the email', async () => {
