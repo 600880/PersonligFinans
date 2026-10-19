@@ -1,5 +1,13 @@
-import { useState, type FormEvent } from 'react'
-import { continueAsGuest, signIn, signUp, type CredentialsFieldErrors, type User } from '../lib/api'
+import { useEffect, useState, type FormEvent } from 'react'
+import {
+  continueAsGuest,
+  fetchPasswordResetAvailable,
+  signIn,
+  signUp,
+  type CredentialsFieldErrors,
+  type User,
+} from '../lib/api'
+import { ForgotPasswordForm } from './ForgotPasswordForm'
 import { Field, inputClassName } from './TransactionForm'
 
 // Everything that differs between signing in and signing up. The form's heading and its submit
@@ -29,8 +37,16 @@ interface LandingPageProps {
   onSignedIn: (user: User) => void
 }
 
+// The server's lockout message, which ends by saying to try again later, offering a Password reset
+// as well, since a reset ends the lockout: "Try again later." becomes "Try again later, or reset
+// your password."
+function withResetOffer(lockoutMessage: string) {
+  return `${lockoutMessage.replace(/\.$/, '')}, or reset your password.`
+}
+
 // What a visitor who isn't signed in sees: a form to sign in or, switched to, to sign up, and a
-// way to try the app as the Guest. The email typed in carries over when switching.
+// way to try the app as the Guest, and, when Password reset is available, a way to ask for a link to
+// choose a new password. The email typed in carries over when switching.
 export function LandingPage({ onSignedIn }: LandingPageProps) {
   const [mode, setMode] = useState<Mode>('signIn')
   const [email, setEmail] = useState('')
@@ -41,6 +57,22 @@ export function LandingPage({ onSignedIn }: LandingPageProps) {
   const [guestError, setGuestError] = useState<string | null>(null)
   const [isContinuingAsGuest, setIsContinuingAsGuest] = useState(false)
   const current = MODES[mode]
+  // Whether Password reset is available, which is false until the server says so. Everything the
+  // landing page says about resetting a password depends on this alone.
+  const [canResetPassword, setCanResetPassword] = useState(false)
+  const [isAskingForReset, setIsAskingForReset] = useState(false)
+  // Whether errorMessage says the email is locked after too many failed sign-ins.
+  const [isLockedOut, setIsLockedOut] = useState(false)
+
+  useEffect(() => {
+    let ignore = false
+    void fetchPasswordResetAvailable().then((available) => {
+      if (!ignore) setCanResetPassword(available)
+    })
+    return () => {
+      ignore = true
+    }
+  }, [])
 
   function switchMode() {
     setMode(current.other)
@@ -61,6 +93,7 @@ export function LandingPage({ onSignedIn }: LandingPageProps) {
     setIsSubmitting(false)
     setFieldErrors(result.fieldErrors)
     setErrorMessage(result.message)
+    setIsLockedOut(result.lockedOut === true)
   }
 
   async function handleContinueAsGuest() {
@@ -82,7 +115,14 @@ export function LandingPage({ onSignedIn }: LandingPageProps) {
       </header>
 
       <main className="flex flex-col items-center gap-6 px-6 py-10 max-sm:px-4">
+        {isAskingForReset && (
+          <ForgotPasswordForm email={email} onEmailChange={setEmail} onBack={() => setIsAskingForReset(false)} />
+        )}
+
+        {/* Hidden rather than gone while asking for a reset, so going back finds Sign in as it was
+            left. */}
         <section
+          hidden={isAskingForReset}
           aria-labelledby="credentials-heading"
           className="w-full max-w-sm rounded-xl border border-slate-200 bg-white p-6 shadow-sm max-sm:p-4"
         >
@@ -92,7 +132,7 @@ export function LandingPage({ onSignedIn }: LandingPageProps) {
 
           {errorMessage && (
             <p role="alert" className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
-              {errorMessage}
+              {isLockedOut && canResetPassword ? withResetOffer(errorMessage) : errorMessage}
             </p>
           )}
 
@@ -124,6 +164,18 @@ export function LandingPage({ onSignedIn }: LandingPageProps) {
               {isSubmitting ? current.submittingLabel : current.label}
             </button>
           </form>
+
+          {mode === 'signIn' && canResetPassword && (
+            <p className="mt-3 text-center text-sm">
+              <button
+                type="button"
+                onClick={() => setIsAskingForReset(true)}
+                className="font-medium text-slate-900 underline"
+              >
+                Forgot your password?
+              </button>
+            </p>
+          )}
 
           <p className="mt-4 text-center text-sm text-slate-600">
             {current.switchPrompt}
