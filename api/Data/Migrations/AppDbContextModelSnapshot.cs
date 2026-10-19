@@ -257,6 +257,7 @@ namespace PersonligFinans.Api.Data.Migrations
                         .HasColumnName("upload_id");
 
                     b.Property<string>("UserId")
+                        .IsRequired()
                         .HasColumnType("text")
                         .HasColumnName("user_id");
 
@@ -302,6 +303,7 @@ namespace PersonligFinans.Api.Data.Migrations
                         .HasColumnName("upload_id");
 
                     b.Property<string>("UserId")
+                        .IsRequired()
                         .HasColumnType("text")
                         .HasColumnName("user_id");
 
@@ -349,6 +351,7 @@ namespace PersonligFinans.Api.Data.Migrations
                         .HasColumnName("name");
 
                     b.Property<string>("UserId")
+                        .IsRequired()
                         .HasColumnType("text")
                         .HasColumnName("user_id");
 
@@ -403,6 +406,7 @@ namespace PersonligFinans.Api.Data.Migrations
                         .HasColumnName("posted_date");
 
                     b.Property<string>("UserId")
+                        .IsRequired()
                         .HasColumnType("text")
                         .HasColumnName("user_id");
 
@@ -473,6 +477,7 @@ namespace PersonligFinans.Api.Data.Migrations
                         .WithMany()
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
                         .HasConstraintName("fk_bank_statements_asp_net_users_user_id");
                 });
 
@@ -489,6 +494,7 @@ namespace PersonligFinans.Api.Data.Migrations
                         .WithMany()
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
                         .HasConstraintName("fk_categorization_rules_asp_net_users_user_id");
 
                     b.Navigation("Category");
@@ -500,6 +506,7 @@ namespace PersonligFinans.Api.Data.Migrations
                         .WithMany()
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
                         .HasConstraintName("fk_categories_asp_net_users_user_id");
                 });
 
@@ -527,6 +534,7 @@ namespace PersonligFinans.Api.Data.Migrations
                         .WithMany()
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
                         .HasConstraintName("fk_transactions_asp_net_users_user_id");
 
                     b.Navigation("BankStatement");

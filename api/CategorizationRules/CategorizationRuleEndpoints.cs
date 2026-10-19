@@ -43,7 +43,7 @@ public static class CategorizationRuleEndpoints
 
         var rule = new CategorizationRule
         {
-            UserId = db.CurrentUserId,
+            UserId = db.OwnerOfNewRows,
             Keyword = keyword,
             CategoryId = request.CategoryId!.Value,
             CreatedAt = DateTimeOffset.UtcNow,

@@ -7,7 +7,7 @@ using PersonligFinans.Api.Users;
 namespace PersonligFinans.Api.Tests;
 
 // A database context that acts as one User, as the endpoints' does for a request signed in as them:
-// it sees only that User's rows, and CurrentUserId is the owner to give the rows a test adds.
+// it sees only that User's rows, and OwnerOfNewRows is the owner to give the rows a test adds.
 public sealed class UserDatabase : IAsyncDisposable
 {
     private readonly AsyncServiceScope _scope;

@@ -64,7 +64,7 @@ public static class CategoryEndpoints
 
         var category = new Category
         {
-            UserId = db.CurrentUserId,
+            UserId = db.OwnerOfNewRows,
             Name = name,
             Description = description,
             Colour = CategoryColours.Next(await db.Categories.Select(c => c.Colour).ToListAsync()),

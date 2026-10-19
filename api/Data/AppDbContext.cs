@@ -27,8 +27,14 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, CurrentUser cu
 
     // The User this context works for, or null for nobody. Its queries see only that User's
     // Transactions, Bank Statements, Categories and Categorization Rules, through the query filters.
-    // Read at each query. Every write sets a new row's owner to it explicitly.
+    // Read at each query.
     public string? CurrentUserId => currentUser.Id;
+
+    // The owner every write gives a new Transaction, Bank Statement, Category or Categorization Rule
+    // explicitly: the current User. Acting for nobody, there is no one to own it, so the write fails
+    // here rather than in the database.
+    public string OwnerOfNewRows => CurrentUserId
+        ?? throw new InvalidOperationException("Only a signed-in User can own new rows.");
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -110,15 +116,13 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, CurrentUser cu
     }
 
     // Each User sees only their own rows, so no query can reach another User's data by leaving out a
-    // condition. A row with no owner, from before Users, is seen by nobody. Unique indexes include the
-    // owner, and Postgres never counts two nulls as equal, so such rows never clash with a User's.
+    // condition. Signed out, the current User is nobody, so no row is seen.
     private void OwnedByAUser<TEntity>(EntityTypeBuilder<TEntity> entity) where TEntity : class
     {
         entity.HasOne<IdentityUser>()
             .WithMany()
             .HasForeignKey("UserId")
             .OnDelete(DeleteBehavior.Restrict);
-        entity.HasQueryFilter(row => EF.Property<string?>(row, "UserId") != null &&
-            EF.Property<string?>(row, "UserId") == CurrentUserId);
+        entity.HasQueryFilter(row => EF.Property<string>(row, "UserId") == CurrentUserId);
     }
 }

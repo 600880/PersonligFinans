@@ -111,7 +111,7 @@ public static class Categorizer
 
             var rule = new CategorizationRule
             {
-                UserId = db.CurrentUserId,
+                UserId = db.OwnerOfNewRows,
                 Keyword = keyword,
                 CategoryId = categoryId,
                 CreatedAt = now,

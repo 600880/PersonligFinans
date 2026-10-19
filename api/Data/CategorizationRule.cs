@@ -4,8 +4,8 @@ public class CategorizationRule
 {
     public int Id { get; set; }
 
-    // The User it belongs to. Null only for a row from before Users, which belongs to nobody.
-    public string? UserId { get; set; }
+    // The User it belongs to.
+    public required string UserId { get; set; }
 
     // Matched against a Transaction's description, ignoring case. Unique among the User's rules,
     // ignoring case.

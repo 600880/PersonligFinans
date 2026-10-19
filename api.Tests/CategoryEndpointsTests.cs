@@ -40,7 +40,7 @@ public class CategoryEndpointsTests : IAsyncLifetime
         var db = user.Db;
         var category = new Category
         {
-            UserId = db.CurrentUserId,
+            UserId = db.OwnerOfNewRows,
             Name = name,
             Description = description,
             Colour = CategoryColours.Fallback,
@@ -170,10 +170,10 @@ public class CategoryEndpointsTests : IAsyncLifetime
     {
         await using var user = await UserDatabase.OfAsync(_factory, _email);
         var db = user.Db;
-        db.Categories.Add(new Category { UserId = db.CurrentUserId, Name = "Hobby", Description = "Hobbies.", Colour = CategoryColours.Fallback });
+        db.Categories.Add(new Category { UserId = db.OwnerOfNewRows, Name = "Hobby", Description = "Hobbies.", Colour = CategoryColours.Fallback });
         await db.SaveChangesAsync();
 
-        db.Categories.Add(new Category { UserId = db.CurrentUserId, Name = "HOBBY", Description = "Hobbies.", Colour = CategoryColours.Fallback });
+        db.Categories.Add(new Category { UserId = db.OwnerOfNewRows, Name = "HOBBY", Description = "Hobbies.", Colour = CategoryColours.Fallback });
 
         await Assert.ThrowsAsync<DbUpdateException>(() => db.SaveChangesAsync());
     }
@@ -269,14 +269,14 @@ public class CategoryEndpointsTests : IAsyncLifetime
         var db = user.Db;
         var statement = new BankStatement
         {
-            UserId = db.CurrentUserId,
+            UserId = db.OwnerOfNewRows,
             AccountNumber = Guid.NewGuid().ToString("N")[..AppDbContext.AccountNumberMaxLength],
             PeriodStart = new DateOnly(2026, 8, 1),
             PeriodEnd = new DateOnly(2026, 8, 31),
             ImportedAt = DateTimeOffset.UtcNow,
         };
         var transactions = descriptions
-            .Select(d => new Transaction { UserId = db.CurrentUserId, PostedDate = postedDate, Description = d, Amount = -100m })
+            .Select(d => new Transaction { UserId = db.OwnerOfNewRows, PostedDate = postedDate, Description = d, Amount = -100m })
             .ToList();
         statement.Transactions.AddRange(transactions);
         db.BankStatements.Add(statement);

@@ -318,43 +318,13 @@ public class UserIsolationTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task RowsWithNoOwner_AreSeenByNobody()
-    {
-        await using (var user = await UserDatabase.OfAsync(_factory, _emailA))
-        {
-            var groceries = new Category { Name = "Groceries", Description = "Nobody's.", Colour = CategoryColours.Fallback };
-            var statement = new BankStatement
-            {
-                AccountNumber = AccountNumber(),
-                PeriodStart = new DateOnly(2026, 8, 1),
-                PeriodEnd = new DateOnly(2026, 8, 31),
-                ImportedAt = DateTimeOffset.UtcNow,
-            };
-            statement.Transactions.Add(new Transaction
-            {
-                PostedDate = new DateOnly(2026, 8, 3), Description = "Kafé Sentrum", Amount = -100m, Category = groceries,
-            });
-            user.Db.BankStatements.Add(statement);
-            user.Db.CategorizationRules.Add(new CategorizationRule { Keyword = "kafé", Category = groceries, CreatedAt = DateTimeOffset.UtcNow });
-            await user.Db.SaveChangesAsync();
-        }
-
-        Assert.Empty(await August(_a));
-        Assert.DoesNotContain(await Rules(_a), r => r.Keyword == "kafé");
-        Assert.DoesNotContain(await Categories(_a), c => c.Description == "Nobody's.");
-        // Nor do they clash with a User's.
-        await AddRule(_a, "kafé", _seededA.Restaurants);
-    }
-
-    [Fact]
     public async Task StartUp_RematchesEachUsersImportedTransactions_AgainstTheirOwnRulesOnly()
     {
         // Only the second User has a rule for the café.
         await AddRule(_b, "kafé", _seededB.Restaurants);
         // Stored as if imported before the rules changed, all Uncategorized.
-        await StoreImported(_emailA, mine: true, "Kafé Sentrum", "Rema 1000");
-        await StoreImported(_emailB, mine: true, "Rema 1000");
-        var unowned = await StoreImported(_emailA, mine: false, "Rema 1000");
+        await StoreImported(_emailA, "Kafé Sentrum", "Rema 1000");
+        await StoreImported(_emailB, "Rema 1000");
 
         // Starting another API runs the start-up again.
         await using var api = _factory.WithWebHostBuilder(_ => { });
@@ -364,16 +334,14 @@ public class UserIsolationTests : IAsyncLifetime
         Assert.Null(august["Kafé Sentrum"]);
         Assert.Equal(_seededA.Groceries, august["Rema 1000"]);
         Assert.Equal(_seededB.Groceries, (await August(_b)).Single().CategoryId);
-        await using var user = await UserDatabase.OfAsync(_factory, _emailA);
-        Assert.Null((await user.Db.Transactions.IgnoreQueryFilters().SingleAsync(t => t.Id == unowned[0])).CategoryId);
     }
 
-    // Stores Uncategorized Transactions straight in the database, as if imported in August 2026: the
-    // User's, or with no owner. Returns their ids.
-    private async Task<int[]> StoreImported(string email, bool mine, params string[] descriptions)
+    // Stores the User's Uncategorized Transactions straight in the database, as if imported in
+    // August 2026.
+    private async Task StoreImported(string email, params string[] descriptions)
     {
         await using var user = await UserDatabase.OfAsync(_factory, email);
-        var owner = mine ? user.Db.CurrentUserId : null;
+        var owner = user.Db.OwnerOfNewRows;
         var statement = new BankStatement
         {
             UserId = owner,
@@ -382,12 +350,9 @@ public class UserIsolationTests : IAsyncLifetime
             PeriodEnd = new DateOnly(2026, 8, 31),
             ImportedAt = DateTimeOffset.UtcNow,
         };
-        var transactions = descriptions
-            .Select(d => new Transaction { UserId = owner, PostedDate = new DateOnly(2026, 8, 3), Description = d, Amount = -100m })
-            .ToList();
-        statement.Transactions.AddRange(transactions);
+        statement.Transactions.AddRange(descriptions
+            .Select(d => new Transaction { UserId = owner, PostedDate = new DateOnly(2026, 8, 3), Description = d, Amount = -100m }));
         user.Db.BankStatements.Add(statement);
         await user.Db.SaveChangesAsync();
-        return transactions.Select(t => t.Id).ToArray();
     }
 }

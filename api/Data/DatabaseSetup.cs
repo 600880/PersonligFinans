@@ -37,12 +37,11 @@ public static class DatabaseSetup
         // A migration may change the rules, whether applied here or by hand. Re-matching is
         // idempotent and cheap, so do it on every startup to keep the imported Transactions already
         // stored in line with the rules: each User's against that User's own rules, as that User.
-        // Only Users with imported Transactions have any to re-match. Rows with no owner are left
-        // alone.
+        // Only Users with imported Transactions have any to re-match.
         var userIds = await db.Transactions
             .IgnoreQueryFilters()
-            .Where(t => t.UserId != null && t.BankStatementId != null)
-            .Select(t => t.UserId!)
+            .Where(t => t.BankStatementId != null)
+            .Select(t => t.UserId)
             .Distinct()
             .ToListAsync();
         foreach (var userId in userIds)

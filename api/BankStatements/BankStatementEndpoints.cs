@@ -103,7 +103,7 @@ public static class BankStatementEndpoints
 
         var statement = new BankStatement
         {
-            UserId = db.CurrentUserId,
+            UserId = db.OwnerOfNewRows,
             AccountNumber = parsed.AccountNumber,
             PeriodStart = parsed.PeriodStart,
             PeriodEnd = parsed.PeriodEnd,
@@ -121,7 +121,7 @@ public static class BankStatementEndpoints
             var rule = Categorizer.ChooseRule(row.Description, rules);
             return new Transaction
             {
-                UserId = db.CurrentUserId,
+                UserId = db.OwnerOfNewRows,
                 PostedDate = row.BookedDate,
                 Description = row.Description,
                 Amount = row.Amount,

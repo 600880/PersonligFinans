@@ -95,14 +95,14 @@ public class CategorizationRuleEndpointsTests : IAsyncLifetime
         var db = user.Db;
         var statement = new BankStatement
         {
-            UserId = db.CurrentUserId,
+            UserId = db.OwnerOfNewRows,
             AccountNumber = Guid.NewGuid().ToString("N")[..AppDbContext.AccountNumberMaxLength],
             PeriodStart = new DateOnly(2026, 8, 1),
             PeriodEnd = new DateOnly(2026, 8, 31),
             ImportedAt = DateTimeOffset.UtcNow,
         };
         var transactions = descriptions
-            .Select(d => new Transaction { UserId = db.CurrentUserId, PostedDate = new DateOnly(2026, 8, 3), Description = d, Amount = -100m })
+            .Select(d => new Transaction { UserId = db.OwnerOfNewRows, PostedDate = new DateOnly(2026, 8, 3), Description = d, Amount = -100m })
             .ToList();
         statement.Transactions.AddRange(transactions);
         db.BankStatements.Add(statement);

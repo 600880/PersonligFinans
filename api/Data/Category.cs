@@ -4,8 +4,8 @@ public class Category
 {
     public int Id { get; set; }
 
-    // The User it belongs to. Null only for a row from before Users, which belongs to nobody.
-    public string? UserId { get; set; }
+    // The User it belongs to.
+    public required string UserId { get; set; }
 
     // Unique among the User's Categories, ignoring case.
     public required string Name { get; set; }
