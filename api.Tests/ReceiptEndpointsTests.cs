@@ -19,7 +19,7 @@ public class ReceiptEndpointsTests : IAsyncLifetime
     private readonly PostgresApiFactory _factory;
     private readonly string _email = SignedInClient.UniqueEmail();
     private HttpClient _client = null!;
-    private SeededCategories _seeded = null!;
+    private TestCategories _categories = null!;
 
     public ReceiptEndpointsTests(PostgresApiFactory factory)
     {
@@ -29,7 +29,7 @@ public class ReceiptEndpointsTests : IAsyncLifetime
     public async Task InitializeAsync()
     {
         _client = await _factory.CreateSignedInClientAsync(_email);
-        _seeded = await SeededCategories.Of(_client);
+        _categories = await TestCategories.Of(_client);
     }
 
     public Task DisposeAsync() => Task.CompletedTask;
@@ -198,7 +198,7 @@ public class ReceiptEndpointsTests : IAsyncLifetime
     [Fact]
     public async Task Post_ReadReceipt_SuggestsItsDateDescriptionAndAmountWithTheCategoryOfAMatchingRule()
     {
-        await AddRule("kafé", _seeded.Restaurants);
+        await AddRule("kafé", _categories.Restaurants);
 
         var suggestion = await SuggestionFrom(ReaderReading(
             purchaseDate: new DateOnly(2026, 10, 12),
@@ -207,7 +207,7 @@ public class ReceiptEndpointsTests : IAsyncLifetime
             categoryName: "Groceries"));
 
         Assert.Equal(
-            new ReceiptSuggestion(ReceiptOutcome.Read, new DateOnly(2026, 10, 12), "Kafé Sentrum", -249.90m, _seeded.Restaurants),
+            new ReceiptSuggestion(ReceiptOutcome.Read, new DateOnly(2026, 10, 12), "Kafé Sentrum", -249.90m, _categories.Restaurants),
             suggestion);
     }
 
@@ -216,7 +216,7 @@ public class ReceiptEndpointsTests : IAsyncLifetime
     {
         var suggestion = await SuggestionFrom(ReaderReading(merchantName: "Torghandel", total: 89m, categoryName: "Groceries"));
 
-        Assert.Equal(_seeded.Groceries, suggestion.CategoryId);
+        Assert.Equal(_categories.Groceries, suggestion.CategoryId);
     }
 
     [Fact]
@@ -224,7 +224,7 @@ public class ReceiptEndpointsTests : IAsyncLifetime
     {
         var suggestion = await SuggestionFrom(ReaderReading(merchantName: "Torghandel", total: 89m, categoryName: "groceries"));
 
-        Assert.Equal(_seeded.Groceries, suggestion.CategoryId);
+        Assert.Equal(_categories.Groceries, suggestion.CategoryId);
     }
 
     [Fact]
@@ -241,7 +241,7 @@ public class ReceiptEndpointsTests : IAsyncLifetime
         var suggestion = await SuggestionFrom(ReaderReading(total: 89m, categoryName: "Groceries"));
 
         Assert.Null(suggestion.Description);
-        Assert.Equal(_seeded.Groceries, suggestion.CategoryId);
+        Assert.Equal(_categories.Groceries, suggestion.CategoryId);
     }
 
     [Fact]
@@ -275,7 +275,7 @@ public class ReceiptEndpointsTests : IAsyncLifetime
             categoryName: "Restaurants"));
 
         Assert.Equal(
-            new ReceiptSuggestion(ReceiptOutcome.Read, new DateOnly(2026, 7, 3), "Café de Paris", null, _seeded.Restaurants),
+            new ReceiptSuggestion(ReceiptOutcome.Read, new DateOnly(2026, 7, 3), "Café de Paris", null, _categories.Restaurants),
             suggestion);
     }
 
@@ -328,11 +328,11 @@ public class ReceiptEndpointsTests : IAsyncLifetime
     [Fact]
     public async Task Post_ReadReceiptWithAPaymentChannel_SuggestsTheCategoryOfTheRuleMatchingTheMerchant()
     {
-        await AddRule("kiosk", _seeded.Restaurants);
+        await AddRule("kiosk", _categories.Restaurants);
 
         var suggestion = await SuggestionFrom(ReaderReading(merchantName: "Vipps*Kiosk", total: 35m, categoryName: "Other"));
 
-        Assert.Equal(_seeded.Restaurants, suggestion.CategoryId);
+        Assert.Equal(_categories.Restaurants, suggestion.CategoryId);
     }
 
     [Fact]
@@ -382,7 +382,7 @@ public class ReceiptEndpointsTests : IAsyncLifetime
         Assert.Equal(Jpeg, call.Receipt.Image);
         Assert.Equal("image/jpeg", call.Receipt.MediaType);
         Assert.Equal(
-            Seeds.Categories.Select(c => new CategoryChoice(c.Name, c.Description)).OrderBy(c => c.Name),
+            TestCategories.All.Select(c => new CategoryChoice(c.Name, c.Description)).OrderBy(c => c.Name),
             call.Categories.OrderBy(c => c.Name));
     }
 
@@ -399,7 +399,7 @@ public class ReceiptEndpointsTests : IAsyncLifetime
     [Fact]
     public async Task Post_ReadReceipt_LeavesTransactionsAndCategorizationRulesUnchanged()
     {
-        await AddRule("kafé", _seeded.Restaurants);
+        await AddRule("kafé", _categories.Restaurants);
         var before = await Stored();
 
         await SuggestionFrom(ReaderReading(merchantName: "Kafé", total: 249.90m, categoryName: "Groceries"));

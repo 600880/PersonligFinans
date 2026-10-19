@@ -92,7 +92,7 @@ public class DailyAiLimitTests
     [Fact]
     public async Task BankStatementsBeyondTheUsersLimit_AreImportedWithUnmatchedRowsUncategorized_SayingTheLimitIsReached()
     {
-        var generator = new FakeRuleGenerator().Proposing("Kafé", "kafé", "Restaurants");
+        var generator = new FakeRuleGenerator().Proposing("Kafé", "kafé", "Other");
         await using var api = Api(NoonOnJanuary(11), perUser: 1, allUsers: 100,
             ruleGenerator: generator);
         var client = await api.CreateSignedInClientAsync();

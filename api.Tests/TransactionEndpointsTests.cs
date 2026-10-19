@@ -19,7 +19,7 @@ public class TransactionEndpointsTests : IAsyncLifetime
     private readonly PostgresApiFactory _factory;
     private readonly string _email = SignedInClient.UniqueEmail();
     private HttpClient _client = null!;
-    private SeededCategories _seeded = null!;
+    private TestCategories _categories = null!;
 
     public TransactionEndpointsTests(PostgresApiFactory factory)
     {
@@ -29,7 +29,7 @@ public class TransactionEndpointsTests : IAsyncLifetime
     public async Task InitializeAsync()
     {
         _client = await _factory.CreateSignedInClientAsync(_email);
-        _seeded = await SeededCategories.Of(_client);
+        _categories = await TestCategories.Of(_client);
     }
 
     public Task DisposeAsync() => Task.CompletedTask;
@@ -38,7 +38,7 @@ public class TransactionEndpointsTests : IAsyncLifetime
         string? Date, string? Description, decimal? Amount, string? Note, int? CategoryId);
 
     // A valid manually-entered Transaction in Other, of which each test changes only what it is about.
-    private TransactionRequest ValidRequest => new("2026-09-24", "Rema 1000", -249.90m, Note: null, _seeded.Other);
+    private TransactionRequest ValidRequest => new("2026-09-24", "Rema 1000", -249.90m, Note: null, _categories.Other);
 
     private async Task<Dictionary<string, string[]>> PostExpectingValidationErrors(object request)
     {
@@ -49,11 +49,11 @@ public class TransactionEndpointsTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Get_Categories_ReturnsSeededList()
+    public async Task Get_Categories_ReturnsTheUsersCategories()
     {
         var categories = (await _client.GetFromJsonAsync<List<CategoryResponse>>("/api/categories"))!;
 
-        Assert.Equal(Seeds.Categories.Select(c => c.Name).Order(), categories.Select(c => c.Name).Order());
+        Assert.Equal(TestCategories.All.Select(c => c.Name).Order(), categories.Select(c => c.Name).Order());
     }
 
     [Fact]
@@ -73,7 +73,7 @@ public class TransactionEndpointsTests : IAsyncLifetime
         Assert.Equal("Invoice 42 paid", stored.Description);
         Assert.Equal(1500m, stored.Amount);
         Assert.Equal("INV-42", stored.Note);
-        Assert.Equal(_seeded.Other, stored.CategoryId);
+        Assert.Equal(_categories.Other, stored.CategoryId);
         Assert.Null(stored.BankStatementId);
     }
 
@@ -208,8 +208,8 @@ public class TransactionEndpointsTests : IAsyncLifetime
             [
                 (new DateOnly(2042, 2, 28), "last day", -10m, (int?)null),
                 (new DateOnly(2042, 2, 14), "imported mid", -10m, null),
-                (new DateOnly(2042, 2, 14), "manual mid", -249.90m, _seeded.Other),
-                (new DateOnly(2042, 2, 1), "first day", -249.90m, _seeded.Other),
+                (new DateOnly(2042, 2, 14), "manual mid", -249.90m, _categories.Other),
+                (new DateOnly(2042, 2, 1), "first day", -249.90m, _categories.Other),
             ],
             transactions.Select(t => (t.Date, t.Description, t.Amount, t.CategoryId)));
     }
@@ -294,50 +294,50 @@ public class TransactionEndpointsTests : IAsyncLifetime
         await ImportForCorrection("Kafé");
         var imported = await Own("Kafé");
 
-        var changed = await CategoryChanged(imported.Id, _seeded.Restaurants);
+        var changed = await CategoryChanged(imported.Id, _categories.Restaurants);
 
-        Assert.Equal(imported with { CategoryId = _seeded.Restaurants, Locked = true }, changed);
-        Assert.Equal(_seeded.Restaurants, (await Own("Kafé")).CategoryId);
+        Assert.Equal(imported with { CategoryId = _categories.Restaurants, Locked = true }, changed);
+        Assert.Equal(_categories.Restaurants, (await Own("Kafé")).CategoryId);
     }
 
     [Fact]
     public async Task Put_Category_CorrectedImportedTransactionKeepsItWhenAMatchingRuleIsAdded()
     {
         await ImportForCorrection("Kafé Nord", "Kafé Sør");
-        await CategoryChanged((await Own("Kafé Nord")).Id, _seeded.Restaurants);
+        await CategoryChanged((await Own("Kafé Nord")).Id, _categories.Restaurants);
 
-        await AddRule("kafé", _seeded.Groceries);
+        await AddRule("kafé", _categories.Groceries);
 
-        Assert.Equal(_seeded.Restaurants, (await Own("Kafé Nord")).CategoryId);
-        Assert.Equal(_seeded.Groceries, (await Own("Kafé Sør")).CategoryId);
+        Assert.Equal(_categories.Restaurants, (await Own("Kafé Nord")).CategoryId);
+        Assert.Equal(_categories.Groceries, (await Own("Kafé Sør")).CategoryId);
     }
 
     [Fact]
     public async Task Put_Category_CorrectedImportedTransactionKeepsItWhenTheRuleThatCategorizedItIsEdited()
     {
-        var ruleId = await AddRule("kafé", _seeded.Groceries);
+        var ruleId = await AddRule("kafé", _categories.Groceries);
         await ImportForCorrection("Kafé Nord", "Kafé Sør");
-        await CategoryChanged((await Own("Kafé Nord")).Id, _seeded.Restaurants);
+        await CategoryChanged((await Own("Kafé Nord")).Id, _categories.Restaurants);
 
         var response = await _client.PutAsJsonAsync(
-            $"/api/categorization-rules/{ruleId}", new { keyword = "kafé", categoryId = _seeded.Shopping });
+            $"/api/categorization-rules/{ruleId}", new { keyword = "kafé", categoryId = _categories.Shopping });
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.Equal(_seeded.Restaurants, (await Own("Kafé Nord")).CategoryId);
-        Assert.Equal(_seeded.Shopping, (await Own("Kafé Sør")).CategoryId);
+        Assert.Equal(_categories.Restaurants, (await Own("Kafé Nord")).CategoryId);
+        Assert.Equal(_categories.Shopping, (await Own("Kafé Sør")).CategoryId);
     }
 
     [Fact]
     public async Task Put_Category_CorrectedImportedTransactionKeepsItWhenTheRuleThatCategorizedItIsDeleted()
     {
-        var ruleId = await AddRule("kafé", _seeded.Groceries);
+        var ruleId = await AddRule("kafé", _categories.Groceries);
         await ImportForCorrection("Kafé Nord", "Kafé Sør");
-        await CategoryChanged((await Own("Kafé Nord")).Id, _seeded.Restaurants);
+        await CategoryChanged((await Own("Kafé Nord")).Id, _categories.Restaurants);
 
         var response = await _client.DeleteAsync($"/api/categorization-rules/{ruleId}");
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.Equal(_seeded.Restaurants, (await Own("Kafé Nord")).CategoryId);
+        Assert.Equal(_categories.Restaurants, (await Own("Kafé Nord")).CategoryId);
         Assert.Null((await Own("Kafé Sør")).CategoryId);
     }
 
@@ -345,26 +345,26 @@ public class TransactionEndpointsTests : IAsyncLifetime
     public async Task Put_Category_CorrectedImportedTransactionKeepsItWhenALaterImportsAiGeneratedRuleMatchesIt()
     {
         await ImportForCorrection("Kafé Nord");
-        await CategoryChanged((await Own("Kafé Nord")).Id, _seeded.Shopping);
+        await CategoryChanged((await Own("Kafé Nord")).Id, _categories.Shopping);
         var generator = new FakeRuleGenerator().Proposing("Kafé Sør", "kafé", "Restaurants");
 
         await ImportForCorrection(generator, "Kafé Sør");
 
         var rule = Assert.Single(await Rules(), r => r.Keyword == "kafé");
         Assert.True(rule.AiGenerated);
-        Assert.Equal(_seeded.Restaurants, (await Own("Kafé Sør")).CategoryId);
-        Assert.Equal(_seeded.Shopping, (await Own("Kafé Nord")).CategoryId);
+        Assert.Equal(_categories.Restaurants, (await Own("Kafé Sør")).CategoryId);
+        Assert.Equal(_categories.Shopping, (await Own("Kafé Nord")).CategoryId);
     }
 
     [Fact]
     public async Task Put_Category_CreatesNoRuleAndLeavesTheRulesUnchanged()
     {
-        await AddRule("kafé", _seeded.Groceries);
+        await AddRule("kafé", _categories.Groceries);
         await ImportForCorrection("Kafé Nord", "Frisør");
         var before = await Rules();
 
-        await CategoryChanged((await Own("Kafé Nord")).Id, _seeded.Restaurants);
-        await CategoryChanged((await Own("Frisør")).Id, _seeded.Shopping);
+        await CategoryChanged((await Own("Kafé Nord")).Id, _categories.Restaurants);
+        await CategoryChanged((await Own("Frisør")).Id, _categories.Shopping);
 
         Assert.Equal(before, await Rules());
     }
@@ -376,11 +376,11 @@ public class TransactionEndpointsTests : IAsyncLifetime
         await ImportForCorrection(generator, "Kafé");
         var rule = Assert.Single(await Rules(), r => r.Keyword == "kafé");
         Assert.True(rule.AiGenerated);
-        Assert.Equal(_seeded.Restaurants, (await Own("Kafé")).CategoryId);
+        Assert.Equal(_categories.Restaurants, (await Own("Kafé")).CategoryId);
 
-        await CategoryChanged((await Own("Kafé")).Id, _seeded.Groceries);
+        await CategoryChanged((await Own("Kafé")).Id, _categories.Groceries);
 
-        Assert.Equal(_seeded.Groceries, (await Own("Kafé")).CategoryId);
+        Assert.Equal(_categories.Groceries, (await Own("Kafé")).CategoryId);
         Assert.Equal(rule, Assert.Single(await Rules(), r => r.Keyword == "kafé"));
     }
 
@@ -392,10 +392,10 @@ public class TransactionEndpointsTests : IAsyncLifetime
             ValidRequest with { Date = "2044-01-20", Description = "Lunsj", Note = "INV-7" });
         var manual = (await response.Content.ReadFromJsonAsync<TransactionResponse>())!;
 
-        await CategoryChanged(manual.Id, _seeded.Groceries);
-        var changed = await CategoryChanged(manual.Id, _seeded.Restaurants);
+        await CategoryChanged(manual.Id, _categories.Groceries);
+        var changed = await CategoryChanged(manual.Id, _categories.Restaurants);
 
-        Assert.Equal(manual with { CategoryId = _seeded.Restaurants }, changed);
+        Assert.Equal(manual with { CategoryId = _categories.Restaurants }, changed);
         Assert.Equal(changed, await Own("Lunsj"));
     }
 
@@ -404,10 +404,10 @@ public class TransactionEndpointsTests : IAsyncLifetime
     {
         await ImportForCorrection("Kafé");
 
-        var changed = await CategoryChanged((await Own("Kafé")).Id, _seeded.Other);
+        var changed = await CategoryChanged((await Own("Kafé")).Id, _categories.Other);
 
-        Assert.Equal(_seeded.Other, changed.CategoryId);
-        Assert.Equal(_seeded.Other, (await Own("Kafé")).CategoryId);
+        Assert.Equal(_categories.Other, changed.CategoryId);
+        Assert.Equal(_categories.Other, (await Own("Kafé")).CategoryId);
     }
 
     [Fact]
@@ -423,12 +423,12 @@ public class TransactionEndpointsTests : IAsyncLifetime
     [Fact]
     public async Task Get_Month_ShowsATransactionCategorizedByARuleAsNotLocked()
     {
-        await AddRule("kafé", _seeded.Restaurants);
+        await AddRule("kafé", _categories.Restaurants);
         await ImportForCorrection("Kafé");
 
         var categorized = await Own("Kafé");
 
-        Assert.Equal((_seeded.Restaurants, false), (categorized.CategoryId, categorized.Locked));
+        Assert.Equal((_categories.Restaurants, false), (categorized.CategoryId, categorized.Locked));
     }
 
     [Fact]
@@ -445,10 +445,10 @@ public class TransactionEndpointsTests : IAsyncLifetime
     [Fact]
     public async Task Put_Category_OfTransactionCategorizedByARule_LocksIt()
     {
-        await AddRule("kafé", _seeded.Restaurants);
+        await AddRule("kafé", _categories.Restaurants);
         await ImportForCorrection("Kafé");
 
-        var changed = await CategoryChanged((await Own("Kafé")).Id, _seeded.Groceries);
+        var changed = await CategoryChanged((await Own("Kafé")).Id, _categories.Groceries);
 
         Assert.True(changed.Locked);
         Assert.Equal(changed, await Own("Kafé"));
@@ -457,7 +457,7 @@ public class TransactionEndpointsTests : IAsyncLifetime
     [Fact]
     public async Task Put_Category_OfUnknownTransaction_ReturnsNotFound()
     {
-        var response = await ChangeCategory(int.MaxValue, _seeded.Groceries);
+        var response = await ChangeCategory(int.MaxValue, _categories.Groceries);
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }

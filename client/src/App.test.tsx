@@ -5539,12 +5539,12 @@ describe('Guest notice', () => {
     return screen.queryByRole('note', { name: 'Guest' })
   }
 
-  it('tells the Guest that the Guest is shared, on every page', async () => {
+  it('tells the Guest to use only test data, on every page', async () => {
     currentUser = guest
     const user = userEvent.setup()
     await renderApp()
 
-    expect(guestNotice()).toHaveTextContent('anyone can see and change what you enter')
+    expect(guestNotice()).toHaveTextContent('Demo mode: only use test data.')
     await user.click(screen.getByRole('button', { name: 'Rules' }))
     expect(guestNotice()).toBeInTheDocument()
   })

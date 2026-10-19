@@ -26,8 +26,8 @@ public class UserIsolationTests : IAsyncLifetime
     private readonly string _emailB = SignedInClient.UniqueEmail();
     private HttpClient _a = null!;
     private HttpClient _b = null!;
-    private SeededCategories _seededA = null!;
-    private SeededCategories _seededB = null!;
+    private TestCategories _categoriesA = null!;
+    private TestCategories _categoriesB = null!;
 
     public UserIsolationTests(PostgresApiFactory factory)
     {
@@ -38,8 +38,8 @@ public class UserIsolationTests : IAsyncLifetime
     {
         _a = await _factory.CreateSignedInClientAsync(_emailA);
         _b = await _factory.CreateSignedInClientAsync(_emailB);
-        _seededA = await SeededCategories.Of(_a);
-        _seededB = await SeededCategories.Of(_b);
+        _categoriesA = await TestCategories.Of(_a);
+        _categoriesB = await TestCategories.Of(_b);
     }
 
     public Task DisposeAsync() => Task.CompletedTask;
@@ -115,27 +115,29 @@ public class UserIsolationTests : IAsyncLifetime
     [Fact]
     public async Task NewUser_HasTheSeededCategoriesAndRules_OfTheirOwn()
     {
-        var categories = await Categories(_a);
-        var rules = await Rules(_a);
+        // A User of its own, since the tests' other Users have the tests' Categories added.
+        var fresh = await _factory.CreateSignedInClientAsync();
+        var categories = await Categories(fresh);
+        var rules = await Rules(fresh);
 
         Assert.Equal(
-            ["Housing", "Groceries", "Clothing", "Transport", "Other", "Income", "Transfers",
-             "Electronics", "Entertainment", "Health", "Restaurants", "Shopping", "Subscriptions", "Travel", "Utilities"],
+            ["Housing", "Groceries", "Clothing", "Transport", "Other", "Income", "Transfers"],
             categories.Select(c => c.Name));
-        Assert.Equal(7, categories.Count(c => c.BuiltIn));
+        Assert.All(categories, c => Assert.True(c.BuiltIn));
         Assert.All(categories, c => Assert.Equal(0, c.TransactionCount));
-        Assert.Equal(52, rules.Count);
+        Assert.Equal(14, rules.Count);
         Assert.All(rules, r => Assert.False(r.AiGenerated || r.IsNew));
+        var categoryByName = categories.ToDictionary(c => c.Name, c => c.Id);
         var categoryByKeyword = rules.ToDictionary(r => r.Keyword, r => r.CategoryId);
-        Assert.Equal(_seededA.Groceries, categoryByKeyword["rema"]);
-        Assert.Equal(_seededA.Clothing, categoryByKeyword["zalando"]);
-        Assert.Equal(_seededA.Transfers, categoryByKeyword["overføring til konto"]);
-        Assert.Equal(categories.Single(c => c.Name == "Utilities").Id, categoryByKeyword["telenor"]);
+        Assert.Equal(categoryByName["Groceries"], categoryByKeyword["rema"]);
+        Assert.Equal(categoryByName["Clothing"], categoryByKeyword["cubus"]);
+        Assert.Equal(categoryByName["Transport"], categoryByKeyword["ruter"]);
+        Assert.Equal(categoryByName["Transfers"], categoryByKeyword["overføring til konto"]);
 
-        // The other User's seeds are copies, not the same rows.
-        Assert.NotEqual(_seededA.Groceries, _seededB.Groceries);
-        Assert.Empty((await Rules(_b)).Select(r => r.Id).Intersect(rules.Select(r => r.Id)));
-        Assert.Empty(await August(_a));
+        // Another User's seeds are copies, not the same rows.
+        Assert.NotEqual(_categoriesA.Groceries, categoryByName["Groceries"]);
+        Assert.Empty((await Rules(_a)).Select(r => r.Id).Intersect(rules.Select(r => r.Id)));
+        Assert.Empty(await August(fresh));
     }
 
     [Fact]
@@ -165,24 +167,24 @@ public class UserIsolationTests : IAsyncLifetime
     [Fact]
     public async Task AnotherUsersIds_GiveNotFound()
     {
-        var transactionId = await AddTransaction(_a, _seededA.Other);
+        var transactionId = await AddTransaction(_a, _categoriesA.Other);
         var categoryId = await AddCategory(_a, "Hobbies");
-        var ruleId = (await AddRule(_a, "kafé", _seededA.Restaurants)).Id;
+        var ruleId = (await AddRule(_a, "kafé", _categoriesA.Restaurants)).Id;
 
         Assert.Equal(HttpStatusCode.NotFound,
             (await _b.PutAsJsonAsync($"/api/transactions/{transactionId}/note", new { note = "Mine now" })).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound,
-            (await _b.PutAsJsonAsync($"/api/transactions/{transactionId}/category", new { categoryId = _seededB.Other })).StatusCode);
+            (await _b.PutAsJsonAsync($"/api/transactions/{transactionId}/category", new { categoryId = _categoriesB.Other })).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await _b.DeleteAsync($"/api/transactions/{transactionId}")).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound,
             (await _b.PutAsJsonAsync($"/api/categories/{categoryId}", new { name = "Mine", description = "Mine." })).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await _b.DeleteAsync($"/api/categories/{categoryId}")).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound,
-            (await _b.PutAsJsonAsync($"/api/categorization-rules/{ruleId}", new { keyword = "mine", categoryId = _seededB.Other })).StatusCode);
+            (await _b.PutAsJsonAsync($"/api/categorization-rules/{ruleId}", new { keyword = "mine", categoryId = _categoriesB.Other })).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await _b.DeleteAsync($"/api/categorization-rules/{ruleId}")).StatusCode);
 
         // Nothing of the first User's changed.
-        Assert.Equal((null, _seededA.Other), (await August(_a)).Select(t => (t.Note, t.CategoryId)).Single());
+        Assert.Equal((null, _categoriesA.Other), (await August(_a)).Select(t => (t.Note, t.CategoryId)).Single());
         Assert.Contains(await Categories(_a), c => c.Id == categoryId && c.Name == "Hobbies");
         Assert.Contains(await Rules(_a), r => r.Id == ruleId && r.Keyword == "kafé");
     }
@@ -190,23 +192,23 @@ public class UserIsolationTests : IAsyncLifetime
     [Fact]
     public async Task AnotherUsersCategory_InARequest_IsAnUnknownCategory()
     {
-        var ownTransactionId = await AddTransaction(_b, _seededB.Other);
+        var ownTransactionId = await AddTransaction(_b, _categoriesB.Other);
         var ownCategoryId = await AddCategory(_b, "Hobbies");
 
         var transaction = await _b.PostAsJsonAsync("/api/transactions", new
         {
-            date = "2026-08-03", description = "Kafé Sentrum", amount = -100m, categoryId = _seededA.Groceries,
+            date = "2026-08-03", description = "Kafé Sentrum", amount = -100m, categoryId = _categoriesA.Groceries,
         });
         var recategorized = await _b.PutAsJsonAsync(
-            $"/api/transactions/{ownTransactionId}/category", new { categoryId = _seededA.Groceries });
-        var rule = await PostRule(_b, "kafé", _seededA.Groceries);
-        var replaced = await _b.DeleteAsync($"/api/categories/{ownCategoryId}?replacementCategoryId={_seededA.Groceries}");
+            $"/api/transactions/{ownTransactionId}/category", new { categoryId = _categoriesA.Groceries });
+        var rule = await PostRule(_b, "kafé", _categoriesA.Groceries);
+        var replaced = await _b.DeleteAsync($"/api/categories/{ownCategoryId}?replacementCategoryId={_categoriesA.Groceries}");
 
         Assert.Equal(["Category does not exist."], (await ValidationErrors(transaction))["categoryId"]);
         Assert.Equal(["Category does not exist."], (await ValidationErrors(recategorized))["categoryId"]);
         Assert.Equal(["Category does not exist."], (await ValidationErrors(rule))["categoryId"]);
         Assert.Equal(["The replacement Category does not exist."], (await ValidationErrors(replaced))["replacementCategoryId"]);
-        Assert.Equal(_seededB.Other, (await August(_b)).Single().CategoryId);
+        Assert.Equal(_categoriesB.Other, (await August(_b)).Single().CategoryId);
     }
 
     [Fact]
@@ -228,11 +230,11 @@ public class UserIsolationTests : IAsyncLifetime
     {
         await AddCategory(_a, "Hobbies");
         await AddCategory(_b, "hobbies");
-        await AddRule(_a, "kafé", _seededA.Restaurants);
-        await AddRule(_b, "KAFÉ", _seededB.Restaurants);
+        await AddRule(_a, "kafé", _categoriesA.Restaurants);
+        await AddRule(_b, "KAFÉ", _categoriesB.Restaurants);
 
         var category = await _a.PostAsJsonAsync("/api/categories", new { name = "HOBBIES", description = "Again." });
-        var rule = await PostRule(_b, "Kafé", _seededB.Restaurants);
+        var rule = await PostRule(_b, "Kafé", _categoriesB.Restaurants);
 
         Assert.Equal(["A category named 'Hobbies' already exists."], (await ValidationErrors(category))["name"]);
         Assert.Equal(["A rule for 'KAFÉ' already exists."], (await ValidationErrors(rule))["keyword"]);
@@ -244,10 +246,10 @@ public class UserIsolationTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.Created, (await Upload(_a, Statement(AccountNumber()))).StatusCode);
         Assert.Equal(HttpStatusCode.Created, (await Upload(_b, Statement(AccountNumber()))).StatusCode);
 
-        var rule = await AddRule(_a, "kafé", _seededA.Restaurants);
+        var rule = await AddRule(_a, "kafé", _categoriesA.Restaurants);
 
         Assert.Equal(1, rule.TransactionsChanged);
-        Assert.Equal(_seededA.Restaurants, (await August(_a)).Single().CategoryId);
+        Assert.Equal(_categoriesA.Restaurants, (await August(_a)).Single().CategoryId);
         Assert.Null((await August(_b)).Single().CategoryId);
     }
 
@@ -261,7 +263,7 @@ public class UserIsolationTests : IAsyncLifetime
         await AddRule(_a, "kafé", hobbiesA);
         await AddRule(_b, "kafé", hobbiesB);
 
-        var response = await _a.DeleteAsync($"/api/categories/{hobbiesA}?replacementCategoryId={_seededA.Other}");
+        var response = await _a.DeleteAsync($"/api/categories/{hobbiesA}?replacementCategoryId={_categoriesA.Other}");
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal(1, (await response.Content.ReadFromJsonAsync<DeletedCategoryResponse>())!.TransactionsChanged);
@@ -286,7 +288,7 @@ public class UserIsolationTests : IAsyncLifetime
         var rule = (await Rules(a)).Single(r => r.Keyword == "kafé");
         Assert.True(rule.IsNew);
         Assert.True(rule.AiGenerated);
-        Assert.Equal(_seededA.Restaurants, rule.CategoryId);
+        Assert.Equal(_categoriesA.Restaurants, rule.CategoryId);
         Assert.DoesNotContain(await Rules(b), r => r.Keyword == "kafé" || r.IsNew);
     }
 
@@ -294,7 +296,7 @@ public class UserIsolationTests : IAsyncLifetime
     public async Task TheLlm_IsOfferedOnlyTheUsersOwnCategories_AndAReceiptMatchesOnlyTheirRules()
     {
         await AddCategory(_a, "Hobbies");
-        await AddRule(_a, "kafé", _seededA.Restaurants);
+        await AddRule(_a, "kafé", _categoriesA.Restaurants);
         var generator = new FakeRuleGenerator();
         var reader = new FakeReceiptReader
         {
@@ -312,16 +314,16 @@ public class UserIsolationTests : IAsyncLifetime
 
         Assert.DoesNotContain(generator.Calls.Single().Categories, c => c.Name == "Hobbies");
         Assert.DoesNotContain(reader.Calls.Single().Categories, c => c.Name == "Hobbies");
-        Assert.Equal(15, reader.Calls.Single().Categories.Count);
+        Assert.Equal(Seeds.Categories.Count, reader.Calls.Single().Categories.Count);
         // Not the first User's rule for "kafé": the reader's own choice, among this User's Categories.
-        Assert.Equal((await SeededCategories.Of(b)).Other, suggestion!.CategoryId);
+        Assert.Equal((await TestCategories.Of(b)).Other, suggestion!.CategoryId);
     }
 
     [Fact]
     public async Task StartUp_RematchesEachUsersImportedTransactions_AgainstTheirOwnRulesOnly()
     {
         // Only the second User has a rule for the café.
-        await AddRule(_b, "kafé", _seededB.Restaurants);
+        await AddRule(_b, "kafé", _categoriesB.Restaurants);
         // Stored as if imported before the rules changed, all Uncategorized.
         await StoreImported(_emailA, "Kafé Sentrum", "Rema 1000");
         await StoreImported(_emailB, "Rema 1000");
@@ -332,8 +334,8 @@ public class UserIsolationTests : IAsyncLifetime
 
         var august = (await August(_a)).ToDictionary(t => t.Description, t => t.CategoryId);
         Assert.Null(august["Kafé Sentrum"]);
-        Assert.Equal(_seededA.Groceries, august["Rema 1000"]);
-        Assert.Equal(_seededB.Groceries, (await August(_b)).Single().CategoryId);
+        Assert.Equal(_categoriesA.Groceries, august["Rema 1000"]);
+        Assert.Equal(_categoriesB.Groceries, (await August(_b)).Single().CategoryId);
     }
 
     // Stores the User's Uncategorized Transactions straight in the database, as if imported in
