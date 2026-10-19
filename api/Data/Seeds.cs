@@ -10,43 +10,21 @@ public static class Seeds
     public static readonly IReadOnlyList<SeedCategory> Categories =
     [
         new("Groceries", "All groceries.", "#2a78d6", BuiltIn: true),
-        new("Restaurants", "Restaurant, takeaway, bakery etc.", "#eb6834"),
-        new("Transport", "All transport.", "#1baf7a", BuiltIn: true),
+        new("Transport", "All expenses related to car and public transport.", "#1baf7a", BuiltIn: true),
         new("Housing", "Mortgage, common costs and insurance.", "#eda100", BuiltIn: true),
-        new("Utilities", "Electricity, water, phone, internet etc.", "#e87ba4"),
-        new("Subscriptions", "All subscriptions.", "#008300"),
-        new("Health", "Pharmacy etc.", "#4a3aa7"),
-        new("Shopping", "All shopping.", "#e34948"),
-        new("Entertainment", "Movies, video games etc.", "#104281"),
-        new("Travel", "All travel.", "#86b6ef"),
         new("Income", "All income.", "#8a5a1c", BuiltIn: true),
         new("Transfers", "All private transfers.", "#0f766e", BuiltIn: true),
         new("Other", "Costs that don't belong in any other category.", "#9085e9", BuiltIn: true),
-        new("Clothing", "All clothing.", "#b8336a", BuiltIn: true),
-        new("Electronics", "All electronics.", "#6b8e23"),
+        new("Clothing", "All clothing, including sportswear.", "#b8336a", BuiltIn: true),
     ];
 
     // Common merchants, each with the name of its seeded Category.
     public static readonly IReadOnlyList<(string Keyword, string CategoryName)> Rules =
     [
-        ("rema", "Groceries"), ("kiwi", "Groceries"), ("coop", "Groceries"), ("meny", "Groceries"),
+        ("rema", "Groceries"), ("kiwi", "Groceries"), ("coop extra", "Groceries"), ("meny", "Groceries"),
         ("joker", "Groceries"), ("bunnpris", "Groceries"),
-        ("mcdonald", "Restaurants"), ("burger king", "Restaurants"), ("peppes", "Restaurants"),
-        ("espresso house", "Restaurants"), ("starbucks", "Restaurants"), ("foodora", "Restaurants"),
-        ("wolt", "Restaurants"),
-        ("vy", "Transport"), ("skyss", "Transport"), ("ruter", "Transport"), ("flytoget", "Transport"),
-        ("circle k", "Transport"), ("uno-x", "Transport"), ("easypark", "Transport"),
-        ("fjordkraft", "Utilities"), ("tibber", "Utilities"), ("telenor", "Utilities"), ("telia", "Utilities"),
-        ("netflix", "Subscriptions"), ("spotify", "Subscriptions"), ("viaplay", "Subscriptions"),
-        ("hbo", "Subscriptions"), ("disney", "Subscriptions"),
-        ("apotek", "Health"),
-        ("clas ohlson", "Shopping"), ("ikea", "Shopping"), ("xxl", "Shopping"),
-        ("zalando", "Clothing"), ("cubus", "Clothing"), ("dressmann", "Clothing"), ("lindex", "Clothing"),
-        ("bik bok", "Clothing"), ("carlings", "Clothing"), ("kappahl", "Clothing"), ("h&m", "Clothing"),
-        ("elkjøp", "Electronics"), ("komplett", "Electronics"), ("proshop", "Electronics"),
-        ("netonnet", "Electronics"),
-        ("kino", "Entertainment"),
-        ("norwegian air", "Travel"), ("widerøe", "Travel"), ("airbnb", "Travel"), ("booking.com", "Travel"),
+        ("vy", "Transport"), ("skyss", "Transport"), ("ruter", "Transport"),
+        ("cubus", "Clothing"), ("dressmann", "Clothing"), ("h&m", "Clothing"),
         ("overføring mellom egne kontoer", "Transfers"), ("overføring til konto", "Transfers"),
     ];
 

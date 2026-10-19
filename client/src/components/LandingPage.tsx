@@ -9,7 +9,7 @@ const MODES = {
     label: 'Sign in',
     submittingLabel: 'Signing in…',
     passwordAutoComplete: 'current-password',
-    switchPrompt: 'New here? ',
+    switchPrompt: 'No account? ',
     other: 'signUp',
     submit: signIn,
   },
@@ -29,8 +29,8 @@ interface LandingPageProps {
   onSignedIn: (user: User) => void
 }
 
-// What a visitor who isn't signed in sees: what the app is, a form to sign in or, switched to, to
-// sign up, and a way to try the app as the Guest. The email typed in carries over when switching.
+// What a visitor who isn't signed in sees: a form to sign in or, switched to, to sign up, and a
+// way to try the app as the Guest. The email typed in carries over when switching.
 export function LandingPage({ onSignedIn }: LandingPageProps) {
   const [mode, setMode] = useState<Mode>('signIn')
   const [email, setEmail] = useState('')
@@ -82,10 +82,6 @@ export function LandingPage({ onSignedIn }: LandingPageProps) {
       </header>
 
       <main className="flex flex-col items-center gap-6 px-6 py-10 max-sm:px-4">
-        <p className="max-w-md text-center text-slate-600">
-          Import your bank statements and receipts, and see what your money goes to.
-        </p>
-
         <section
           aria-labelledby="credentials-heading"
           className="w-full max-w-sm rounded-xl border border-slate-200 bg-white p-6 shadow-sm max-sm:p-4"

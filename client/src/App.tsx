@@ -349,8 +349,7 @@ function SignedInApp({ user, onSignedOut }: SignedInAppProps) {
           aria-label="Guest"
           className="border-b border-amber-200 bg-amber-50 px-6 py-2 text-center text-sm text-amber-900 max-sm:px-4"
         >
-          You're the Guest, which everyone trying the app shares: anyone can see and change what you
-          enter, so don't enter real financial data.
+          Demo mode: only use test data.
         </p>
       )}
 
