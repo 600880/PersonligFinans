@@ -7,7 +7,7 @@ namespace PersonligFinans.Api.Users;
 public static class UserSetup
 {
     public const int MinPasswordLength = 8;
-    public const int MaxFailedLogIns = 5;
+    public const int MaxFailedSignIns = 5;
     public static readonly TimeSpan LockoutDuration = TimeSpan.FromMinutes(5);
 
     // Users sign in with ASP.NET Core Identity, stored in the app's database, and stay signed in
@@ -31,13 +31,13 @@ public static class UserSetup
                 options.Password.RequireNonAlphanumeric = false;
 
                 // The email is the user name. Identity matches both by their normalized form, so
-                // emails are unique, and log-in matches them, ignoring case. The email is validated
+                // emails are unique, and signing in matches them, ignoring case. The email is validated
                 // as an email, so the user name needn't be limited to Identity's default characters.
                 options.User.RequireUniqueEmail = true;
                 options.User.AllowedUserNameCharacters = "";
 
                 // Guessing a password takes many tries, so a few failures lock the email for a while.
-                options.Lockout.MaxFailedAccessAttempts = MaxFailedLogIns;
+                options.Lockout.MaxFailedAccessAttempts = MaxFailedSignIns;
                 options.Lockout.DefaultLockoutTimeSpan = LockoutDuration;
                 options.Lockout.AllowedForNewUsers = true;
             })
@@ -57,7 +57,7 @@ public static class UserSetup
             options.ExpireTimeSpan = TimeSpan.FromDays(14);
             options.SlidingExpiration = true;
 
-            // An API has no log-in page to send anyone to: signed out is 401, and not allowed is 403.
+            // An API has no sign-in page to send anyone to: signed out is 401, and not allowed is 403.
             // The client shows its landing page on a 401.
             options.Events.OnRedirectToLogin = context =>
             {

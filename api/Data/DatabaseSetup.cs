@@ -31,7 +31,7 @@ public static class DatabaseSetup
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         await db.Database.MigrateAsync();
 
-        // So the Guest exists on a fresh deployment, without anyone registering it.
+        // So the Guest exists on a fresh deployment, without anyone signing it up.
         await Guest.CreateIfMissingAsync(app.Services);
 
         // A migration may change the rules, whether applied here or by hand. Re-matching is

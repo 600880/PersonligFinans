@@ -1,25 +1,25 @@
 import { useState, type FormEvent } from 'react'
-import { continueAsGuest, logIn, register, type CredentialsFieldErrors, type User } from '../lib/api'
+import { continueAsGuest, signIn, signUp, type CredentialsFieldErrors, type User } from '../lib/api'
 import { Field, inputClassName } from './TransactionForm'
 
-// Everything that differs between logging in and registering. The form's heading and its submit
+// Everything that differs between signing in and signing up. The form's heading and its submit
 // button both say label, and the other Mode is offered after switchPrompt.
 const MODES = {
-  logIn: {
-    label: 'Log in',
-    submittingLabel: 'Logging in…',
+  signIn: {
+    label: 'Sign in',
+    submittingLabel: 'Signing in…',
     passwordAutoComplete: 'current-password',
     switchPrompt: 'New here? ',
-    other: 'register',
-    submit: logIn,
+    other: 'signUp',
+    submit: signIn,
   },
-  register: {
-    label: 'Register',
-    submittingLabel: 'Registering…',
+  signUp: {
+    label: 'Sign up',
+    submittingLabel: 'Signing up…',
     passwordAutoComplete: 'new-password',
-    switchPrompt: 'Already registered? ',
-    other: 'logIn',
-    submit: register,
+    switchPrompt: 'Already signed up? ',
+    other: 'signIn',
+    submit: signUp,
   },
 } as const
 
@@ -29,10 +29,10 @@ interface LandingPageProps {
   onSignedIn: (user: User) => void
 }
 
-// What a visitor who isn't signed in sees: what the app is, a form to log in or, switched to, to
-// register, and a way to try the app as the Guest. The email typed in carries over when switching.
+// What a visitor who isn't signed in sees: what the app is, a form to sign in or, switched to, to
+// sign up, and a way to try the app as the Guest. The email typed in carries over when switching.
 export function LandingPage({ onSignedIn }: LandingPageProps) {
-  const [mode, setMode] = useState<Mode>('logIn')
+  const [mode, setMode] = useState<Mode>('signIn')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [fieldErrors, setFieldErrors] = useState<CredentialsFieldErrors>({})
@@ -138,7 +138,7 @@ export function LandingPage({ onSignedIn }: LandingPageProps) {
         </section>
 
         <section aria-label="Try as Guest" className="flex w-full max-w-sm flex-col items-center gap-3 text-center">
-          <p className="text-sm text-slate-600">Or try the app first, without registering.</p>
+          <p className="text-sm text-slate-600">Or try the app first, without signing up.</p>
           <button
             type="button"
             onClick={() => void handleContinueAsGuest()}

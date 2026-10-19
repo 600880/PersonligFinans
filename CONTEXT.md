@@ -9,8 +9,16 @@ Someone who signs in with an email and password, or the Guest. Each User has the
 _Avoid_: Account, profile, member
 
 **Guest**:
-The one User anyone can sign in as without registering, so everything in it is seen and changed by every visitor who uses it. It is for trying the app, not for real data, and otherwise works like any other User: it starts like a new User, is never reset, and has its own Daily AI limit, shared by everyone using it.
+The one User anyone can sign in as without signing up, so everything in it is seen and changed by every visitor who uses it. It is for trying the app, not for real data, and otherwise works like any other User: it starts like a new User, is never reset, and has its own Daily AI limit, shared by everyone using it.
 _Avoid_: Demo user, anonymous user, guest account
+
+**Sign up**:
+Becoming a new User with an email and a password, which signs you straight in. The Guest is never signed up; the app creates it.
+_Avoid_: Register, create an account
+
+**Sign in**:
+Getting back into your own User with the email and password you signed up with. Being signed in is the state of using the app as a User, however you got there: by signing in, signing up or continuing as the Guest. Signing out ends it.
+_Avoid_: Log in, log out
 
 **AI request**:
 One ask of the LLM on a User's behalf, counted whether or not it succeeds: reading one Receipt, or proposing AI-generated rules for one Bank Statement that has rows no Categorization Rule matches. A Bank Statement whose rows all match makes none.

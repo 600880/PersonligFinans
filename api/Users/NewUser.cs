@@ -3,7 +3,7 @@ using PersonligFinans.Api.Data;
 
 namespace PersonligFinans.Api.Users;
 
-// How every User is created, whether by registering or, for the Guest, by the app at start-up: so
+// How every User is created, whether by signing up or, for the Guest, by the app at start-up: so
 // that each starts with the seeds.
 public static class NewUser
 {

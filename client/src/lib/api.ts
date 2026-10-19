@@ -3,7 +3,7 @@ import { spanQuery, type Span } from './span'
 import type { CreateTransactionRequest, PossibleDuplicateQuery } from './transactionForm'
 
 // Told when any call for the app's data answers 401, which means the sign-in has ended: it expired,
-// or the User logged out elsewhere. The app then goes back to its landing page.
+// or the User signed out elsewhere. The app then goes back to its landing page.
 let handleSignedOut: (() => void) | null = null
 
 export function setSignedOutHandler(handler: (() => void) | null) {
@@ -76,7 +76,7 @@ async function readProblem<Request = object>(
   return { fieldErrors, detail: problem?.detail ?? null }
 }
 
-// The signed-in User, by the email they registered with, and whether they are the Guest.
+// The signed-in User, by the email they signed up with, and whether they are the Guest.
 export interface User {
   email: string
   isGuest: boolean
@@ -104,14 +104,14 @@ export type SubmitCredentialsResult =
 
 // A wrong email or password gets one message that doesn't say which was wrong; a locked email gets
 // a message of its own.
-export function logIn(request: CredentialsRequest): Promise<SubmitCredentialsResult> {
-  return submitCredentials('/api/user/log-in', request, 'Logging in')
+export function signIn(request: CredentialsRequest): Promise<SubmitCredentialsResult> {
+  return submitCredentials('/api/user/sign-in', request, 'Signing in')
 }
 
-// Creates a User and signs it in. A registered email, an invalid email or a short password gets a
+// Creates a User and signs it in. An email in use, an invalid email or a short password gets a
 // field error.
-export function register(request: CredentialsRequest): Promise<SubmitCredentialsResult> {
-  return submitCredentials('/api/user/register', request, 'Registering')
+export function signUp(request: CredentialsRequest): Promise<SubmitCredentialsResult> {
+  return submitCredentials('/api/user/sign-up', request, 'Signing up')
 }
 
 // Posts the body as JSON to an endpoint that signs someone in, or null when the server couldn't be
@@ -132,7 +132,7 @@ async function postSignIn(url: string, body: object): Promise<Response | null> {
 
 const UNREACHABLE = 'Could not reach the server.'
 
-// action names what failed, e.g. "Logging in", for an answer that isn't a problem.
+// action names what failed, e.g. "Signing in", for an answer that isn't a problem.
 async function submitCredentials(
   url: string,
   request: CredentialsRequest,
@@ -165,9 +165,9 @@ export async function continueAsGuest(): Promise<ContinueAsGuestResult> {
 }
 
 // Ends the sign-in. Resolves false when the server couldn't be told, so the User is still signed in.
-export async function logOut(): Promise<boolean> {
+export async function signOut(): Promise<boolean> {
   try {
-    const response = await fetch('/api/user/log-out', { method: 'POST' })
+    const response = await fetch('/api/user/sign-out', { method: 'POST' })
     if (response.ok) forgetAntiforgeryToken()
     return response.ok
   } catch {

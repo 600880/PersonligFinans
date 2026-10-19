@@ -3,9 +3,9 @@ using PersonligFinans.Api.Data;
 
 namespace PersonligFinans.Api.Users;
 
-// The one User anyone can sign in as without registering, by continuing as the Guest. It is an
-// ordinary User whose email is on a reserved domain nobody can register on, and which has no
-// password, so Log in can never reach it. See docs/adr/0005-guest-is-one-shared-user.md.
+// The one User anyone can sign in as without signing up, by continuing as the Guest. It is an
+// ordinary User whose email is on a reserved domain nobody can sign up with, and which has no
+// password, so Sign in can never reach it. See docs/adr/0005-guest-is-one-shared-user.md.
 public static class Guest
 {
     // .invalid is reserved for names that can never exist, so no real email is on this domain.
@@ -16,12 +16,12 @@ public static class Guest
     // Whether the email is the Guest's, ignoring case, as Identity matches emails.
     public static bool Is(string email) => string.Equals(email, Email, StringComparison.OrdinalIgnoreCase);
 
-    // Whether the email is on the Guest's reserved domain, where nobody can register or log in.
+    // Whether the email is on the Guest's reserved domain, where nobody can sign up or sign in.
     public static bool IsReserved(string email) =>
         email.EndsWith("@" + ReservedDomain, StringComparison.OrdinalIgnoreCase);
 
     // Creates the Guest, starting like any new User, unless it already exists. An existing Guest is
-    // never reset, so it keeps whatever visitors have added. Log in never tries the Guest, and as
+    // never reset, so it keeps whatever visitors have added. Sign in never tries the Guest, and as
     // well the Guest is exempt from the lockout Identity gives every new User, so nothing can lock
     // it out.
     public static async Task CreateIfMissingAsync(IServiceProvider services)

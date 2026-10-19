@@ -20,12 +20,12 @@ public sealed class UserDatabase : IAsyncDisposable
 
     public AppDbContext Db { get; }
 
-    // Acts as the User registered with the given email.
+    // Acts as the User who signed up with the given email.
     public static async Task<UserDatabase> OfAsync(WebApplicationFactory<Program> factory, string email)
     {
         var scope = factory.Services.CreateAsyncScope();
         var user = await scope.ServiceProvider.GetRequiredService<UserManager<IdentityUser>>().FindByEmailAsync(email)
-            ?? throw new InvalidOperationException($"No User is registered with {email}.");
+            ?? throw new InvalidOperationException($"No User has signed up with {email}.");
         scope.ServiceProvider.GetRequiredService<CurrentUser>().ActAs(user.Id);
         return new UserDatabase(scope);
     }

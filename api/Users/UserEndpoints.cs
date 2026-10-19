@@ -19,7 +19,7 @@ public static class UserEndpoints
     // Identity's limit on a user name and an email.
     private const int MaxEmailLength = 256;
 
-    private const string EmailTaken = "This email is already registered.";
+    private const string EmailTaken = "This email is already in use.";
 
 
     public static void MapUserEndpoints(this IEndpointRouteBuilder app)
@@ -30,17 +30,17 @@ public static class UserEndpoints
         // how the client knows to show its landing page.
         api.MapGet("/", (ClaimsPrincipal user) => Results.Ok(UserResponse.Of(user.Identity!.Name!)));
 
-        // Registering, logging in, continuing as the Guest and logging out are for anyone; logging
+        // Signing up, signing in, continuing as the Guest and signing out are for anyone; signing
         // out when signed out does nothing.
-        api.MapPost("/register", Register).AllowAnonymous();
-        api.MapPost("/log-in", LogIn).AllowAnonymous();
+        api.MapPost("/sign-up", SignUp).AllowAnonymous();
+        api.MapPost("/sign-in", SignIn).AllowAnonymous();
         api.MapPost("/continue-as-guest", ContinueAsGuest).AllowAnonymous();
-        api.MapPost("/log-out", LogOut).AllowAnonymous();
+        api.MapPost("/sign-out", SignOut).AllowAnonymous();
     }
 
     // Creates a User whose user name is their email, with copies of the seeds of their own, and signs
     // it in.
-    private static async Task<IResult> Register(
+    private static async Task<IResult> SignUp(
         CredentialsRequest request,
         UserManager<IdentityUser> userManager,
         SignInManager<IdentityUser> signInManager,
@@ -68,7 +68,7 @@ public static class UserEndpoints
         // The Guest's email, which is taken, and any other on its domain, which is kept for the
         // Guest.
         if (Guest.IsReserved(email))
-            fieldErrors["email"] = ["This email can't be registered."];
+            fieldErrors["email"] = ["This email can't be used."];
         if (fieldErrors.Count > 0)
             return Results.ValidationProblem(fieldErrors);
 
@@ -77,7 +77,7 @@ public static class UserEndpoints
         {
             result = await NewUser.CreateAsync(userManager, db, user, password);
         }
-        // The email was registered concurrently, between validation and now.
+        // Someone signed up with the email concurrently, between validation and now.
         catch (DbUpdateException e) when (e.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
         {
             return Results.ValidationProblem(new Dictionary<string, string[]> { ["email"] = [EmailTaken] });
@@ -90,11 +90,11 @@ public static class UserEndpoints
     }
 
     // Signs in with an email and password. A wrong email and a wrong password get the same answer, so
-    // nobody can find out which emails are registered. Every failure counts towards locking the
+    // nobody can find out which emails are in use. Every failure counts towards locking the
     // email, and a locked email is refused, even with the right password, until the lockout ends.
     // The Guest has no password and is never tried, so its failures never count and it is never
     // locked.
-    private static async Task<IResult> LogIn(
+    private static async Task<IResult> SignIn(
         CredentialsRequest request, UserManager<IdentityUser> userManager, SignInManager<IdentityUser> signInManager)
     {
         var (email, password, errors) = ValidateRequired(request);
@@ -106,18 +106,18 @@ public static class UserEndpoints
         var result = await signInManager.PasswordSignInAsync(email, password, isPersistent: true, lockoutOnFailure: true);
         if (result.IsLockedOut)
             return Results.Problem(
-                detail: "Too many failed log-ins, so this email is locked for a few minutes. Try again later.",
+                detail: "Too many failed sign-ins, so this email is locked for a few minutes. Try again later.",
                 statusCode: StatusCodes.Status429TooManyRequests);
         if (!result.Succeeded)
             return WrongEmailOrPassword();
 
-        // The email as registered, whatever its case when logging in.
+        // The email as it was signed up with, whatever its case when signing in.
         var user = await userManager.FindByNameAsync(email);
         return Results.Ok(UserResponse.Of(user!.Email!));
     }
 
     // Signs in as the Guest, which the app created at start-up, for as long as any other sign-in.
-    // Like logging in and registering, it takes only JSON, which another site's form can't send, so
+    // Like signing in and signing up, it takes only JSON, which another site's form can't send, so
     // no other site can sign its visitors in as the Guest.
     private static async Task<IResult> ContinueAsGuest(
         HttpRequest request, UserManager<IdentityUser> userManager, SignInManager<IdentityUser> signInManager)
@@ -134,7 +134,7 @@ public static class UserEndpoints
     private static IResult WrongEmailOrPassword() =>
         Results.Problem(detail: "Wrong email or password.", statusCode: StatusCodes.Status401Unauthorized);
 
-    private static async Task<IResult> LogOut(SignInManager<IdentityUser> signInManager)
+    private static async Task<IResult> SignOut(SignInManager<IdentityUser> signInManager)
     {
         await signInManager.SignOutAsync();
         return Results.NoContent();

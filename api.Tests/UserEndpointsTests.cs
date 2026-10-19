@@ -17,11 +17,11 @@ public class UserEndpointsTests
         _factory = factory;
     }
 
-    private static Task<HttpResponseMessage> Register(HttpClient client, string email, string password) =>
-        client.PostAsJsonAsync("/api/user/register", new { email, password });
+    private static Task<HttpResponseMessage> SignUp(HttpClient client, string email, string password) =>
+        client.PostAsJsonAsync("/api/user/sign-up", new { email, password });
 
-    private static Task<HttpResponseMessage> LogIn(HttpClient client, string email, string password) =>
-        client.PostAsJsonAsync("/api/user/log-in", new { email, password });
+    private static Task<HttpResponseMessage> SignIn(HttpClient client, string email, string password) =>
+        client.PostAsJsonAsync("/api/user/sign-in", new { email, password });
 
     private static async Task<string?> WhoAmI(HttpClient client)
     {
@@ -32,12 +32,12 @@ public class UserEndpointsTests
         return (await response.Content.ReadFromJsonAsync<UserResponse>())!.Email;
     }
 
-    // Registers a User from a client of its own, so the test's own client stays signed out.
-    private async Task<string> RegisteredEmail()
+    // Signs up a User from a client of its own, so the test's own client stays signed out.
+    private async Task<string> SignedUpEmail()
     {
         var email = SignedInClient.UniqueEmail();
         using var client = _factory.CreateClient();
-        Assert.Equal(HttpStatusCode.OK, (await Register(client, email, Password)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await SignUp(client, email, Password)).StatusCode);
         return email;
     }
 
@@ -62,12 +62,12 @@ public class UserEndpointsTests
     }
 
     [Fact]
-    public async Task Register_SignsTheNewUserIn()
+    public async Task SignUp_SignsTheNewUserIn()
     {
         var client = _factory.CreateClient();
         var email = SignedInClient.UniqueEmail();
 
-        var response = await Register(client, email, Password);
+        var response = await SignUp(client, email, Password);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal(email, (await response.Content.ReadFromJsonAsync<UserResponse>())!.Email);
@@ -75,11 +75,11 @@ public class UserEndpointsTests
     }
 
     [Fact]
-    public async Task Register_SetsAPersistentSecureHttpOnlyLaxCookie()
+    public async Task SignUp_SetsAPersistentSecureHttpOnlyLaxCookie()
     {
         var client = _factory.CreateClient();
 
-        var response = await Register(client, SignedInClient.UniqueEmail(), Password);
+        var response = await SignUp(client, SignedInClient.UniqueEmail(), Password);
 
         var cookie = Assert.Single(response.Headers.GetValues("Set-Cookie")).ToLowerInvariant();
         Assert.Contains("httponly", cookie);
@@ -89,25 +89,25 @@ public class UserEndpointsTests
     }
 
     [Fact]
-    public async Task Register_AnEmailAlreadyRegistered_IsRefused_IgnoringCase()
+    public async Task SignUp_AnEmailAlreadyInUse_IsRefused_IgnoringCase()
     {
-        var email = await RegisteredEmail();
+        var email = await SignedUpEmail();
         var client = _factory.CreateClient();
 
-        var exact = await ValidationErrors(await Register(client, email, Password));
-        var otherCase = await ValidationErrors(await Register(client, email.ToUpperInvariant(), Password));
+        var exact = await ValidationErrors(await SignUp(client, email, Password));
+        var otherCase = await ValidationErrors(await SignUp(client, email.ToUpperInvariant(), Password));
 
-        Assert.Equal(["This email is already registered."], exact["email"]);
-        Assert.Equal(["This email is already registered."], otherCase["email"]);
+        Assert.Equal(["This email is already in use."], exact["email"]);
+        Assert.Equal(["This email is already in use."], otherCase["email"]);
         Assert.Null(await WhoAmI(client));
     }
 
     [Fact]
-    public async Task Register_AShortPassword_IsRefused()
+    public async Task SignUp_AShortPassword_IsRefused()
     {
         var client = _factory.CreateClient();
 
-        var errors = await ValidationErrors(await Register(client, SignedInClient.UniqueEmail(), "1234567"));
+        var errors = await ValidationErrors(await SignUp(client, SignedInClient.UniqueEmail(), "1234567"));
 
         Assert.Equal(["Password must be at least 8 characters."], errors["password"]);
         Assert.False(errors.ContainsKey("email"));
@@ -115,55 +115,55 @@ public class UserEndpointsTests
     }
 
     [Fact]
-    public async Task Register_APasswordOfEightOfAnyCharacter_IsAccepted()
+    public async Task SignUp_APasswordOfEightOfAnyCharacter_IsAccepted()
     {
         var client = _factory.CreateClient();
 
-        var response = await Register(client, SignedInClient.UniqueEmail(), "aaaaaaaa");
+        var response = await SignUp(client, SignedInClient.UniqueEmail(), "aaaaaaaa");
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
 
     [Fact]
-    public async Task Register_AnInvalidEmail_IsRefused()
+    public async Task SignUp_AnInvalidEmail_IsRefused()
     {
         var client = _factory.CreateClient();
 
-        var errors = await ValidationErrors(await Register(client, "not an email", Password));
+        var errors = await ValidationErrors(await SignUp(client, "not an email", Password));
 
         Assert.Equal(["Enter a valid email address."], errors["email"]);
     }
 
     [Fact]
-    public async Task Register_EveryFieldThatIsWrong_IsReportedAtOnce()
+    public async Task SignUp_EveryFieldThatIsWrong_IsReportedAtOnce()
     {
-        var email = await RegisteredEmail();
+        var email = await SignedUpEmail();
         var client = _factory.CreateClient();
 
-        var errors = await ValidationErrors(await Register(client, email, "short"));
+        var errors = await ValidationErrors(await SignUp(client, email, "short"));
 
-        Assert.Equal(["This email is already registered."], errors["email"]);
+        Assert.Equal(["This email is already in use."], errors["email"]);
         Assert.Equal(["Password must be at least 8 characters."], errors["password"]);
     }
 
     [Fact]
-    public async Task Register_MissingFields_AreRefused()
+    public async Task SignUp_MissingFields_AreRefused()
     {
         var client = _factory.CreateClient();
 
-        var errors = await ValidationErrors(await Register(client, "  ", ""));
+        var errors = await ValidationErrors(await SignUp(client, "  ", ""));
 
         Assert.Equal(["Email is required."], errors["email"]);
         Assert.Equal(["Password is required."], errors["password"]);
     }
 
     [Fact]
-    public async Task LogIn_SignsIn_IgnoringTheEmailsCase()
+    public async Task SignIn_MatchesTheEmail_IgnoringItsCase()
     {
-        var email = await RegisteredEmail();
+        var email = await SignedUpEmail();
         var client = _factory.CreateClient();
 
-        var response = await LogIn(client, email.ToUpperInvariant(), Password);
+        var response = await SignIn(client, email.ToUpperInvariant(), Password);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal(email, (await response.Content.ReadFromJsonAsync<UserResponse>())!.Email);
@@ -171,13 +171,13 @@ public class UserEndpointsTests
     }
 
     [Fact]
-    public async Task LogIn_AWrongPasswordAndAnUnknownEmail_GetTheSameError()
+    public async Task SignIn_AWrongPasswordAndAnUnknownEmail_GetTheSameError()
     {
-        var email = await RegisteredEmail();
+        var email = await SignedUpEmail();
         var client = _factory.CreateClient();
 
-        var wrongPassword = await LogIn(client, email, "wrong password");
-        var unknownEmail = await LogIn(client, SignedInClient.UniqueEmail(), Password);
+        var wrongPassword = await SignIn(client, email, "wrong password");
+        var unknownEmail = await SignIn(client, SignedInClient.UniqueEmail(), Password);
 
         Assert.Equal(HttpStatusCode.Unauthorized, wrongPassword.StatusCode);
         Assert.Equal(HttpStatusCode.Unauthorized, unknownEmail.StatusCode);
@@ -187,20 +187,20 @@ public class UserEndpointsTests
     }
 
     [Fact]
-    public async Task LogIn_AfterFiveFailures_LocksTheEmail_EvenForTheRightPassword()
+    public async Task SignIn_AfterFiveFailures_LocksTheEmail_EvenForTheRightPassword()
     {
-        var email = await RegisteredEmail();
+        var email = await SignedUpEmail();
         var client = _factory.CreateClient();
 
-        for (var attempt = 1; attempt < UserSetup.MaxFailedLogIns; attempt++)
-            Assert.Equal(HttpStatusCode.Unauthorized, (await LogIn(client, email, "wrong password")).StatusCode);
-        var fifthFailure = await LogIn(client, email, "wrong password");
-        var rightPassword = await LogIn(client, email, Password);
+        for (var attempt = 1; attempt < UserSetup.MaxFailedSignIns; attempt++)
+            Assert.Equal(HttpStatusCode.Unauthorized, (await SignIn(client, email, "wrong password")).StatusCode);
+        var fifthFailure = await SignIn(client, email, "wrong password");
+        var rightPassword = await SignIn(client, email, Password);
 
         Assert.Equal(HttpStatusCode.TooManyRequests, fifthFailure.StatusCode);
         Assert.Equal(HttpStatusCode.TooManyRequests, rightPassword.StatusCode);
         Assert.Equal(
-            "Too many failed log-ins, so this email is locked for a few minutes. Try again later.",
+            "Too many failed sign-ins, so this email is locked for a few minutes. Try again later.",
             await ProblemDetail(rightPassword));
         Assert.Null(await WhoAmI(client));
     }
@@ -209,26 +209,26 @@ public class UserEndpointsTests
     [InlineData(Guest.Email)]
     [InlineData("GUEST@PERSONLIGFINANS.INVALID")]
     [InlineData("someone@personligfinans.invalid")]
-    public async Task Register_AnEmailOnTheGuestsReservedDomain_IsRefused(string email)
+    public async Task SignUp_AnEmailOnTheGuestsReservedDomain_IsRefused(string email)
     {
         var client = _factory.CreateClient();
 
-        var errors = await ValidationErrors(await Register(client, email, Password));
+        var errors = await ValidationErrors(await SignUp(client, email, Password));
 
-        Assert.Equal(["This email can't be registered."], errors["email"]);
+        Assert.Equal(["This email can't be used."], errors["email"]);
         Assert.Null(await WhoAmI(client));
     }
 
     [Fact]
-    public async Task LogIn_AsTheGuest_GetsTheWrongEmailOrPasswordError_AndNeverLocksIt()
+    public async Task SignIn_AsTheGuest_GetsTheWrongEmailOrPasswordError_AndNeverLocksIt()
     {
         var client = _factory.CreateClient();
 
-        // More failures than lock a registered User's email, and with no password at all.
+        // More failures than lock any other User's email, and with no password at all.
         var responses = new List<HttpResponseMessage>();
-        for (var attempt = 0; attempt <= UserSetup.MaxFailedLogIns; attempt++)
-            responses.Add(await LogIn(client, Guest.Email, Password));
-        responses.Add(await LogIn(client, Guest.Email.ToUpperInvariant(), " "));
+        for (var attempt = 0; attempt <= UserSetup.MaxFailedSignIns; attempt++)
+            responses.Add(await SignIn(client, Guest.Email, Password));
+        responses.Add(await SignIn(client, Guest.Email.ToUpperInvariant(), " "));
 
         foreach (var response in responses)
         {
@@ -240,22 +240,22 @@ public class UserEndpointsTests
     }
 
     [Fact]
-    public async Task LogIn_MissingFields_AreRefused()
+    public async Task SignIn_MissingFields_AreRefused()
     {
         var client = _factory.CreateClient();
 
-        var errors = await ValidationErrors(await LogIn(client, "", ""));
+        var errors = await ValidationErrors(await SignIn(client, "", ""));
 
         Assert.Equal(["Email is required."], errors["email"]);
         Assert.Equal(["Password is required."], errors["password"]);
     }
 
     [Fact]
-    public async Task LogOut_EndsTheSignIn()
+    public async Task SignOut_EndsTheSignIn()
     {
         var client = await _factory.CreateSignedInClientAsync();
 
-        var response = await client.PostAsync("/api/user/log-out", null);
+        var response = await client.PostAsync("/api/user/sign-out", null);
 
         Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
         Assert.Null(await WhoAmI(client));

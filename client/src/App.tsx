@@ -9,7 +9,7 @@ import { RulesPage } from './components/RulesPage'
 import { TransactionsPage, type TransactionsTarget } from './components/TransactionsPage'
 import {
   fetchCurrentUser,
-  logOut,
+  signOut,
   readReceipt,
   setSignedOutHandler,
   uploadBankStatement,
@@ -37,8 +37,8 @@ const NAV_ITEMS: { view: View; label: string }[] = [
 const ADD_ACTION_CLASS =
   'rounded-lg border border-slate-300 bg-white px-5 py-2.5 text-sm font-medium text-slate-900 shadow-sm hover:bg-slate-100 max-sm:w-full max-sm:border-0 max-sm:text-left max-sm:shadow-none'
 
-// Asks who is signed in, and shows the landing page to nobody and the app to a User. Signing out,
-// by logging out or by any call answering 401, unmounts the app, so the next User starts from
+// Asks who is signed in, and shows the landing page to nobody and the app to a User. Being signed
+// out, by Sign out or by any call answering 401, unmounts the app, so the next User starts from
 // nothing the previous one saw.
 function App() {
   // undefined while asking, null when nobody is signed in.
@@ -75,15 +75,15 @@ function App() {
   // A blank page while asking, so a signed-in User never sees the landing page flash by.
   if (user === undefined) return <div className="min-h-screen bg-slate-50" />
   if (user === null) return <LandingPage onSignedIn={setUser} />
-  return <SignedInApp user={user} onLoggedOut={() => setUser(null)} />
+  return <SignedInApp user={user} onSignedOut={() => setUser(null)} />
 }
 
 interface SignedInAppProps {
   user: User
-  onLoggedOut: () => void
+  onSignedOut: () => void
 }
 
-function SignedInApp({ user, onLoggedOut }: SignedInAppProps) {
+function SignedInApp({ user, onSignedOut }: SignedInAppProps) {
   const [view, setView] = useState<View>('home')
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [showSavedMessage, setShowSavedMessage] = useState(false)
@@ -110,9 +110,9 @@ function SignedInApp({ user, onLoggedOut }: SignedInAppProps) {
   // On a narrow screen the pages, and the ways to add Transactions, each sit behind a menu.
   const [isNavOpen, setIsNavOpen] = useState(false)
   const [isAddMenuOpen, setIsAddMenuOpen] = useState(false)
-  // Who is signed in, and Log out, behind the User entry in the header.
+  // Who is signed in, and Sign out, behind the User entry in the header.
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false)
-  const [logOutFailed, setLogOutFailed] = useState(false)
+  const [signOutFailed, setSignOutFailed] = useState(false)
   const headerRef = useRef<HTMLElement>(null)
   const addMenuRef = useRef<HTMLDivElement>(null)
   const userMenuRef = useRef<HTMLDivElement>(null)
@@ -153,10 +153,10 @@ function SignedInApp({ user, onLoggedOut }: SignedInAppProps) {
   }
 
   // Stays signed in, saying so, when the server couldn't be told.
-  async function handleLogOut() {
-    setLogOutFailed(false)
-    if (await logOut()) onLoggedOut()
-    else setLogOutFailed(true)
+  async function handleSignOut() {
+    setSignOutFailed(false)
+    if (await signOut()) onSignedOut()
+    else setSignOutFailed(true)
   }
 
   function openTransactions(target: TransactionsTarget) {
@@ -326,14 +326,14 @@ function SignedInApp({ user, onLoggedOut }: SignedInAppProps) {
                 </p>
                 <button
                   type="button"
-                  onClick={() => void handleLogOut()}
+                  onClick={() => void handleSignOut()}
                   className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-900 shadow-sm hover:bg-slate-100"
                 >
-                  Log out
+                  Sign out
                 </button>
-                {logOutFailed && (
+                {signOutFailed && (
                   <p role="alert" className="text-xs text-red-600">
-                    Logging out failed. Try again.
+                    Signing out failed. Try again.
                   </p>
                 )}
               </div>

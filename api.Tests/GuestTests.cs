@@ -6,7 +6,7 @@ using PersonligFinans.Api.Users;
 
 namespace PersonligFinans.Api.Tests;
 
-// The Guest: the one User anyone can sign in as without registering, so every visitor who continues
+// The Guest: the one User anyone can sign in as without signing up, so every visitor who continues
 // as the Guest sees and changes the same data. Every test here shares that one Guest, with each
 // other and with any other test class, so each names what it adds uniquely.
 [Collection(ApiCollection.Name)]
@@ -56,7 +56,7 @@ public class GuestTests
     }
 
     [Fact]
-    public async Task ARegisteredUser_IsNotTheGuest()
+    public async Task AUserWhoSignedUp_IsNotTheGuest()
     {
         var client = await _factory.CreateSignedInClientAsync();
 
@@ -78,18 +78,18 @@ public class GuestTests
     }
 
     [Fact]
-    public async Task TheGuestsData_IsSeparateFromARegisteredUsers()
+    public async Task TheGuestsData_IsSeparateFromThatOfAUserWhoSignedUp()
     {
         var guest = await _factory.CreateGuestClientAsync();
-        var registered = await _factory.CreateSignedInClientAsync();
+        var signedUp = await _factory.CreateSignedInClientAsync();
         var guestsName = UniqueName();
-        var registeredName = UniqueName();
+        var signedUpName = UniqueName();
 
         await AddCategory(guest, guestsName);
-        await AddCategory(registered, registeredName);
+        await AddCategory(signedUp, signedUpName);
 
-        Assert.DoesNotContain(registeredName, await CategoryNames(guest));
-        Assert.DoesNotContain(guestsName, await CategoryNames(registered));
+        Assert.DoesNotContain(signedUpName, await CategoryNames(guest));
+        Assert.DoesNotContain(guestsName, await CategoryNames(signedUp));
     }
 
     [Fact]

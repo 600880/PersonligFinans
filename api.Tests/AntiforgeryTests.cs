@@ -118,9 +118,9 @@ public class AntiforgeryTests
     {
         var client = _factory.CreateClient();
         var token = await TokenFor(client);
-        var registered = await client.PostAsJsonAsync(
-            "/api/user/register", new { email = SignedInClient.UniqueEmail(), password = SignedInClient.Password });
-        Assert.Equal(HttpStatusCode.OK, registered.StatusCode);
+        var signedUp = await client.PostAsJsonAsync(
+            "/api/user/sign-up", new { email = SignedInClient.UniqueEmail(), password = SignedInClient.Password });
+        Assert.Equal(HttpStatusCode.OK, signedUp.StatusCode);
         UseToken(client, token);
 
         var response = await PostForm(client, form);

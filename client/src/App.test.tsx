@@ -76,20 +76,20 @@ let handleSpending: (year: number, month: number | undefined, quarter: number | 
 let handleMonthlySpending: (from: Month, to: Month, includeTransfers: boolean) => Response
 // Who is signed in: signed in as a User unless a test signs out, or keeps the answer waiting.
 let currentUser: { email: string; isGuest: boolean } | Response | Promise<Response>
-let handleLogIn: PostHandler
-let handleRegister: PostHandler
+let handleSignIn: PostHandler
+let handleSignUp: PostHandler
 let handleContinueAsGuest: () => Response
-let handleLogOut: () => Response
+let handleSignOut: () => Response
 // How many antiforgery tokens the server has given. Each is new: token-1, token-2 and so on.
 let antiforgeryTokensGiven: number
 const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
   if (url === '/api/user') {
     return currentUser instanceof Response || currentUser instanceof Promise ? currentUser : Response.json(currentUser)
   }
-  if (url === '/api/user/log-in' && init?.method === 'POST') return handleLogIn(JSON.parse(init.body as string))
-  if (url === '/api/user/register' && init?.method === 'POST') return handleRegister(JSON.parse(init.body as string))
+  if (url === '/api/user/sign-in' && init?.method === 'POST') return handleSignIn(JSON.parse(init.body as string))
+  if (url === '/api/user/sign-up' && init?.method === 'POST') return handleSignUp(JSON.parse(init.body as string))
   if (url === '/api/user/continue-as-guest' && init?.method === 'POST') return handleContinueAsGuest()
-  if (url === '/api/user/log-out' && init?.method === 'POST') return handleLogOut()
+  if (url === '/api/user/sign-out' && init?.method === 'POST') return handleSignOut()
   if (url === '/api/antiforgery-token') return Response.json({ token: `token-${++antiforgeryTokensGiven}` })
   const monthlyUrl =
     /^\/api\/spending\/monthly\?fromYear=(\d+)&fromMonth=(\d+)&toYear=(\d+)&toMonth=(\d+)(&includeTransfers=true)?$/.exec(url)
@@ -185,10 +185,10 @@ beforeEach(() => {
   handleMonthlySpending = (from, to) => Response.json(monthlySpending(from, to))
   categoriesServed = categories
   currentUser = { email: 'me@example.com', isGuest: false }
-  handleLogIn = (body) => Response.json({ email: (body as { email: string }).email, isGuest: false })
-  handleRegister = (body) => Response.json({ email: (body as { email: string }).email, isGuest: false })
+  handleSignIn = (body) => Response.json({ email: (body as { email: string }).email, isGuest: false })
+  handleSignUp = (body) => Response.json({ email: (body as { email: string }).email, isGuest: false })
   handleContinueAsGuest = () => Response.json(guest)
-  handleLogOut = () => new Response(null, { status: 204 })
+  handleSignOut = () => new Response(null, { status: 204 })
   antiforgeryTokensGiven = 0
   vi.stubGlobal('fetch', fetchMock)
 })
@@ -5237,7 +5237,7 @@ describe('Scan receipts', () => {
 describe('Signing in', () => {
   const signedOut = () => new Response(null, { status: 401 })
 
-  function landingPage(heading: 'Log in' | 'Register' = 'Log in') {
+  function landingPage(heading: 'Sign in' | 'Sign up' = 'Sign in') {
     return screen.findByRole('heading', { name: heading })
   }
 
@@ -5252,7 +5252,8 @@ describe('Signing in', () => {
 
     expect(await landingPage()).toBeInTheDocument()
     expect(screen.getByText(/bank statements and receipts/i)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Register' })).toBeInTheDocument()
+    expect(screen.getByText('New here?', { exact: false })).toContainElement(screen.getByRole('button', { name: 'Sign up' }))
+    expect(screen.getByText('Or try the app first, without signing up.')).toBeInTheDocument()
     expect(screen.queryByRole('navigation')).not.toBeInTheDocument()
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(['/api/user'])
   })
@@ -5263,7 +5264,7 @@ describe('Signing in', () => {
     render(<App />)
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/user'))
-    expect(screen.queryByRole('heading', { name: 'Log in' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Sign in' })).not.toBeInTheDocument()
     expect(screen.queryByRole('navigation')).not.toBeInTheDocument()
 
     respond(Response.json({ email: 'me@example.com', isGuest: false }))
@@ -5277,66 +5278,66 @@ describe('Signing in', () => {
     await landingPage()
 
     await fillIn(user, 'me@example.com', 'my long passphrase')
-    await user.click(screen.getByRole('button', { name: 'Log in' }))
+    await user.click(screen.getByRole('button', { name: 'Sign in' }))
 
     expect(await screen.findByRole('navigation')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Add transaction' })).toBeInTheDocument()
-    const logIn = fetchMock.mock.calls.find(([url]) => url === '/api/user/log-in')
-    expect(JSON.parse(logIn?.[1]?.body as string)).toEqual({ email: 'me@example.com', password: 'my long passphrase' })
+    const signIn = fetchMock.mock.calls.find(([url]) => url === '/api/user/sign-in')
+    expect(JSON.parse(signIn?.[1]?.body as string)).toEqual({ email: 'me@example.com', password: 'my long passphrase' })
   })
 
   it.each([
     [401, 'Wrong email or password.'],
-    [429, 'Too many failed log-ins, so this email is locked for a few minutes. Try again later.'],
-  ])('stays on the landing page with the error of a log-in refused with %i', async (status, detail) => {
+    [429, 'Too many failed sign-ins, so this email is locked for a few minutes. Try again later.'],
+  ])('stays on the landing page with the error of a sign-in refused with %i', async (status, detail) => {
     currentUser = signedOut()
-    handleLogIn = () => Response.json({ detail }, { status })
+    handleSignIn = () => Response.json({ detail }, { status })
     const user = userEvent.setup()
     render(<App />)
     await landingPage()
 
     await fillIn(user, 'me@example.com', 'wrong password')
-    await user.click(screen.getByRole('button', { name: 'Log in' }))
+    await user.click(screen.getByRole('button', { name: 'Sign in' }))
 
     expect(await screen.findByRole('alert')).toHaveTextContent(detail)
-    expect(screen.getByRole('heading', { name: 'Log in' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Sign in' })).toBeInTheDocument()
     expect(screen.queryByRole('navigation')).not.toBeInTheDocument()
   })
 
-  it('registers and shows the app', async () => {
+  it('signs up and shows the app', async () => {
     currentUser = signedOut()
     const user = userEvent.setup()
     render(<App />)
     await landingPage()
 
-    await user.click(screen.getByRole('button', { name: 'Register' }))
-    await landingPage('Register')
+    await user.click(screen.getByRole('button', { name: 'Sign up' }))
+    await landingPage('Sign up')
     await fillIn(user, 'new@example.com', 'my long passphrase')
-    await user.click(screen.getByRole('button', { name: 'Register' }))
+    await user.click(screen.getByRole('button', { name: 'Sign up' }))
 
     expect(await screen.findByRole('navigation')).toBeInTheDocument()
-    const register = fetchMock.mock.calls.find(([url]) => url === '/api/user/register')
-    expect(JSON.parse(register?.[1]?.body as string)).toEqual({ email: 'new@example.com', password: 'my long passphrase' })
+    const signUp = fetchMock.mock.calls.find(([url]) => url === '/api/user/sign-up')
+    expect(JSON.parse(signUp?.[1]?.body as string)).toEqual({ email: 'new@example.com', password: 'my long passphrase' })
     await user.click(screen.getByRole('button', { name: 'User' }))
     expect(screen.getByText('new@example.com')).toBeInTheDocument()
   })
 
-  it('shows each field error of a refused registration under its field', async () => {
+  it('shows each field error of a refused sign-up under its field', async () => {
     currentUser = signedOut()
-    handleRegister = () =>
+    handleSignUp = () =>
       Response.json(
-        { errors: { email: ['This email is already registered.'], password: ['Password must be at least 8 characters.'] } },
+        { errors: { email: ['This email is already in use.'], password: ['Password must be at least 8 characters.'] } },
         { status: 400 },
       )
     const user = userEvent.setup()
     render(<App />)
     await landingPage()
 
-    await user.click(screen.getByRole('button', { name: 'Register' }))
+    await user.click(screen.getByRole('button', { name: 'Sign up' }))
     await fillIn(user, 'me@example.com', 'short')
-    await user.click(screen.getByRole('button', { name: 'Register' }))
+    await user.click(screen.getByRole('button', { name: 'Sign up' }))
 
-    expect(await screen.findByText('This email is already registered.')).toBeInTheDocument()
+    expect(await screen.findByText('This email is already in use.')).toBeInTheDocument()
     expect(screen.getByText('Password must be at least 8 characters.')).toBeInTheDocument()
     expect(screen.getByLabelText(/^email/i)).toHaveValue('me@example.com')
     expect(screen.queryByRole('navigation')).not.toBeInTheDocument()
@@ -5370,19 +5371,22 @@ describe('Signing in', () => {
     expect(screen.queryByRole('navigation')).not.toBeInTheDocument()
   })
 
-  it('keeps the email but not the errors when switching between Log in and Register', async () => {
+  it('keeps the email but not the errors when switching between Sign in and Sign up', async () => {
     currentUser = signedOut()
-    handleLogIn = () => Response.json({ detail: 'Wrong email or password.' }, { status: 401 })
+    handleSignIn = () => Response.json({ detail: 'Wrong email or password.' }, { status: 401 })
     const user = userEvent.setup()
     render(<App />)
     await landingPage()
     await fillIn(user, 'me@example.com', 'wrong password')
-    await user.click(screen.getByRole('button', { name: 'Log in' }))
+    await user.click(screen.getByRole('button', { name: 'Sign in' }))
     await screen.findByRole('alert')
 
-    await user.click(screen.getByRole('button', { name: 'Register' }))
+    await user.click(screen.getByRole('button', { name: 'Sign up' }))
 
-    expect(await landingPage('Register')).toBeInTheDocument()
+    expect(await landingPage('Sign up')).toBeInTheDocument()
+    expect(screen.getByText('Already signed up?', { exact: false })).toContainElement(
+      screen.getByRole('button', { name: 'Sign in' }),
+    )
     expect(screen.getByLabelText(/^email/i)).toHaveValue('me@example.com')
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
@@ -5401,7 +5405,7 @@ describe('User menu', () => {
     await user.click(userButton())
     expect(userButton()).toHaveAttribute('aria-expanded', 'true')
     expect(screen.getByText(/signed in as/i)).toHaveTextContent('Signed in as me@example.com')
-    expect(screen.getByRole('button', { name: 'Log out' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Sign out' })).toBeInTheDocument()
 
     await user.keyboard('{Escape}')
     expect(screen.queryByText(/signed in as/i)).not.toBeInTheDocument()
@@ -5411,27 +5415,27 @@ describe('User menu', () => {
     expect(screen.queryByText(/signed in as/i)).not.toBeInTheDocument()
   })
 
-  it('logs out to the landing page, and logging in again starts afresh', async () => {
+  it('signs out to the landing page, and signing in again starts afresh', async () => {
     const user = userEvent.setup()
     await renderApp()
     await user.click(screen.getByRole('button', { name: 'Rules' }))
 
     await user.click(userButton())
-    await user.click(screen.getByRole('button', { name: 'Log out' }))
+    await user.click(screen.getByRole('button', { name: 'Sign out' }))
 
-    expect(await screen.findByRole('heading', { name: 'Log in' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Sign in' })).toBeInTheDocument()
     expect(screen.queryByRole('navigation')).not.toBeInTheDocument()
-    expect(fetchMock).toHaveBeenCalledWith('/api/user/log-out', { method: 'POST' })
+    expect(fetchMock).toHaveBeenCalledWith('/api/user/sign-out', { method: 'POST' })
 
     await user.type(screen.getByLabelText(/^email/i), 'me@example.com')
     await user.type(screen.getByLabelText(/^password/i), 'my long passphrase')
-    await user.click(screen.getByRole('button', { name: 'Log in' }))
+    await user.click(screen.getByRole('button', { name: 'Sign in' }))
     await screen.findByRole('navigation')
     expect(screen.getByRole('button', { name: 'Rules' })).not.toHaveAttribute('aria-current')
     expect(screen.getByRole('button', { name: 'Add transaction' })).toBeVisible()
   })
 
-  it('sends none of the remaining Bank Statements of an Upload after logging out', async () => {
+  it('sends none of the remaining Bank Statements of an Upload after signing out', async () => {
     const responders: ((response: Response) => void)[] = []
     handleUpload = () => new Promise((resolve) => responders.push(resolve))
     const user = userEvent.setup()
@@ -5440,8 +5444,8 @@ describe('User menu', () => {
     await user.upload(screen.getByLabelText(/bank statement pdf/i), [statementPdf, statementPdf])
     await waitFor(() => expect(responders).toHaveLength(1))
     await user.click(userButton())
-    await user.click(screen.getByRole('button', { name: 'Log out' }))
-    await screen.findByRole('heading', { name: 'Log in' })
+    await user.click(screen.getByRole('button', { name: 'Sign out' }))
+    await screen.findByRole('heading', { name: 'Sign in' })
 
     responders[0](Response.json(importedStatement, { status: 201 }))
     // Lets the finished upload's continuation run, which would send the next one.
@@ -5449,15 +5453,15 @@ describe('User menu', () => {
     expect(responders).toHaveLength(1)
   })
 
-  it('stays signed in, saying so, when logging out fails', async () => {
-    handleLogOut = () => new Response(null, { status: 500 })
+  it('stays signed in, saying so, when signing out fails', async () => {
+    handleSignOut = () => new Response(null, { status: 500 })
     const user = userEvent.setup()
     await renderApp()
 
     await user.click(userButton())
-    await user.click(screen.getByRole('button', { name: 'Log out' }))
+    await user.click(screen.getByRole('button', { name: 'Sign out' }))
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('Logging out failed. Try again.')
+    expect(await screen.findByRole('alert')).toHaveTextContent('Signing out failed. Try again.')
     expect(screen.getByRole('navigation')).toBeInTheDocument()
   })
 })
@@ -5477,22 +5481,22 @@ describe('Guest notice', () => {
     expect(guestNotice()).toBeInTheDocument()
   })
 
-  it('is not shown to a registered User', async () => {
+  it('is not shown to a User who signed up', async () => {
     await renderApp()
 
     expect(guestNotice()).not.toBeInTheDocument()
   })
 
-  it('goes with the Guest when the Guest logs out and a User logs in', async () => {
+  it('goes with the Guest when the Guest signs out and a User signs in', async () => {
     currentUser = guest
     const user = userEvent.setup()
     await renderApp()
 
     await user.click(screen.getByRole('button', { name: 'User' }))
-    await user.click(screen.getByRole('button', { name: 'Log out' }))
+    await user.click(screen.getByRole('button', { name: 'Sign out' }))
     await user.type(await screen.findByLabelText(/^email/i), 'me@example.com')
     await user.type(screen.getByLabelText(/^password/i), 'my long passphrase')
-    await user.click(screen.getByRole('button', { name: 'Log in' }))
+    await user.click(screen.getByRole('button', { name: 'Sign in' }))
     await screen.findByRole('navigation')
 
     expect(guestNotice()).not.toBeInTheDocument()
@@ -5500,7 +5504,7 @@ describe('Guest notice', () => {
 })
 
 describe('Signed out mid-session', () => {
-  it('returns to the landing page when a call answers 401, and logging in again starts afresh', async () => {
+  it('returns to the landing page when a call answers 401, and signing in again starts afresh', async () => {
     const user = userEvent.setup()
     await renderApp()
     await user.click(screen.getByRole('button', { name: 'Rules' }))
@@ -5508,13 +5512,13 @@ describe('Signed out mid-session', () => {
 
     await user.click(screen.getByRole('button', { name: 'Categories' }))
 
-    expect(await screen.findByRole('heading', { name: 'Log in' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Sign in' })).toBeInTheDocument()
     expect(screen.queryByRole('navigation')).not.toBeInTheDocument()
 
     categoriesServed = categories
     await user.type(screen.getByLabelText(/^email/i), 'me@example.com')
     await user.type(screen.getByLabelText(/^password/i), 'my long passphrase')
-    await user.click(screen.getByRole('button', { name: 'Log in' }))
+    await user.click(screen.getByRole('button', { name: 'Sign in' }))
     await screen.findByRole('navigation')
     expect(screen.getByRole('button', { name: 'Categories' })).not.toHaveAttribute('aria-current')
     expect(screen.getByRole('button', { name: 'Add transaction' })).toBeVisible()
@@ -5572,10 +5576,10 @@ describe('Antiforgery token', () => {
     await screen.findByRole('status')
 
     await user.click(screen.getByRole('button', { name: 'User' }))
-    await user.click(screen.getByRole('button', { name: 'Log out' }))
+    await user.click(screen.getByRole('button', { name: 'Sign out' }))
     await user.type(await screen.findByLabelText(/^email/i), 'other@example.com')
     await user.type(screen.getByLabelText(/^password/i), 'my long passphrase')
-    await user.click(screen.getByRole('button', { name: 'Log in' }))
+    await user.click(screen.getByRole('button', { name: 'Sign in' }))
     await screen.findByRole('navigation')
     await user.upload(screen.getByLabelText(/bank statement pdf/i), statementPdf)
     await screen.findByRole('status')
