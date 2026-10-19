@@ -98,9 +98,10 @@ export interface CredentialsRequest {
 
 export type CredentialsFieldErrors = Partial<Record<keyof CredentialsRequest, string>>
 
+// lockedOut is true when the email is locked after too many failed sign-ins.
 export type SubmitCredentialsResult =
   | { ok: true; user: User }
-  | { ok: false; fieldErrors: CredentialsFieldErrors; message: string | null }
+  | { ok: false; fieldErrors: CredentialsFieldErrors; message: string | null; lockedOut?: boolean }
 
 // A wrong email or password gets one message that doesn't say which was wrong; a locked email gets
 // a message of its own.
@@ -147,7 +148,7 @@ async function submitCredentials(
   if (response.status === 400 || response.status === 401 || response.status === 429) {
     const { fieldErrors, detail } = await readProblem<CredentialsRequest>(response)
     if (Object.keys(fieldErrors).length > 0) return { ok: false, fieldErrors, message: null }
-    if (detail) return { ok: false, fieldErrors: {}, message: detail }
+    if (detail) return { ok: false, fieldErrors: {}, message: detail, lockedOut: response.status === 429 }
   }
 
   return { ok: false, fieldErrors: {}, message: `${action} failed (${response.status}).` }
@@ -162,6 +163,48 @@ export async function continueAsGuest(): Promise<ContinueAsGuestResult> {
   if (!response) return { ok: false, message: UNREACHABLE }
   if (!response.ok) return { ok: false, message: `Continuing as Guest failed (${response.status}).` }
   return { ok: true, user: (await response.json()) as User }
+}
+
+// Whether Password reset is available, meaning the server can send email. Anything but a clear yes,
+// a server that can't be reached included, counts as unavailable, so the landing page never offers
+// a reset that can't work.
+export async function fetchPasswordResetAvailable(): Promise<boolean> {
+  try {
+    const response = await fetch('/api/user/password-reset/availability')
+    if (!response.ok) return false
+    return ((await response.json()) as { available: boolean }).available === true
+  } catch {
+    return false
+  }
+}
+
+export type RequestPasswordResetResult =
+  | { ok: true }
+  | { ok: false; fieldErrors: { email?: string }; message: string | null }
+
+// Asks for a link to choose a new password to be emailed. The server answers the same for every
+// email, whether or not it is a User's, so success says only that the request was taken. Sent as
+// JSON, which the server requires, like Sign in.
+export async function requestPasswordReset(email: string): Promise<RequestPasswordResetResult> {
+  let response: Response
+  try {
+    response = await fetch('/api/user/password-reset/request', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email }),
+    })
+  } catch {
+    return { ok: false, fieldErrors: {}, message: UNREACHABLE }
+  }
+  if (response.ok) return { ok: true }
+
+  // 400 is a validation problem for the email, and 503 means email can't be sent at all.
+  if (response.status === 400) {
+    const { fieldErrors } = await readProblem<{ email: string }>(response)
+    if (Object.keys(fieldErrors).length > 0) return { ok: false, fieldErrors, message: null }
+  }
+  if (response.status === 503) return { ok: false, fieldErrors: {}, message: 'Password reset is unavailable.' }
+  return { ok: false, fieldErrors: {}, message: `Sending the link failed (${response.status}).` }
 }
 
 // Ends the sign-in. Resolves false when the server couldn't be told, so the User is still signed in.

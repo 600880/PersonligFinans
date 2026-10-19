@@ -3,6 +3,7 @@ using PersonligFinans.Api.BankStatements;
 using PersonligFinans.Api.Categories;
 using PersonligFinans.Api.CategorizationRules;
 using PersonligFinans.Api.Data;
+using PersonligFinans.Api.Emails;
 using PersonligFinans.Api.Receipts;
 using PersonligFinans.Api.Spending;
 using PersonligFinans.Api.Transactions;
@@ -12,6 +13,7 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddDatabase(builder.Configuration);
 builder.Services.AddRuleGenerator(builder.Configuration);
+builder.Services.AddEmail(builder.Configuration);
 builder.Services.AddUsers();
 builder.Services.AddAntiforgeryTokens();
 builder.Services.AddAiRequestLedger(builder.Configuration);
@@ -38,6 +40,7 @@ app.UseAntiforgery();
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok" })).AllowAnonymous();
 app.MapUserEndpoints();
+app.MapPasswordResetEndpoints();
 app.MapAntiforgeryTokenEndpoint();
 app.MapTransactionEndpoints();
 app.MapCategoryEndpoints();

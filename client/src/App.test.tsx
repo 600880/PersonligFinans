@@ -80,6 +80,10 @@ let handleSignIn: PostHandler
 let handleSignUp: PostHandler
 let handleContinueAsGuest: () => Response
 let handleSignOut: () => Response
+// Whether Password reset is available, meaning the server has an email sender: not unless a test
+// says so, as when developing locally.
+let passwordResetAvailability: { available: boolean } | Response
+let handleRequestPasswordReset: PostHandler
 // How many antiforgery tokens the server has given. Each is new: token-1, token-2 and so on.
 let antiforgeryTokensGiven: number
 const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
@@ -90,6 +94,12 @@ const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
   if (url === '/api/user/sign-up' && init?.method === 'POST') return handleSignUp(JSON.parse(init.body as string))
   if (url === '/api/user/continue-as-guest' && init?.method === 'POST') return handleContinueAsGuest()
   if (url === '/api/user/sign-out' && init?.method === 'POST') return handleSignOut()
+  if (url === '/api/user/password-reset/availability') {
+    return passwordResetAvailability instanceof Response ? passwordResetAvailability : Response.json(passwordResetAvailability)
+  }
+  if (url === '/api/user/password-reset/request' && init?.method === 'POST') {
+    return handleRequestPasswordReset(JSON.parse(init.body as string))
+  }
   if (url === '/api/antiforgery-token') return Response.json({ token: `token-${++antiforgeryTokensGiven}` })
   const monthlyUrl =
     /^\/api\/spending\/monthly\?fromYear=(\d+)&fromMonth=(\d+)&toYear=(\d+)&toMonth=(\d+)(&includeTransfers=true)?$/.exec(url)
@@ -190,6 +200,8 @@ beforeEach(() => {
   handleContinueAsGuest = () => Response.json(guest)
   handleSignOut = () => new Response(null, { status: 204 })
   antiforgeryTokensGiven = 0
+  passwordResetAvailability = { available: false }
+  handleRequestPasswordReset = () => new Response(null, { status: 204 })
   vi.stubGlobal('fetch', fetchMock)
 })
 
@@ -5259,7 +5271,9 @@ describe('Signing in', () => {
     expect(screen.getByText('New user?', { exact: false })).toContainElement(screen.getByRole('button', { name: 'Sign up' }))
     expect(screen.getByText('Or try the app first, without signing up.')).toBeInTheDocument()
     expect(screen.queryByRole('navigation')).not.toBeInTheDocument()
-    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(['/api/user'])
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(['/api/user', '/api/user/password-reset/availability']),
+    )
   })
 
   it('shows neither the landing page nor the app while asking who is signed in', async () => {
@@ -5351,7 +5365,7 @@ describe('Signing in', () => {
     await user.click(screen.getByRole('button', { name: 'Sign up' }))
 
     expect(await screen.findByText("Passwords don't match")).toBeInTheDocument()
-    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(['/api/user'])
+    expect(fetchMock.mock.calls.map(([url]) => url)).not.toContain('/api/user/sign-up')
     expect(screen.queryByRole('navigation')).not.toBeInTheDocument()
   })
 
@@ -5554,6 +5568,139 @@ describe('Guest notice', () => {
     await screen.findByRole('navigation')
 
     expect(guestNotice()).not.toBeInTheDocument()
+  })
+})
+
+describe('Password reset', () => {
+  const ANSWER = "If that email is in use, we've sent a link to it. It works for 1 hour."
+
+  async function renderLandingPage() {
+    currentUser = new Response(null, { status: 401 })
+    render(<App />)
+    await screen.findByRole('heading', { name: 'Sign in' })
+  }
+
+  function forgotLink() {
+    return screen.queryByRole('button', { name: 'Forgot your password?' })
+  }
+
+  // The form that asks for a link to choose a new password.
+  function resetForm() {
+    return screen.getByRole('region', { name: 'Reset your password' })
+  }
+
+  it('offers "Forgot your password?" under Sign in when Password reset is available', async () => {
+    passwordResetAvailability = { available: true }
+    await renderLandingPage()
+
+    expect(await screen.findByRole('button', { name: 'Forgot your password?' })).toBeInTheDocument()
+  })
+
+  it.each([
+    ['unavailable', { available: false }],
+    ['unknown', new Response(null, { status: 500 })],
+  ])('offers no "Forgot your password?" when Password reset is %s', async (_, availability) => {
+    passwordResetAvailability = availability
+    await renderLandingPage()
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/user/password-reset/availability'))
+    await act(async () => {})
+    expect(forgotLink()).not.toBeInTheDocument()
+  })
+
+  it('offers "Forgot your password?" under Sign in only, not Sign up', async () => {
+    passwordResetAvailability = { available: true }
+    const user = userEvent.setup()
+    await renderLandingPage()
+    await screen.findByRole('button', { name: 'Forgot your password?' })
+
+    await user.click(screen.getByRole('button', { name: 'Sign up' }))
+
+    expect(await screen.findByRole('heading', { name: 'Sign up' })).toBeInTheDocument()
+    expect(forgotLink()).not.toBeInTheDocument()
+  })
+
+  it('asks for a link to the email typed into Sign in, and gives the same answer whatever the email', async () => {
+    passwordResetAvailability = { available: true }
+    const user = userEvent.setup()
+    await renderLandingPage()
+    await user.type(screen.getByLabelText(/^email/i), 'me@example.com')
+
+    await user.click(await screen.findByRole('button', { name: 'Forgot your password?' }))
+
+    expect(screen.queryByRole('heading', { name: 'Sign in' })).not.toBeInTheDocument()
+    expect(within(resetForm()).getByLabelText(/^email/i)).toHaveValue('me@example.com')
+    expect(within(resetForm()).queryByLabelText(/^password/i)).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Send link' }))
+
+    expect(await screen.findByRole('status')).toHaveTextContent(ANSWER)
+    const request = fetchMock.mock.calls.find(([url]) => url === '/api/user/password-reset/request')
+    expect(request?.[1]?.headers).toEqual({ 'Content-Type': 'application/json' })
+    expect(JSON.parse(request?.[1]?.body as string)).toEqual({ email: 'me@example.com' })
+  })
+
+  it('shows the field error of a refused request under the email', async () => {
+    passwordResetAvailability = { available: true }
+    handleRequestPasswordReset = () => Response.json({ errors: { email: ['Email is required.'] } }, { status: 400 })
+    const user = userEvent.setup()
+    await renderLandingPage()
+    await user.click(await screen.findByRole('button', { name: 'Forgot your password?' }))
+
+    await user.click(screen.getByRole('button', { name: 'Send link' }))
+
+    expect(await screen.findByText('Email is required.')).toBeInTheDocument()
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+  })
+
+  it('goes back to Sign in with the email typed in', async () => {
+    passwordResetAvailability = { available: true }
+    const user = userEvent.setup()
+    await renderLandingPage()
+    await user.click(await screen.findByRole('button', { name: 'Forgot your password?' }))
+    await user.type(within(resetForm()).getByLabelText(/^email/i), 'me@example.com')
+
+    await user.click(screen.getByRole('button', { name: 'Back to Sign in' }))
+
+    expect(screen.getByRole('heading', { name: 'Sign in' })).toBeInTheDocument()
+    expect(screen.getByLabelText(/^email/i)).toHaveValue('me@example.com')
+    expect(screen.getByLabelText(/^password/i)).toBeInTheDocument()
+  })
+
+  it.each([
+    [true, 'Too many failed sign-ins, so this email is locked for a few minutes. Try again later, or reset your password.'],
+    [false, 'Too many failed sign-ins, so this email is locked for a few minutes. Try again later.'],
+  ])('says a locked email can be reset only when Password reset is available (%s)', async (available, message) => {
+    passwordResetAvailability = { available }
+    handleSignIn = () =>
+      Response.json(
+        { detail: 'Too many failed sign-ins, so this email is locked for a few minutes. Try again later.' },
+        { status: 429 },
+      )
+    const user = userEvent.setup()
+    await renderLandingPage()
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/user/password-reset/availability'))
+    await act(async () => {})
+
+    await user.type(screen.getByLabelText(/^email/i), 'me@example.com')
+    await user.type(screen.getByLabelText(/^password/i), 'wrong password')
+    await user.click(screen.getByRole('button', { name: 'Sign in' }))
+
+    expect((await screen.findByRole('alert')).textContent).toBe(message)
+  })
+
+  it('says nothing about resetting for a wrong password, even when Password reset is available', async () => {
+    passwordResetAvailability = { available: true }
+    handleSignIn = () => Response.json({ detail: 'Wrong email or password.' }, { status: 401 })
+    const user = userEvent.setup()
+    await renderLandingPage()
+    await screen.findByRole('button', { name: 'Forgot your password?' })
+
+    await user.type(screen.getByLabelText(/^email/i), 'me@example.com')
+    await user.type(screen.getByLabelText(/^password/i), 'wrong password')
+    await user.click(screen.getByRole('button', { name: 'Sign in' }))
+
+    expect((await screen.findByRole('alert')).textContent).toBe('Wrong email or password.')
   })
 })
 

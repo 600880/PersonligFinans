@@ -9,6 +9,7 @@ public static class UserSetup
     public const int MinPasswordLength = 8;
     public const int MaxFailedSignIns = 5;
     public static readonly TimeSpan LockoutDuration = TimeSpan.FromMinutes(5);
+    public static readonly TimeSpan PasswordResetLinkLifespan = TimeSpan.FromHours(1);
 
     // Users sign in with ASP.NET Core Identity, stored in the app's database, and stay signed in
     // through Identity's application cookie. The client is served from the same origin as the API,
@@ -20,7 +21,6 @@ public static class UserSetup
         // clears.
         services.AddAuthentication(IdentityConstants.ApplicationScheme).AddIdentityCookies();
 
-        // No email confirmation, password reset or email sender, so no token providers either.
         services.AddIdentityCore<IdentityUser>(options =>
             {
                 // A long passphrase is as good as any symbol rule, so length is all that counts.
@@ -42,7 +42,17 @@ public static class UserSetup
                 options.Lockout.AllowedForNewUsers = true;
             })
             .AddEntityFrameworkStores<AppDbContext>()
-            .AddSignInManager();
+            .AddSignInManager()
+            // The Password reset's token, the only token the app gives out: there is no email
+            // confirmation, two-factor sign-in or change of email. So only the data-protection
+            // provider is registered, as the default provider the reset uses, rather than Identity's
+            // whole set of default providers.
+            .AddTokenProvider<DataProtectorTokenProvider<IdentityUser>>(TokenOptions.DefaultProvider);
+
+        // A link to choose a new password works for an hour. These options cover every
+        // data-protection token, and only the Password reset gives any out.
+        services.Configure<DataProtectionTokenProviderOptions>(options =>
+            options.TokenLifespan = PasswordResetLinkLifespan);
 
         services.ConfigureApplicationCookie(options =>
         {
