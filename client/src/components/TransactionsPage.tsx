@@ -5,6 +5,7 @@ import {
   addFolder,
   changeTransactionCategory,
   changeTransactionNote,
+  deleteFolder,
   deleteTransaction,
   fetchBookmarks,
   fetchCategories,
@@ -13,6 +14,7 @@ import {
   fetchTransactionMonths,
   fetchTransactions,
   removeBookmark,
+  renameFolder,
   type Category,
   type Folder,
   type SaveFolderResult,
@@ -28,7 +30,7 @@ import { currentMonth, MONTH_NAMES } from '../lib/month'
 import { periodLabel, periodValue, type Period } from '../lib/period'
 import { firstMonthWithTransactions, monthsOfQuarter } from '../lib/quarter'
 import { BookmarkAddedPopup } from './BookmarkAddedPopup'
-import { FolderDropdown } from './FolderDropdown'
+import { FolderDropdown, FolderNameForm } from './FolderDropdown'
 import { ErrorMessage, StatusMessage } from './Messages'
 
 const LOAD_ERROR = 'Could not load the transactions.'
@@ -56,6 +58,10 @@ const LISTS: { list: List; label: string }[] = [
   { list: 'all', label: 'All' },
   { list: 'bookmarks', label: 'Bookmarks' },
 ]
+
+// What is open for the chosen Folder in the Bookmarks view: its name field, or its delete
+// confirmation.
+type FolderAction = 'rename' | 'delete'
 
 // A Period's Transactions, remembered with the Period they were loaded for.
 interface LoadedPeriod {
@@ -101,8 +107,8 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
   // with Transactions, decides the one the page opens on.
   const [selected, setSelected] = useState<YearOrMonth | null>(null)
   const [loaded, setLoaded] = useState<LoadedPeriod | null>(null)
-  // Set when a Transaction is deleted while Bookmarks is shown, so the Period and the months are
-  // loaded again the next time All is shown.
+  // Set when a Transaction, or a Folder with its Bookmarks, is deleted while Bookmarks is shown, so the
+  // Period and the months are loaded again the next time All is shown, with every star as it now is.
   const [isAllStale, setIsAllStale] = useState(false)
   // The chosen Folder's bookmarked Transactions while Bookmarks is shown; null while they load, and
   // while All is shown, so choosing Bookmarks or a Folder always loads them afresh. A row whose Bookmark is removed stays, with
@@ -113,6 +119,9 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
   // The User's Folders, in the API's order. Null until first needed and loaded, then kept for the
   // rest of the visit to the page.
   const [folders, setFolders] = useState<Folder[] | null>(null)
+  // What is open for the chosen Folder, if anything, and whether its delete is being saved.
+  const [folderAction, setFolderAction] = useState<FolderAction | null>(null)
+  const [isDeletingFolder, setIsDeletingFolder] = useState(false)
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   // The Transactions whose Category is being saved. Their selects are disabled until it is, so a
@@ -222,16 +231,24 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
       ? bookmarks
       : (transactions?.filter((t) => matchesCategory(t, categoryFilter) && matchesSearch(t, search)) ?? null)
 
+  // Closes any open Note editor, delete confirmation or "Bookmark added" popup, and the chosen Folder's
+  // name field or delete confirmation.
+  function closeOpenActions() {
+    setConfirmingDeleteId(null)
+    setEditingNoteId(null)
+    setPopupId(null)
+    setFolderAction(null)
+  }
+
   // The Year, Month, Category and Search are kept while Bookmarks is shown, and so is the Period's
-  // list, so All comes back as it was left: unless a Transaction was deleted meanwhile, when the
-  // Period and the months are loaded again. Bookmarks always opens on the bookmarks in no Folder.
+  // list, so All comes back as it was left: unless a Transaction or a Folder was deleted meanwhile,
+  // when the Period and the months are loaded again. Bookmarks always opens on the bookmarks in no
+  // Folder.
   function chooseList(next: List) {
     if (next === list) return
     setStatusMessage(null)
     setErrorMessage(null)
-    setConfirmingDeleteId(null)
-    setEditingNoteId(null)
-    setPopupId(null)
+    closeOpenActions()
     setBookmarks(null)
     setChosenFolderId(null)
     if (next === 'all' && isAllStale) {
@@ -254,9 +271,7 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
   function chooseFolder(folderId: number | null) {
     setStatusMessage(null)
     setErrorMessage(null)
-    setConfirmingDeleteId(null)
-    setEditingNoteId(null)
-    setPopupId(null)
+    closeOpenActions()
     setBookmarks(null)
     setChosenFolderId(folderId)
   }
@@ -276,28 +291,66 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
     return result
   }
 
+  // Opens the chosen Folder's name field or delete confirmation, closing whatever else is open.
+  function openFolderAction(action: FolderAction) {
+    setStatusMessage(null)
+    setErrorMessage(null)
+    closeOpenActions()
+    setFolderAction(action)
+  }
+
+  // Moves the renamed Folder to its place in the API's order, still chosen.
+  async function renameChosenFolder(folder: Folder, name: string): Promise<SaveFolderResult> {
+    setStatusMessage(null)
+    setErrorMessage(null)
+    const result = await renameFolder(folder.id, name)
+    if (result.ok) {
+      setFolders(
+        (current) => current && inFolderOrder(current.map((f) => (f.id === result.folder.id ? result.folder : f))),
+      )
+      setFolderAction(null)
+      setStatusMessage('Folder renamed')
+    } else {
+      setErrorMessage(result.message)
+    }
+    return result
+  }
+
+  // Shows "Bookmarks" once the Folder is deleted. Its Bookmarks went with it, so All's stars for their
+  // Transactions are out of date until All is loaded again.
+  async function deleteChosenFolder(folder: Folder) {
+    if (isDeletingFolder) return
+
+    setIsDeletingFolder(true)
+    const result = await deleteFolder(folder.id).finally(() => setIsDeletingFolder(false))
+    setFolderAction(null)
+
+    if (result.ok) {
+      setFolders((current) => current && current.filter((f) => f.id !== folder.id))
+      chooseFolder(null)
+      setStatusMessage(result.alreadyDeleted ? 'The folder was already deleted.' : 'Folder deleted')
+      setIsAllStale(true)
+    } else {
+      setErrorMessage(result.message)
+    }
+  }
+
   function choosePeriod(period: YearOrMonth) {
     setStatusMessage(null)
     setErrorMessage(null)
-    setConfirmingDeleteId(null)
-    setEditingNoteId(null)
-    setPopupId(null)
+    closeOpenActions()
     setSelected(period)
   }
 
   // Changing the filter or search may hide the row whose inline editor or popup is open, so close
   // them all.
   function chooseCategoryFilter(value: string) {
-    setConfirmingDeleteId(null)
-    setEditingNoteId(null)
-    setPopupId(null)
+    closeOpenActions()
     setCategoryFilter(value)
   }
 
   function chooseSearch(value: string) {
-    setConfirmingDeleteId(null)
-    setEditingNoteId(null)
-    setPopupId(null)
+    closeOpenActions()
     setSearch(value)
   }
 
@@ -387,6 +440,7 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
     setStatusMessage(null)
     setErrorMessage(null)
     setConfirmingDeleteId(null)
+    setFolderAction(null)
     setEditingNoteId(transaction.id)
     setNoteDraft(transaction.note ?? '')
   }
@@ -412,6 +466,7 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
     setStatusMessage(null)
     setErrorMessage(null)
     setEditingNoteId(null)
+    setFolderAction(null)
     setConfirmingDeleteId(transaction.id)
   }
 
@@ -461,12 +516,64 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
 
       {list === 'bookmarks' && (
         <div className="mt-4 flex flex-wrap gap-3">
-          <FolderDropdown
-            folders={folders}
-            chosenId={chosenFolderId}
-            onChoose={chooseFolder}
-            createFolder={createFolder}
-          />
+          {chosenFolder && folderAction === 'rename' ? (
+            <FolderNameForm
+              initialName={chosenFolder.name}
+              submitLabel="Save"
+              save={(name) => renameChosenFolder(chosenFolder, name)}
+              onCancel={() => setFolderAction(null)}
+            />
+          ) : (
+            <FolderDropdown
+              folders={folders}
+              chosenId={chosenFolderId}
+              onChoose={chooseFolder}
+              createFolder={createFolder}
+            >
+              {chosenFolder && (
+                <div className="flex items-end gap-2">
+                  <button
+                    type="button"
+                    disabled={isDeletingFolder}
+                    onClick={() => openFolderAction('rename')}
+                    className={smallButtonClass}
+                  >
+                    Rename
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isDeletingFolder}
+                    onClick={() => openFolderAction('delete')}
+                    className={smallButtonClass}
+                  >
+                    Delete
+                  </button>
+                </div>
+              )}
+            </FolderDropdown>
+          )}
+        </div>
+      )}
+
+      {list === 'bookmarks' && chosenFolder && folderAction === 'delete' && (
+        <div className="mt-3 flex flex-wrap items-center justify-end gap-2 rounded-lg bg-red-50 px-3 py-2 text-sm">
+          <span className="mr-auto text-red-800">Delete '{chosenFolder.name}' and its bookmarks?</span>
+          <button
+            type="button"
+            disabled={isDeletingFolder}
+            onClick={() => deleteChosenFolder(chosenFolder)}
+            className={smallButtonClass}
+          >
+            Confirm delete
+          </button>
+          <button
+            type="button"
+            disabled={isDeletingFolder}
+            onClick={() => setFolderAction(null)}
+            className={smallButtonClass}
+          >
+            Cancel
+          </button>
         </div>
       )}
 

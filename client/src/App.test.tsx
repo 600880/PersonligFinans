@@ -76,6 +76,8 @@ let handleListBookmarks: () => Response | Promise<Response>
 let handleListFolderBookmarks: (folderId: number) => Response | Promise<Response>
 let folders: { id: number; name: string }[] | Response
 let handleAddFolder: PostHandler
+let handleRenameFolder: (id: number, body: unknown) => Response | Promise<Response>
+let handleDeleteFolder: (id: number) => Response | Promise<Response>
 // What the categories endpoint returns: `categories` unless a test adds to it or makes it fail.
 let categoriesServed: ServedCategory[] | Response
 // The month or quarter is undefined when the Spending of a whole year, or of a quarter, is asked for.
@@ -149,6 +151,9 @@ const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
   if (folderBookmarksUrl) return handleListFolderBookmarks(Number(folderBookmarksUrl[1]))
   if (url === '/api/folders' && init?.method === 'POST') return handleAddFolder(JSON.parse(init.body as string))
   if (url === '/api/folders') return folders instanceof Response ? folders : Response.json(folders)
+  const folderUrl = /^\/api\/folders\/(\d+)$/.exec(url)
+  if (folderUrl && init?.method === 'PUT') return handleRenameFolder(Number(folderUrl[1]), JSON.parse(init.body as string))
+  if (folderUrl && init?.method === 'DELETE') return handleDeleteFolder(Number(folderUrl[1]))
   const transactionUrl = /^\/api\/transactions\/(\d+)$/.exec(url)
   if (transactionUrl && init?.method === 'DELETE') return handleDeleteTransaction(Number(transactionUrl[1]))
   if (url === '/api/transactions/months') {
@@ -220,6 +225,8 @@ beforeEach(() => {
   handleListFolderBookmarks = () => Response.json([])
   folders = []
   handleAddFolder = (body) => Response.json({ id: 30, ...(body as object) }, { status: 201 })
+  handleRenameFolder = (id, body) => Response.json({ id, ...(body as object) })
+  handleDeleteFolder = () => new Response(null, { status: 204 })
   handleSpending = () => Response.json({ total: 0, slices: [] })
   handleMonthlySpending = (from, to) => Response.json(monthlySpending(from, to))
   categoriesServed = categories
@@ -3380,6 +3387,242 @@ describe('Transactions page', () => {
 
           expect(await screen.findByRole('alert')).toHaveTextContent('Saving failed (500).')
           expect(nameField()).toHaveValue('Receipts')
+        })
+      })
+
+      it('offers Rename and Delete only while a Folder is chosen', async () => {
+        const user = await showBookmarksWithFolders()
+        expect(screen.queryByRole('button', { name: 'Rename' })).not.toBeInTheDocument()
+        expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument()
+
+        await user.selectOptions(folderSelect(), 'Warranty')
+        await screen.findByRole('cell', { name: 'Power' })
+
+        expect(screen.getByRole('button', { name: 'Rename' })).toBeInTheDocument()
+        expect(screen.getByRole('button', { name: 'Delete' })).toBeInTheDocument()
+
+        await user.selectOptions(folderSelect(), 'Bookmarks')
+        await screen.findByRole('cell', { name: 'Elkjøp' })
+
+        expect(screen.queryByRole('button', { name: 'Rename' })).not.toBeInTheDocument()
+        expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument()
+      })
+
+      // Bookmarks shown, with the Warranty Folder chosen and its bookmarks listed.
+      async function showWarranty() {
+        const user = await showBookmarksWithFolders()
+        await user.selectOptions(folderSelect(), 'Warranty')
+        await screen.findByRole('cell', { name: 'Power' })
+        return user
+      }
+
+      it('closes the open popup, Note editor or delete confirmation when Rename or Delete opens', async () => {
+        const user = await showWarranty()
+        const folderDeleteQuestion = "Delete 'Warranty' and its bookmarks?"
+        await user.click(screen.getByRole('button', { name: 'Remove bookmark for Power' }))
+        await user.click(await screen.findByRole('button', { name: 'Bookmark Power' }))
+        await screen.findByRole('dialog', { name: 'Bookmark added' })
+
+        await user.click(screen.getByRole('button', { name: 'Delete' }))
+
+        expect(screen.queryByRole('dialog', { name: 'Bookmark added' })).not.toBeInTheDocument()
+        expect(screen.getByText(folderDeleteQuestion)).toBeInTheDocument()
+
+        await user.click(screen.getByRole('button', { name: 'Add note for Power' }))
+
+        expect(screen.queryByText(folderDeleteQuestion)).not.toBeInTheDocument()
+
+        await user.click(screen.getByRole('button', { name: 'Delete' }))
+
+        expect(screen.queryByRole('textbox', { name: 'Note' })).not.toBeInTheDocument()
+
+        await user.click(screen.getByRole('button', { name: 'Delete Power' }))
+        await user.click(screen.getByRole('button', { name: 'Delete' }))
+
+        expect(screen.queryByText(/Delete "Power"/)).not.toBeInTheDocument()
+
+        await user.click(screen.getByRole('button', { name: 'Rename' }))
+
+        expect(screen.queryByText(folderDeleteQuestion)).not.toBeInTheDocument()
+        expect(screen.getByRole('textbox', { name: 'Folder name' })).toHaveValue('Warranty')
+      })
+
+      it('closes Rename or Delete when another option is chosen or All is shown', async () => {
+        const user = await showWarranty()
+        await user.click(screen.getByRole('button', { name: 'Delete' }))
+
+        await user.selectOptions(folderSelect(), 'Tax deductible')
+
+        expect(await screen.findByText('No bookmarks in Tax deductible')).toBeInTheDocument()
+        expect(screen.queryByText(/and its bookmarks\?/)).not.toBeInTheDocument()
+
+        await user.click(screen.getByRole('button', { name: 'Rename' }))
+        await user.click(switchButton('All'))
+        await showBookmarks(user)
+        await screen.findByRole('cell', { name: 'Elkjøp' })
+        await user.selectOptions(folderSelect(), 'Tax deductible')
+
+        expect(await screen.findByText('No bookmarks in Tax deductible')).toBeInTheDocument()
+        expect(screen.queryByRole('textbox', { name: 'Folder name' })).not.toBeInTheDocument()
+        expect(screen.getByRole('button', { name: 'Rename' })).toBeInTheDocument()
+      })
+
+      describe('renaming a Folder', () => {
+        function nameField() {
+          return screen.getByRole('textbox', { name: 'Folder name' })
+        }
+
+        it('swaps the dropdown for the name, and moves the renamed Folder to its place A–Z, still chosen', async () => {
+          const renamed: [number, unknown][] = []
+          handleRenameFolder = (id, body) => {
+            renamed.push([id, body])
+            return Response.json({ id, name: 'Abonnement' })
+          }
+          const user = await showWarranty()
+
+          await user.click(screen.getByRole('button', { name: 'Rename' }))
+
+          expect(screen.queryByLabelText('Folder')).not.toBeInTheDocument()
+          expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument()
+          expect(nameField()).toHaveValue('Warranty')
+          expect(nameField()).toHaveFocus()
+          expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument()
+
+          await user.clear(nameField())
+          await user.type(nameField(), ' Abonnement ')
+          await user.click(screen.getByRole('button', { name: 'Save' }))
+
+          expect(await screen.findByRole('status')).toHaveTextContent('Folder renamed')
+          expect(renamed).toEqual([[21, { name: 'Abonnement' }]])
+          expect(folderSelect()).toHaveDisplayValue('Abonnement')
+          expect(folderOptions()).toEqual(['Bookmarks', 'Abonnement', 'Tax deductible', 'Create folder'])
+          expect(listedDescriptions()).toEqual(['Power'])
+          expect(screen.queryByRole('textbox', { name: 'Folder name' })).not.toBeInTheDocument()
+        })
+
+        it('shows a field error under the name field and keeps the input', async () => {
+          handleRenameFolder = () =>
+            Response.json({ errors: { name: ["A folder named 'Tax deductible' already exists."] } }, { status: 400 })
+          const user = await showWarranty()
+          await user.click(screen.getByRole('button', { name: 'Rename' }))
+          await user.clear(nameField())
+          await user.type(nameField(), 'tax deductible')
+
+          await user.click(screen.getByRole('button', { name: 'Save' }))
+
+          expect(await screen.findByText("A folder named 'Tax deductible' already exists.")).toBeInTheDocument()
+          expect(nameField()).toHaveAccessibleDescription("A folder named 'Tax deductible' already exists.")
+          expect(nameField()).toHaveValue('tax deductible')
+          expect(screen.queryByLabelText('Folder')).not.toBeInTheDocument()
+          expect(screen.queryByText('Folder renamed')).not.toBeInTheDocument()
+        })
+
+        it('puts the name back on Cancel', async () => {
+          const user = await showWarranty()
+          await user.click(screen.getByRole('button', { name: 'Rename' }))
+          await user.clear(nameField())
+          await user.type(nameField(), 'Abonnement')
+
+          await user.click(screen.getByRole('button', { name: 'Cancel' }))
+
+          expect(folderSelect()).toHaveDisplayValue('Warranty')
+          expect(folderOptions()).toEqual(['Bookmarks', 'Tax deductible', 'Warranty', 'Create folder'])
+          expect(listedDescriptions()).toEqual(['Power'])
+          expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'PUT')).toEqual([])
+
+          await user.click(screen.getByRole('button', { name: 'Rename' }))
+
+          expect(nameField()).toHaveValue('Warranty')
+        })
+      })
+
+      describe('deleting a Folder', () => {
+        it('asks first, then deletes the Folder and shows "Bookmarks"', async () => {
+          const deleted: number[] = []
+          handleDeleteFolder = (id) => {
+            deleted.push(id)
+            return new Response(null, { status: 204 })
+          }
+          const user = await showWarranty()
+
+          await user.click(screen.getByRole('button', { name: 'Delete' }))
+
+          expect(screen.getByText("Delete 'Warranty' and its bookmarks?")).toBeInTheDocument()
+          expect(deleted).toEqual([])
+
+          await user.click(screen.getByRole('button', { name: 'Confirm delete' }))
+
+          expect(await screen.findByRole('status')).toHaveTextContent('Folder deleted')
+          expect(deleted).toEqual([21])
+          expect(folderSelect()).toHaveDisplayValue('Bookmarks')
+          expect(folderOptions()).toEqual(['Bookmarks', 'Tax deductible', 'Create folder'])
+          expect(await screen.findByRole('cell', { name: 'Elkjøp' })).toBeInTheDocument()
+          expect(listedDescriptions()).toEqual(['Rema 1000', 'Elkjøp'])
+          expect(screen.queryByText("Delete 'Warranty' and its bookmarks?")).not.toBeInTheDocument()
+          expect(screen.queryByRole('button', { name: 'Rename' })).not.toBeInTheDocument()
+        })
+
+        it('keeps the Folder on Cancel', async () => {
+          const user = await showWarranty()
+          await user.click(screen.getByRole('button', { name: 'Delete' }))
+
+          await user.click(screen.getByRole('button', { name: 'Cancel' }))
+
+          expect(screen.queryByText("Delete 'Warranty' and its bookmarks?")).not.toBeInTheDocument()
+          expect(folderSelect()).toHaveDisplayValue('Warranty')
+          expect(folderOptions()).toEqual(['Bookmarks', 'Tax deductible', 'Warranty', 'Create folder'])
+          expect(listedDescriptions()).toEqual(['Power'])
+          expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'DELETE')).toEqual([])
+        })
+
+        it('says so, keeping the Folder, when it could not be deleted', async () => {
+          handleDeleteFolder = () => new Response(null, { status: 500 })
+          const user = await showWarranty()
+          await user.click(screen.getByRole('button', { name: 'Delete' }))
+
+          await user.click(screen.getByRole('button', { name: 'Confirm delete' }))
+
+          expect(await screen.findByRole('alert')).toHaveTextContent('Deleting failed (500).')
+          expect(folderSelect()).toHaveDisplayValue('Warranty')
+          expect(folderOptions()).toEqual(['Bookmarks', 'Tax deductible', 'Warranty', 'Create folder'])
+          expect(listedDescriptions()).toEqual(['Power'])
+        })
+
+        it('says so when the Folder was already deleted, and shows "Bookmarks"', async () => {
+          handleDeleteFolder = () => new Response(null, { status: 404 })
+          const user = await showWarranty()
+          await user.click(screen.getByRole('button', { name: 'Delete' }))
+
+          await user.click(screen.getByRole('button', { name: 'Confirm delete' }))
+
+          expect(await screen.findByRole('status')).toHaveTextContent('The folder was already deleted.')
+          expect(folderSelect()).toHaveDisplayValue('Bookmarks')
+          expect(folderOptions()).toEqual(['Bookmarks', 'Tax deductible', 'Create folder'])
+        })
+
+        it('shows the stars of its bookmarks empty once All is shown again', async () => {
+          // Power, filed in Warranty, is in the Period All shows too.
+          let powerBookmarked = true
+          months = [{ year: 2026, month: 9 }]
+          handleListPeriod = () =>
+            Response.json([{ ...warrantyBookmarks[0], date: '2026-09-10', bookmarked: powerBookmarked }])
+          handleDeleteFolder = () => {
+            powerBookmarked = false
+            return new Response(null, { status: 204 })
+          }
+          const user = await openTransactionsPage()
+          await screen.findByRole('button', { name: 'Remove bookmark for Power' })
+          await showBookmarks(user)
+          await screen.findByRole('option', { name: 'Warranty' })
+          await user.selectOptions(folderSelect(), 'Warranty')
+          await screen.findByRole('cell', { name: 'Power' })
+          await user.click(screen.getByRole('button', { name: 'Delete' }))
+          await user.click(screen.getByRole('button', { name: 'Confirm delete' }))
+          await screen.findByText('Folder deleted')
+
+          await user.click(switchButton('All'))
+
+          expect(await screen.findByRole('button', { name: 'Bookmark Power' })).toHaveAttribute('aria-pressed', 'false')
         })
       })
     })

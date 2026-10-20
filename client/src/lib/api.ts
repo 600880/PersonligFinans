@@ -399,11 +399,21 @@ export type SaveFolderResult =
 
 // Creates a Folder. The server refuses a blank name, one already used ignoring case, or "Bookmarks",
 // with a field error on the name.
-export async function addFolder(name: string): Promise<SaveFolderResult> {
+export function addFolder(name: string): Promise<SaveFolderResult> {
+  return saveFolder('/api/folders', 'POST', name)
+}
+
+// Renames a Folder, with the same rules as creating one, except that its own name isn't taken, so
+// only its letter case can change.
+export function renameFolder(id: number, name: string): Promise<SaveFolderResult> {
+  return saveFolder(`/api/folders/${id}`, 'PUT', name)
+}
+
+async function saveFolder(url: string, method: 'POST' | 'PUT', name: string): Promise<SaveFolderResult> {
   let response: Response
   try {
-    response = await apiFetch('/api/folders', {
-      method: 'POST',
+    response = await apiFetch(url, {
+      method,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name }),
     })
@@ -419,6 +429,25 @@ export async function addFolder(name: string): Promise<SaveFolderResult> {
   }
 
   return { ok: false, fieldErrors: {}, message: `Saving failed (${response.status}).` }
+}
+
+// alreadyDeleted: the Folder was gone before this delete, so nothing changed.
+export type DeleteFolderResult = { ok: true; alreadyDeleted: boolean } | { ok: false; message: string }
+
+// Deletes a Folder and the Bookmarks in it, but never their Transactions.
+export async function deleteFolder(id: number): Promise<DeleteFolderResult> {
+  let response: Response
+  try {
+    response = await apiFetch(`/api/folders/${id}`, { method: 'DELETE' })
+  } catch {
+    return { ok: false, message: 'Could not reach the server.' }
+  }
+
+  if (response.ok) return { ok: true, alreadyDeleted: false }
+
+  if (response.status === 404) return { ok: true, alreadyDeleted: true }
+
+  return { ok: false, message: `Deleting failed (${response.status}).` }
 }
 
 // The bookmarked Transactions in the Folder, from any date, newest first.
