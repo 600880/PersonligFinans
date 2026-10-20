@@ -380,7 +380,8 @@ async function saveCategory(
 
 // categoryId is null for an Uncategorized Transaction. locked is set when the Categorization Rules
 // will never change its Category: it was entered manually, or its Category was chosen manually.
-// imported is set when it came from a Bank Statement, so it can't be deleted.
+// imported is set when it came from a Bank Statement, so it can't be deleted. bookmarked is set when
+// the User has put a Bookmark on it.
 export interface Transaction {
   id: number
   date: string
@@ -390,6 +391,7 @@ export interface Transaction {
   categoryId: number | null
   locked: boolean
   imported: boolean
+  bookmarked: boolean
 }
 
 export interface TransactionMonth {
@@ -516,6 +518,38 @@ export async function deleteTransaction(id: number): Promise<DeleteTransactionRe
   }
 
   return { ok: false, message: `Deleting failed (${response.status}).` }
+}
+
+// folderId is the Folder the Bookmark is filed in, or null for none.
+export type AddBookmarkResult = { ok: true; folderId: number | null } | { ok: false }
+
+// Bookmarks the Transaction. One already bookmarked is left as it is, in its Folder.
+export async function addBookmark(id: number): Promise<AddBookmarkResult> {
+  try {
+    const response = await apiFetch(`/api/transactions/${id}/bookmark`, { method: 'POST' })
+    if (!response.ok) return { ok: false }
+    const { folderId } = (await response.json()) as { folderId: number | null }
+    return { ok: true, folderId }
+  } catch {
+    return { ok: false }
+  }
+}
+
+// Removes the Transaction's Bookmark, if it has one. Resolves false when it couldn't be removed.
+export async function removeBookmark(id: number): Promise<boolean> {
+  try {
+    const response = await apiFetch(`/api/transactions/${id}/bookmark`, { method: 'DELETE' })
+    return response.ok
+  } catch {
+    return false
+  }
+}
+
+// The bookmarked Transactions in no Folder, from any date, newest first.
+export async function fetchBookmarks(): Promise<Transaction[]> {
+  const response = await apiFetch('/api/bookmarks')
+  if (!response.ok) throw new Error(`Loading bookmarks failed (${response.status})`)
+  return (await response.json()) as Transaction[]
 }
 
 // An existing Transaction, imported or manually-entered, with the same Amount and a posted date

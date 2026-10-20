@@ -5,7 +5,7 @@ import { firstMonthWithTransactions } from './quarter'
 const q1 = { granularity: 'quarter', year: 2026, quarter: 1 } as const
 
 function transaction(date: string, categoryId: number | null): Transaction {
-  return { id: 1, date, description: 'Kiwi', amount: -100, note: null, categoryId, locked: false, imported: true }
+  return { id: 1, date, description: 'Kiwi', amount: -100, note: null, categoryId, locked: false, imported: true, bookmarked: false }
 }
 
 // The months of a Span from `from` to `to` in 2026.

@@ -67,7 +67,11 @@ let months: { year: number; month: number }[] | Response
 // month is undefined for a whole year.
 let handleListPeriod: (year: number, month: number | undefined) => Response | Promise<Response>
 let handleChangeCategory: (id: number, body: unknown) => Response | Promise<Response>
+let handleChangeNote: (id: number, body: unknown) => Response
 let handleDeleteTransaction: (id: number) => Response | Promise<Response>
+let handleAddBookmark: (id: number) => Response | Promise<Response>
+let handleRemoveBookmark: (id: number) => Response | Promise<Response>
+let handleListBookmarks: () => Response | Promise<Response>
 // What the categories endpoint returns: `categories` unless a test adds to it or makes it fail.
 let categoriesServed: ServedCategory[] | Response
 // The month or quarter is undefined when the Spending of a whole year, or of a quarter, is asked for.
@@ -131,6 +135,12 @@ const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
   if (categoryUrl && init?.method === 'PUT') {
     return handleChangeCategory(Number(categoryUrl[1]), JSON.parse(init.body as string))
   }
+  const noteUrl = /^\/api\/transactions\/(\d+)\/note$/.exec(url)
+  if (noteUrl && init?.method === 'PUT') return handleChangeNote(Number(noteUrl[1]), JSON.parse(init.body as string))
+  const bookmarkUrl = /^\/api\/transactions\/(\d+)\/bookmark$/.exec(url)
+  if (bookmarkUrl && init?.method === 'POST') return handleAddBookmark(Number(bookmarkUrl[1]))
+  if (bookmarkUrl && init?.method === 'DELETE') return handleRemoveBookmark(Number(bookmarkUrl[1]))
+  if (url === '/api/bookmarks') return handleListBookmarks()
   const transactionUrl = /^\/api\/transactions\/(\d+)$/.exec(url)
   if (transactionUrl && init?.method === 'DELETE') return handleDeleteTransaction(Number(transactionUrl[1]))
   if (url === '/api/transactions/months') {
@@ -194,7 +204,11 @@ beforeEach(() => {
   months = []
   handleListPeriod = () => Response.json([])
   handleChangeCategory = () => new Response(null, { status: 500 })
+  handleChangeNote = () => new Response(null, { status: 500 })
   handleDeleteTransaction = () => new Response(null, { status: 204 })
+  handleAddBookmark = () => Response.json({ folderId: null })
+  handleRemoveBookmark = () => new Response(null, { status: 204 })
+  handleListBookmarks = () => Response.json([])
   handleSpending = () => Response.json({ total: 0, slices: [] })
   handleMonthlySpending = (from, to) => Response.json(monthlySpending(from, to))
   categoriesServed = categories
@@ -2039,6 +2053,7 @@ describe('Transactions page', () => {
       categoryId: 1,
       locked: false,
       imported: true,
+      bookmarked: false,
     },
     {
       id: 4,
@@ -2049,6 +2064,7 @@ describe('Transactions page', () => {
       categoryId: null,
       locked: false,
       imported: true,
+      bookmarked: false,
     },
   ]
 
@@ -2061,6 +2077,7 @@ describe('Transactions page', () => {
     categoryId: 1,
     locked: false,
     imported: true,
+    bookmarked: false,
   }
 
   // A month with a Transaction a rule put in Other, one the user put in Other (so Locked), and one a
@@ -2076,6 +2093,7 @@ describe('Transactions page', () => {
       categoryId: 13,
       locked: false,
       imported: true,
+      bookmarked: false,
     },
     {
       id: 7,
@@ -2086,6 +2104,7 @@ describe('Transactions page', () => {
       categoryId: 13,
       locked: true,
       imported: true,
+      bookmarked: false,
     },
   ]
 
@@ -2160,8 +2179,8 @@ describe('Transactions page', () => {
 
     await screen.findByRole('cell', { name: 'Rema 1000' })
     expect(rowCells()).toEqual([
-      ['24.09.2026', 'Rema 1000', 'Groceries', '-1\u00a0249,90\u00a0kr', '', ''],
-      ['03.09.2026', 'Lønn Fra: Testfirma AS', 'Uncategorized', '24\u00a0500,00\u00a0kr', '', ''],
+      ['24.09.2026', 'Rema 1000', 'Groceries', '-1\u00a0249,90\u00a0kr', '', '', ''],
+      ['03.09.2026', 'Lønn Fra: Testfirma AS', 'Uncategorized', '24\u00a0500,00\u00a0kr', '', '', ''],
     ])
   })
 
@@ -2465,6 +2484,7 @@ describe('Transactions page', () => {
       categoryId: 13,
       locked: true,
       imported: false,
+      bookmarked: false,
     }
 
     // getByText collapses the Amount's no-break space into a plain one.
@@ -2633,6 +2653,351 @@ describe('Transactions page', () => {
 
       expect(await screen.findByRole('alert')).toHaveTextContent('Could not reach the server.')
       expect(screen.getByRole('cell', { name: 'Frisør' })).toBeInTheDocument()
+    })
+  })
+
+  describe('bookmarking with the star', () => {
+    // A request kept waiting until the test answers it.
+    function waitingAnswer() {
+      let answer!: (response: Response) => void
+      const response = new Promise<Response>((resolve) => {
+        answer = resolve
+      })
+      return { response, answer }
+    }
+
+    it('bookmarks a Transaction with its empty star, which fills at once and waits for the save', async () => {
+      const added = waitingAnswer()
+      const bookmarkedIds: number[] = []
+      handleAddBookmark = (id) => {
+        bookmarkedIds.push(id)
+        return added.response
+      }
+      const user = await openSeptember()
+      const star = within(transactionRow('Rema 1000')).getByRole('button', { name: 'Bookmark Rema 1000' })
+      expect(star).toHaveAttribute('aria-pressed', 'false')
+
+      await user.click(star)
+
+      const filled = screen.getByRole('button', { name: 'Remove bookmark for Rema 1000' })
+      expect(filled).toHaveAttribute('aria-pressed', 'true')
+      expect(filled).toBeDisabled()
+      expect(bookmarkedIds).toEqual([5])
+
+      added.answer(Response.json({ folderId: null }))
+      await waitFor(() => expect(filled).toBeEnabled())
+      expect(filled).toHaveAttribute('aria-pressed', 'true')
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    })
+
+    // September with Rema 1000 bookmarked.
+    async function openSeptemberWithABookmark() {
+      months = [{ year: 2026, month: 9 }]
+      handleListPeriod = () =>
+        Response.json([{ ...septemberTransactions[0], bookmarked: true }, septemberTransactions[1]])
+      const user = await openTransactionsPage()
+      await screen.findByRole('cell', { name: 'Rema 1000' })
+      return user
+    }
+
+    it('removes the Bookmark with a filled star, which empties at once, with no popup', async () => {
+      const removed = waitingAnswer()
+      const removedIds: number[] = []
+      handleRemoveBookmark = (id) => {
+        removedIds.push(id)
+        return removed.response
+      }
+      const user = await openSeptemberWithABookmark()
+      const star = within(transactionRow('Rema 1000')).getByRole('button', { name: 'Remove bookmark for Rema 1000' })
+      expect(star).toHaveAttribute('aria-pressed', 'true')
+
+      await user.click(star)
+
+      const empty = screen.getByRole('button', { name: 'Bookmark Rema 1000' })
+      expect(empty).toHaveAttribute('aria-pressed', 'false')
+      expect(empty).toBeDisabled()
+      expect(removedIds).toEqual([5])
+
+      removed.answer(new Response(null, { status: 204 }))
+      await waitFor(() => expect(empty).toBeEnabled())
+      expect(empty).toHaveAttribute('aria-pressed', 'false')
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    })
+
+    it('empties the star again and says so when adding the Bookmark fails', async () => {
+      handleAddBookmark = () => new Response(null, { status: 500 })
+      const user = await openSeptember()
+
+      await user.click(screen.getByRole('button', { name: 'Bookmark Rema 1000' }))
+
+      expect(await screen.findByRole('alert')).toHaveTextContent('Could not add the bookmark.')
+      expect(screen.getByRole('button', { name: 'Bookmark Rema 1000' })).toHaveAttribute('aria-pressed', 'false')
+    })
+
+    it('fills the star again and says so when removing the Bookmark fails', async () => {
+      handleRemoveBookmark = () => new Response(null, { status: 500 })
+      const user = await openSeptemberWithABookmark()
+
+      await user.click(screen.getByRole('button', { name: 'Remove bookmark for Rema 1000' }))
+
+      expect(await screen.findByRole('alert')).toHaveTextContent('Could not remove the bookmark.')
+      expect(screen.getByRole('button', { name: 'Remove bookmark for Rema 1000' })).toHaveAttribute('aria-pressed', 'true')
+    })
+
+    it('says the same when the server cannot be reached', async () => {
+      handleAddBookmark = () => Promise.reject(new TypeError('Failed to fetch'))
+      handleRemoveBookmark = () => Promise.reject(new TypeError('Failed to fetch'))
+      const user = await openSeptemberWithABookmark()
+
+      await user.click(screen.getByRole('button', { name: 'Bookmark Lønn Fra: Testfirma AS' }))
+      expect(await screen.findByRole('alert')).toHaveTextContent('Could not add the bookmark.')
+
+      await user.click(screen.getByRole('button', { name: 'Remove bookmark for Rema 1000' }))
+      expect(await screen.findByRole('alert')).toHaveTextContent('Could not remove the bookmark.')
+      expect(screen.getByRole('button', { name: 'Bookmark Lønn Fra: Testfirma AS' })).toBeEnabled()
+      expect(screen.getByRole('button', { name: 'Remove bookmark for Rema 1000' })).toBeEnabled()
+    })
+  })
+
+  describe('All | Bookmarks switch', () => {
+    // Bookmarked Transactions from any date, newest first, as the bookmarks endpoint lists them.
+    const bookmarks = [
+      { ...septemberTransactions[0], bookmarked: true },
+      {
+        id: 2,
+        date: '2024-05-17',
+        description: 'Elkjøp',
+        amount: -4990,
+        note: 'Warranty until 2027',
+        categoryId: 13,
+        locked: true,
+        imported: false,
+        bookmarked: true,
+      },
+    ]
+
+    function switchButton(name: 'All' | 'Bookmarks') {
+      return within(screen.getByRole('group', { name: 'Show' })).getByRole('button', { name })
+    }
+
+    function listedDescriptions() {
+      return rowCells().map((cells) => cells[1])
+    }
+
+    function bookmarksRequests() {
+      return fetchMock.mock.calls.filter(([url]) => url === '/api/bookmarks').length
+    }
+
+    async function showBookmarks(user: ReturnType<typeof userEvent.setup>) {
+      await user.click(switchButton('Bookmarks'))
+    }
+
+    it('opens on All, with no Bookmarks entry in the header', async () => {
+      await openSeptember()
+
+      expect(switchButton('All')).toHaveAttribute('aria-pressed', 'true')
+      expect(switchButton('Bookmarks')).toHaveAttribute('aria-pressed', 'false')
+      expect(within(screen.getByRole('navigation')).queryByRole('button', { name: /bookmark/i })).not.toBeInTheDocument()
+      expect(bookmarksRequests()).toBe(0)
+    })
+
+    it('lists the bookmarks from any date in place of the Year, Month, Category and Search', async () => {
+      handleListBookmarks = () => Response.json(bookmarks)
+      const user = await openSeptember()
+
+      await showBookmarks(user)
+
+      expect(await screen.findByRole('cell', { name: 'Elkjøp' })).toBeInTheDocument()
+      expect(switchButton('Bookmarks')).toHaveAttribute('aria-pressed', 'true')
+      expect(switchButton('All')).toHaveAttribute('aria-pressed', 'false')
+      expect(screen.getByRole('heading', { name: 'Bookmarks' })).toBeInTheDocument()
+      for (const field of ['Year', 'Month', 'Category', 'Search']) {
+        expect(screen.queryByLabelText(field)).not.toBeInTheDocument()
+      }
+      expect(rowCells()).toEqual([
+        ['24.09.2026', 'Rema 1000', 'Groceries', '-1 249,90 kr', '', '', ''],
+        ['17.05.2024', 'Elkjøp', 'Other', '-4 990,00 kr', '', '', ''],
+      ])
+      expect(screen.getByRole('button', { name: 'Remove bookmark for Elkjøp' })).toHaveAttribute('aria-pressed', 'true')
+    })
+
+    it('says when there are no bookmarks', async () => {
+      const user = await openSeptember()
+
+      await showBookmarks(user)
+
+      expect(await screen.findByText('No bookmarks')).toBeInTheDocument()
+      expect(screen.queryByRole('table')).not.toBeInTheDocument()
+    })
+
+    it('says when the bookmarks could not be loaded', async () => {
+      handleListBookmarks = () => new Response(null, { status: 500 })
+      const user = await openSeptember()
+
+      await showBookmarks(user)
+
+      expect(await screen.findByRole('alert')).toHaveTextContent('Could not load the bookmarks.')
+      expect(screen.queryByText('No bookmarks')).not.toBeInTheDocument()
+    })
+
+    it('restores the Year, Month, Category, Search and listed Transactions when switching back to All', async () => {
+      months = [
+        { year: 2026, month: 9 },
+        { year: 2025, month: 3 },
+      ]
+      handleListPeriod = (_year, month) =>
+        Response.json(month === undefined ? [octoberTransaction, ...septemberTransactions] : septemberTransactions)
+      handleListBookmarks = () => Response.json(bookmarks)
+      const user = await openTransactionsPage()
+      await screen.findByRole('cell', { name: 'Rema 1000' })
+      await user.selectOptions(screen.getByLabelText('Month'), 'All months')
+      await screen.findByRole('cell', { name: 'Kiwi' })
+      await user.selectOptions(screen.getByLabelText('Category'), 'Groceries')
+      await user.type(screen.getByLabelText('Search'), 'i')
+      await showBookmarks(user)
+      await screen.findByRole('cell', { name: 'Elkjøp' })
+      const periodsRequested = requestedPeriods().length
+
+      await user.click(switchButton('All'))
+
+      expect(switchButton('All')).toHaveAttribute('aria-pressed', 'true')
+      expect(screen.getByLabelText('Year')).toHaveValue('2026')
+      expect(screen.getByLabelText('Month')).toHaveValue('')
+      expect(screen.getByLabelText('Category')).toHaveValue('1')
+      expect(screen.getByLabelText('Search')).toHaveValue('i')
+      expect(listedDescriptions()).toEqual(['Kiwi'])
+      expect(screen.queryByRole('heading', { name: 'Bookmarks' })).not.toBeInTheDocument()
+      expect(requestedPeriods()).toHaveLength(periodsRequested)
+    })
+
+    it('opens on All again after leaving the page', async () => {
+      const user = await openSeptember()
+      await showBookmarks(user)
+      await screen.findByText('No bookmarks')
+
+      await user.click(screen.getByRole('button', { name: 'Categories' }))
+      await user.click(screen.getByRole('button', { name: 'Transactions' }))
+
+      expect(await screen.findByRole('cell', { name: 'Rema 1000' })).toBeInTheDocument()
+      expect(switchButton('All')).toHaveAttribute('aria-pressed', 'true')
+      expect(screen.getByLabelText('Month')).toHaveValue('9')
+    })
+
+    it('closes an open Note editor or delete confirmation when switching', async () => {
+      handleListBookmarks = () => Response.json(bookmarks)
+      const user = await openSeptember()
+      await user.click(screen.getByRole('button', { name: 'Add note for Rema 1000' }))
+      expect(screen.getByRole('textbox', { name: 'Note' })).toBeInTheDocument()
+
+      await showBookmarks(user)
+      await screen.findByRole('cell', { name: 'Elkjøp' })
+      expect(screen.queryByRole('textbox', { name: 'Note' })).not.toBeInTheDocument()
+
+      await user.click(screen.getByRole('button', { name: 'Delete Elkjøp' }))
+      expect(screen.getByText(/^Delete "Elkjøp"/)).toBeInTheDocument()
+      await user.click(switchButton('All'))
+      await showBookmarks(user)
+      await screen.findByRole('cell', { name: 'Elkjøp' })
+      expect(screen.queryByText(/^Delete "Elkjøp"/)).not.toBeInTheDocument()
+    })
+
+    it('keeps a row whose Bookmark is removed, with an empty star, until All is shown, and can bookmark it again', async () => {
+      const addedIds: number[] = []
+      handleAddBookmark = (id) => {
+        addedIds.push(id)
+        return Response.json({ folderId: null })
+      }
+      handleListBookmarks = () => Response.json(bookmarks)
+      const user = await openSeptember()
+      await showBookmarks(user)
+      await screen.findByRole('cell', { name: 'Elkjøp' })
+
+      await user.click(screen.getByRole('button', { name: 'Remove bookmark for Elkjøp' }))
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Bookmark Elkjøp' })).toBeEnabled())
+      expect(listedDescriptions()).toEqual(['Rema 1000', 'Elkjøp'])
+
+      await user.click(screen.getByRole('button', { name: 'Bookmark Elkjøp' }))
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Remove bookmark for Elkjøp' })).toBeEnabled())
+      expect(addedIds).toEqual([2])
+
+      await user.click(screen.getByRole('button', { name: 'Remove bookmark for Elkjøp' }))
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Bookmark Elkjøp' })).toBeEnabled())
+      handleListBookmarks = () => Response.json([bookmarks[0]])
+      await user.click(switchButton('All'))
+      await showBookmarks(user)
+
+      expect(await screen.findByRole('cell', { name: 'Rema 1000' })).toBeInTheDocument()
+      expect(listedDescriptions()).toEqual(['Rema 1000'])
+    })
+
+    it('shows a star changed in Bookmarks the same in All', async () => {
+      months = [{ year: 2026, month: 9 }]
+      handleListPeriod = () => Response.json([bookmarks[0], septemberTransactions[1]])
+      handleListBookmarks = () => Response.json(bookmarks)
+      const user = await openTransactionsPage()
+      await screen.findByRole('cell', { name: 'Rema 1000' })
+      await showBookmarks(user)
+      await screen.findByRole('cell', { name: 'Elkjøp' })
+
+      await user.click(screen.getByRole('button', { name: 'Remove bookmark for Rema 1000' }))
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Bookmark Rema 1000' })).toBeEnabled())
+      await user.click(switchButton('All'))
+
+      expect(screen.getByRole('button', { name: 'Bookmark Rema 1000' })).toHaveAttribute('aria-pressed', 'false')
+    })
+
+    it("changes a bookmarked Transaction's Category and Note in Bookmarks", async () => {
+      handleListBookmarks = () => Response.json(bookmarks)
+      handleChangeCategory = (_id, body) => Response.json({ ...bookmarks[1], ...(body as object) })
+      handleChangeNote = (_id, body) => Response.json({ ...bookmarks[1], ...(body as object) })
+      const user = await openSeptember()
+      await showBookmarks(user)
+      await screen.findByRole('cell', { name: 'Elkjøp' })
+
+      await user.selectOptions(categorySelect('Elkjøp'), 'Groceries')
+
+      expect(await screen.findByRole('status')).toHaveTextContent('Category changed')
+      expect(categorySelect('Elkjøp')).toHaveValue('1')
+
+      await user.click(screen.getByRole('button', { name: 'Edit note for Elkjøp' }))
+      const note = screen.getByRole('textbox', { name: 'Note' })
+      await user.clear(note)
+      await user.type(note, 'Warranty until 2028')
+      await user.click(screen.getByRole('button', { name: 'Save' }))
+
+      expect(await screen.findByText('Note saved.')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Edit note for Elkjøp' })).toHaveAttribute('title', 'Warranty until 2028')
+      expect(listedDescriptions()).toEqual(['Rema 1000', 'Elkjøp'])
+    })
+
+    it('deletes a bookmarked Transaction in Bookmarks, and loads the Period and months again once All is shown', async () => {
+      let deletedId: number | undefined
+      handleDeleteTransaction = (id) => {
+        deletedId = id
+        return new Response(null, { status: 204 })
+      }
+      handleListBookmarks = () => Response.json(bookmarks)
+      const monthsRequests = () => fetchMock.mock.calls.filter(([url]) => url === '/api/transactions/months').length
+      const user = await openSeptember()
+      await showBookmarks(user)
+      await screen.findByRole('cell', { name: 'Elkjøp' })
+      const periodsRequested = requestedPeriods().length
+      const monthsRequested = monthsRequests()
+
+      await user.click(screen.getByRole('button', { name: 'Delete Elkjøp' }))
+      await user.click(screen.getByRole('button', { name: 'Confirm delete' }))
+
+      expect(await screen.findByRole('status')).toHaveTextContent('Transaction deleted.')
+      expect(deletedId).toBe(2)
+      expect(listedDescriptions()).toEqual(['Rema 1000'])
+      expect(monthsRequests()).toBe(monthsRequested)
+
+      await user.click(switchButton('All'))
+
+      expect(await screen.findByRole('cell', { name: 'Lønn Fra: Testfirma AS' })).toBeInTheDocument()
+      expect(requestedPeriods()).toHaveLength(periodsRequested + 1)
+      expect(requestedPeriods().at(-1)).toBe('/api/transactions?year=2026&month=9')
+      expect(monthsRequests()).toBe(monthsRequested + 1)
     })
   })
 })
@@ -2988,6 +3353,7 @@ describe('Dashboard', () => {
         categoryId: null,
         locked: false,
         imported: true,
+        bookmarked: false,
       }
       handleListPeriod = () => Response.json([transaction])
       handleChangeCategory = () => {
@@ -3191,6 +3557,7 @@ describe('Dashboard', () => {
         categoryId: 1,
         locked: false,
         imported: true,
+        bookmarked: false,
       },
       {
         id: 4,
@@ -3201,6 +3568,7 @@ describe('Dashboard', () => {
         categoryId: null,
         locked: false,
         imported: true,
+        bookmarked: false,
       },
     ]
 
@@ -3382,6 +3750,22 @@ describe('Dashboard', () => {
         expect(await screen.findByRole('cell', { name: 'Kiwi' })).toBeInTheDocument()
         expect(chosenFilters()).toEqual(['2025', 'November', 'Groceries'])
       })
+    })
+
+    it('opens the Transactions page on All, even after Bookmarks was shown there before', async () => {
+      const user = await openDashboard()
+      await user.click(screen.getByRole('button', { name: 'Transactions' }))
+      const switchTo = (name: string) =>
+        within(screen.getByRole('group', { name: 'Show' })).getByRole('button', { name })
+      await user.click(switchTo('Bookmarks'))
+      await screen.findByText('No bookmarks')
+      await user.click(screen.getByRole('button', { name: 'PersonligFinans' }))
+
+      await user.click(await legendButton('Groceries'))
+
+      expect(await screen.findByRole('cell', { name: 'Rema 1000' })).toBeInTheDocument()
+      expect(switchTo('All')).toHaveAttribute('aria-pressed', 'true')
+      expect(chosenFilters()).toEqual(['2026', 'September', 'Groceries'])
     })
 
     it('still opens on the latest month, all Categories and no search from the header', async () => {
