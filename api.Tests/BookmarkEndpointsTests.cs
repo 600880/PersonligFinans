@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using Microsoft.AspNetCore.Mvc;
 using PersonligFinans.Api.Bookmarks;
 using PersonligFinans.Api.Folders;
 using PersonligFinans.Api.Spending;
@@ -59,7 +60,7 @@ public class BookmarkEndpointsTests : IAsyncLifetime
         (await _client.GetFromJsonAsync<List<TransactionResponse>>($"/api/transactions?year={year}&month={month}"))!;
 
     [Fact]
-    public async Task Post_Bookmark_AnswersNoFolderAndListsTheTransactionAsBookmarked()
+    public async Task Post_Bookmark_WithNoLastUsedFolder_GoesIntoNoFolder_AndListsTheTransactionAsBookmarked()
     {
         var transaction = await AddTransaction();
 
@@ -112,6 +113,7 @@ public class BookmarkEndpointsTests : IAsyncLifetime
     public async Task UnknownTransaction_ReturnsNotFound()
     {
         Assert.Equal(HttpStatusCode.NotFound, (await AddBookmark(int.MaxValue)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await PutBookmark(int.MaxValue, folderId: null)).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await RemoveBookmark(int.MaxValue)).StatusCode);
     }
 
@@ -211,10 +213,129 @@ public class BookmarkEndpointsTests : IAsyncLifetime
         return (await response.Content.ReadFromJsonAsync<FolderResponse>())!.Id;
     }
 
-    private async Task BookmarkInFolder(int transactionId, int folderId)
+    // Files the Transaction's Bookmark in the Folder, or in none for null.
+    private Task<HttpResponseMessage> PutBookmark(int transactionId, int? folderId) =>
+        _client.PutAsJsonAsync($"/api/transactions/{transactionId}/bookmark", new { folderId });
+
+    private async Task FileBookmark(int transactionId, int? folderId)
     {
-        await Bookmark(transactionId);
-        await _factory.FileBookmarkAsync(_email, transactionId, folderId);
+        var response = await PutBookmark(transactionId, folderId);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(new BookmarkResponse(folderId), await response.Content.ReadFromJsonAsync<BookmarkResponse>());
+    }
+
+    // The Folder a new Bookmark went into, as adding answered.
+    private async Task<int?> FolderOfNewBookmark()
+    {
+        var response = await AddBookmark((await AddTransaction()).Id);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        return (await response.Content.ReadFromJsonAsync<BookmarkResponse>())!.FolderId;
+    }
+
+    [Fact]
+    public async Task Post_Bookmark_AfterFilingInAFolder_GoesIntoThatFolder()
+    {
+        var tax = await AddFolder("Tax deductible");
+        var filed = await AddTransaction(description: "filed");
+        await Bookmark(filed.Id);
+        await FileBookmark(filed.Id, tax);
+        var added = await AddTransaction(description: "added after");
+
+        var response = await AddBookmark(added.Id);
+
+        Assert.Equal(new BookmarkResponse(tax), await response.Content.ReadFromJsonAsync<BookmarkResponse>());
+        Assert.Equal(["added after", "filed"], (await BookmarksIn(tax)).Select(t => t.Description).Order());
+        Assert.Empty(await Bookmarks());
+    }
+
+    [Fact]
+    public async Task Put_Bookmark_MovesItToAnotherFolder()
+    {
+        var tax = await AddFolder("Tax deductible");
+        var warranty = await AddFolder("Warranty");
+        var transaction = await AddTransaction();
+        await FileBookmark(transaction.Id, tax);
+
+        await FileBookmark(transaction.Id, warranty);
+
+        Assert.Empty(await BookmarksIn(tax));
+        Assert.Equal([transaction.Id], (await BookmarksIn(warranty)).Select(t => t.Id));
+        Assert.Empty(await Bookmarks());
+    }
+
+    [Fact]
+    public async Task Put_Bookmark_InNoFolder_TakesItOutOfItsFolder_AndMakesBookmarksTheLastUsedFolder()
+    {
+        var tax = await AddFolder("Tax deductible");
+        var transaction = await AddTransaction();
+        await FileBookmark(transaction.Id, tax);
+
+        await FileBookmark(transaction.Id, folderId: null);
+
+        Assert.Empty(await BookmarksIn(tax));
+        Assert.Equal([transaction.Id], (await Bookmarks()).Select(t => t.Id));
+        Assert.Null(await FolderOfNewBookmark());
+    }
+
+    [Fact]
+    public async Task Put_Bookmark_OfATransactionNotBookmarked_BookmarksItInTheFolder()
+    {
+        var tax = await AddFolder("Tax deductible");
+        var transaction = await AddTransaction(date: "2026-09-24");
+
+        await FileBookmark(transaction.Id, tax);
+
+        Assert.Equal([transaction with { Bookmarked = true }], await BookmarksIn(tax));
+        Assert.True((await TransactionsOf(2026, 9)).Single().Bookmarked);
+    }
+
+    [Fact]
+    public async Task Post_Bookmark_NeverChangesTheLastUsedFolder()
+    {
+        var tax = await AddFolder("Tax deductible");
+        var warranty = await AddFolder("Warranty");
+        var inWarranty = await AddTransaction(description: "in Warranty");
+        await FileBookmark(inWarranty.Id, warranty);
+        await FileBookmark((await AddTransaction()).Id, tax);
+
+        // Already bookmarked, so it stays in its Folder, which isn't the last used one.
+        var again = await AddBookmark(inWarranty.Id);
+
+        Assert.Equal(new BookmarkResponse(warranty), await again.Content.ReadFromJsonAsync<BookmarkResponse>());
+        Assert.Equal([inWarranty.Id], (await BookmarksIn(warranty)).Select(t => t.Id));
+        Assert.Equal(tax, await FolderOfNewBookmark());
+        Assert.Equal(tax, await FolderOfNewBookmark());
+    }
+
+    [Fact]
+    public async Task Put_Bookmark_InAnUnknownFolder_IsAFieldError_AndChangesNothing()
+    {
+        var tax = await AddFolder("Tax deductible");
+        var transaction = await AddTransaction();
+        await FileBookmark(transaction.Id, tax);
+
+        var response = await PutBookmark(transaction.Id, int.MaxValue);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(
+            ["The folder no longer exists."],
+            (await response.Content.ReadFromJsonAsync<ValidationProblemDetails>())!.Errors["folderId"]);
+        Assert.Equal([transaction.Id], (await BookmarksIn(tax)).Select(t => t.Id));
+        Assert.Equal(tax, await FolderOfNewBookmark());
+    }
+
+    [Fact]
+    public async Task Post_Bookmark_AfterTheLastUsedFolderIsDeleted_GoesIntoNoFolder()
+    {
+        var tax = await AddFolder("Tax deductible");
+        await FileBookmark((await AddTransaction()).Id, tax);
+        Assert.Equal(HttpStatusCode.NoContent, (await _client.DeleteAsync($"/api/folders/{tax}")).StatusCode);
+
+        var transaction = await AddTransaction();
+        var response = await AddBookmark(transaction.Id);
+
+        Assert.Equal(new BookmarkResponse(FolderId: null), await response.Content.ReadFromJsonAsync<BookmarkResponse>());
+        Assert.Equal([transaction.Id], (await Bookmarks()).Select(t => t.Id));
     }
 
     private Task<HttpResponseMessage> GetBookmarksIn(int folderId) =>
@@ -236,9 +357,9 @@ public class BookmarkEndpointsTests : IAsyncLifetime
         var inWarranty = await AddTransaction(description: "in Warranty");
         var unfiled = await AddTransaction(description: "in no Folder");
         await AddTransaction(description: "not bookmarked");
-        await BookmarkInFolder(inTax.Id, tax);
-        await BookmarkInFolder(inWarranty.Id, warranty);
-        await Bookmark(unfiled.Id);
+        await FileBookmark(inTax.Id, tax);
+        await FileBookmark(inWarranty.Id, warranty);
+        await FileBookmark(unfiled.Id, folderId: null);
 
         Assert.Equal(["in Tax deductible"], (await BookmarksIn(tax)).Select(t => t.Description));
         Assert.Equal(["in Warranty"], (await BookmarksIn(warranty)).Select(t => t.Description));
@@ -256,7 +377,7 @@ public class BookmarkEndpointsTests : IAsyncLifetime
         await _client.PutAsJsonAsync($"/api/transactions/{september.Id}/note", new { note = "Warranty" });
         // Filed in another order than they are listed.
         foreach (var transaction in new[] { sameDayFirst, september, older, sameDaySecond })
-            await BookmarkInFolder(transaction.Id, tax);
+            await FileBookmark(transaction.Id, tax);
 
         var bookmarks = await BookmarksIn(tax);
 

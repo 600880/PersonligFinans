@@ -431,6 +431,37 @@ namespace PersonligFinans.Api.Data.Migrations
                     b.ToTable("folders", (string)null);
                 });
 
+            modelBuilder.Entity("PersonligFinans.Api.Data.LastUsedFolder", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int?>("FolderId")
+                        .HasColumnType("integer")
+                        .HasColumnName("folder_id");
+
+                    b.Property<string>("UserId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_last_used_folders");
+
+                    b.HasIndex("FolderId")
+                        .HasDatabaseName("ix_last_used_folders_folder_id");
+
+                    b.HasIndex("UserId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_last_used_folders_user_id");
+
+                    b.ToTable("last_used_folders", (string)null);
+                });
+
             modelBuilder.Entity("PersonligFinans.Api.Data.SentPasswordResetEmail", b =>
                 {
                     b.Property<long>("Id")
@@ -638,6 +669,22 @@ namespace PersonligFinans.Api.Data.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_folders_asp_net_users_user_id");
+                });
+
+            modelBuilder.Entity("PersonligFinans.Api.Data.LastUsedFolder", b =>
+                {
+                    b.HasOne("PersonligFinans.Api.Data.Folder", null)
+                        .WithMany()
+                        .HasForeignKey("FolderId")
+                        .OnDelete(DeleteBehavior.SetNull)
+                        .HasConstraintName("fk_last_used_folders_folders_folder_id");
+
+                    b.HasOne("Microsoft.AspNetCore.Identity.IdentityUser", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_last_used_folders_asp_net_users_user_id");
                 });
 
             modelBuilder.Entity("PersonligFinans.Api.Data.SentPasswordResetEmail", b =>

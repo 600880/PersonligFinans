@@ -5,6 +5,9 @@ using PersonligFinans.Api.Transactions;
 
 namespace PersonligFinans.Api.Bookmarks;
 
+// FolderId is the Folder to file the Bookmark in, or null for none.
+public record FileBookmarkRequest(int? FolderId);
+
 // FolderId is the Folder the Bookmark is filed in, or null for none.
 public record BookmarkResponse(int? FolderId);
 
@@ -15,6 +18,7 @@ public static class BookmarkEndpoints
         var api = app.MapGroup("/api");
 
         api.MapPost("/transactions/{id:int}/bookmark", AddBookmark);
+        api.MapPut("/transactions/{id:int}/bookmark", FileBookmark);
         api.MapDelete("/transactions/{id:int}/bookmark", RemoveBookmark);
 
         api.MapGet("/bookmarks", ListBookmarks);
@@ -32,9 +36,9 @@ public static class BookmarkEndpoints
             db));
     }
 
-    // Bookmarks the Transaction in no Folder. One already bookmarked is left as it is and answers with
-    // its Folder, so a double click never makes a copy or moves it. Changes nothing about the
-    // Transaction itself.
+    // Bookmarks the Transaction in the User's last used folder, which only filing changes, so adding
+    // never does. One already bookmarked is left as it is and answers with its Folder, so a double
+    // click never makes a copy or moves it. Changes nothing about the Transaction itself.
     private static async Task<IResult> AddBookmark(int id, AppDbContext db)
     {
         if (!await db.Transactions.AnyAsync(t => t.Id == id))
@@ -43,7 +47,9 @@ public static class BookmarkEndpoints
         if (await BookmarkOf(db, id) is { } existing)
             return Results.Ok(existing);
 
-        db.Bookmarks.Add(new Bookmark { UserId = db.OwnerOfNewRows, TransactionId = id });
+        // No row means "Bookmarks", as a null Folder does.
+        var folderId = await db.LastUsedFolders.Select(l => l.FolderId).SingleOrDefaultAsync();
+        db.Bookmarks.Add(new Bookmark { UserId = db.OwnerOfNewRows, TransactionId = id, FolderId = folderId });
         try
         {
             await db.SaveChangesAsync();
@@ -55,7 +61,46 @@ public static class BookmarkEndpoints
             return Results.Ok(await BookmarkOf(db, id));
         }
 
-        return Results.Ok(new BookmarkResponse(FolderId: null));
+        return Results.Ok(new BookmarkResponse(folderId));
+    }
+
+    // Files the Transaction's Bookmark in the Folder, or in none, bookmarking it first if it isn't, and
+    // makes that the User's last used folder, so the next Bookmark goes there too.
+    private static async Task<IResult> FileBookmark(int id, FileBookmarkRequest request, AppDbContext db)
+    {
+        if (!await db.Transactions.AnyAsync(t => t.Id == id))
+            return Results.NotFound();
+
+        // Another visitor of the Guest, or another tab, may have deleted it since the list was shown.
+        if (request.FolderId is not null && !await db.Folders.AnyAsync(f => f.Id == request.FolderId))
+            return Results.ValidationProblem(
+                new Dictionary<string, string[]> { ["folderId"] = ["The folder no longer exists."] });
+
+        var bookmark = await db.Bookmarks.SingleOrDefaultAsync(b => b.TransactionId == id);
+        if (bookmark is null)
+            db.Bookmarks.Add(new Bookmark { UserId = db.OwnerOfNewRows, TransactionId = id, FolderId = request.FolderId });
+        else
+            bookmark.FolderId = request.FolderId;
+
+        var lastUsed = await db.LastUsedFolders.SingleOrDefaultAsync();
+        if (lastUsed is null)
+            db.LastUsedFolders.Add(new LastUsedFolder { UserId = db.OwnerOfNewRows, FolderId = request.FolderId });
+        else
+            lastUsed.FolderId = request.FolderId;
+
+        try
+        {
+            await db.SaveChangesAsync();
+        }
+        // Bookmarked, or a first last used folder recorded, concurrently, between the lookups and now:
+        // filing again finds those rows and changes them instead.
+        catch (DbUpdateException e) when (e.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
+        {
+            db.ChangeTracker.Clear();
+            return await FileBookmark(id, request, db);
+        }
+
+        return Results.Ok(new BookmarkResponse(request.FolderId));
     }
 
     // Removes the Transaction's Bookmark. One that isn't bookmarked ends the same way, so it answers

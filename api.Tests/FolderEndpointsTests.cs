@@ -211,9 +211,8 @@ public class FolderEndpointsTests : IAsyncLifetime
             date = "2026-09-24", description, amount = -249.90m, categoryId = categories.Other,
         });
         var transaction = (await created.Content.ReadFromJsonAsync<TransactionResponse>())!;
-        Assert.Equal(HttpStatusCode.OK, (await _client.PostAsync($"/api/transactions/{transaction.Id}/bookmark", null)).StatusCode);
-        if (folderId is { } id)
-            await _factory.FileBookmarkAsync(_email, transaction.Id, id);
+        var filed = await _client.PutAsJsonAsync($"/api/transactions/{transaction.Id}/bookmark", new { folderId });
+        Assert.Equal(HttpStatusCode.OK, filed.StatusCode);
         return transaction.Id;
     }
 
