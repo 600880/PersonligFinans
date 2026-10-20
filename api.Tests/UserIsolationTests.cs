@@ -222,15 +222,9 @@ public class UserIsolationTests : IAsyncLifetime
         var created = await PostFolder(_a, "Tax deductible");
         Assert.Equal(HttpStatusCode.Created, created.StatusCode);
         var folderId = (await created.Content.ReadFromJsonAsync<FolderResponse>())!.Id;
-        // Bookmarked in the first User's Folder straight in the database, since the API can't file
-        // Bookmarks yet.
         var transactionId = await AddTransaction(_a, _categoriesA.Other);
         Assert.Equal(HttpStatusCode.OK, (await _a.PostAsync($"/api/transactions/{transactionId}/bookmark", null)).StatusCode);
-        await using (var user = await UserDatabase.OfAsync(_factory, _emailA))
-        {
-            (await user.Db.Bookmarks.SingleAsync(b => b.TransactionId == transactionId)).FolderId = folderId;
-            await user.Db.SaveChangesAsync();
-        }
+        await _factory.FileBookmarkAsync(_emailA, transactionId, folderId);
 
         Assert.Empty(await Folders(_b));
         Assert.Equal(HttpStatusCode.NotFound, (await _b.GetAsync($"/api/bookmarks?folderId={folderId}")).StatusCode);

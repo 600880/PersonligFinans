@@ -1,7 +1,6 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
-using Microsoft.EntityFrameworkCore;
 using PersonligFinans.Api.Bookmarks;
 using PersonligFinans.Api.Folders;
 using PersonligFinans.Api.Spending;
@@ -212,15 +211,10 @@ public class BookmarkEndpointsTests : IAsyncLifetime
         return (await response.Content.ReadFromJsonAsync<FolderResponse>())!.Id;
     }
 
-    // Bookmarks the Transaction and files the Bookmark in the Folder straight in the database, since
-    // the API can't file Bookmarks yet.
     private async Task BookmarkInFolder(int transactionId, int folderId)
     {
         await Bookmark(transactionId);
-        await using var user = await UserDatabase.OfAsync(_factory, _email);
-        var bookmark = await user.Db.Bookmarks.SingleAsync(b => b.TransactionId == transactionId);
-        bookmark.FolderId = folderId;
-        await user.Db.SaveChangesAsync();
+        await _factory.FileBookmarkAsync(_email, transactionId, folderId);
     }
 
     private Task<HttpResponseMessage> GetBookmarksIn(int folderId) =>

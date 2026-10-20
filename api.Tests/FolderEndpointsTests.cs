@@ -150,12 +150,9 @@ public class FolderEndpointsTests : IAsyncLifetime
         });
         var transaction = (await created.Content.ReadFromJsonAsync<TransactionResponse>())!;
         Assert.Equal(HttpStatusCode.OK, (await _client.PostAsync($"/api/transactions/{transaction.Id}/bookmark", null)).StatusCode);
+        await _factory.FileBookmarkAsync(_email, transaction.Id, folder.Id);
         await using (var user = await UserDatabase.OfAsync(_factory, _email))
-        {
-            (await user.Db.Bookmarks.SingleAsync(b => b.TransactionId == transaction.Id)).FolderId = folder.Id;
-            await user.Db.SaveChangesAsync();
             await user.Db.Folders.Where(f => f.Id == folder.Id).ExecuteDeleteAsync();
-        }
 
         var september = await _client.GetFromJsonAsync<List<TransactionResponse>>("/api/transactions?year=2026&month=9");
 
