@@ -32,7 +32,7 @@ public static class BookmarkEndpoints
         if (!await db.Transactions.AnyAsync(t => t.Id == id))
             return Results.NotFound();
 
-        if (await FolderOfBookmark(db, id) is { } existing)
+        if (await BookmarkOf(db, id) is { } existing)
             return Results.Ok(existing);
 
         db.Bookmarks.Add(new Bookmark { UserId = db.OwnerOfNewRows, TransactionId = id });
@@ -44,7 +44,7 @@ public static class BookmarkEndpoints
         catch (DbUpdateException e) when (e.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
         {
             db.ChangeTracker.Clear();
-            return Results.Ok(await FolderOfBookmark(db, id));
+            return Results.Ok(await BookmarkOf(db, id));
         }
 
         return Results.Ok(new BookmarkResponse(FolderId: null));
@@ -63,7 +63,7 @@ public static class BookmarkEndpoints
     }
 
     // The Transaction's Bookmark as a response, or null when it isn't bookmarked.
-    private static Task<BookmarkResponse?> FolderOfBookmark(AppDbContext db, int transactionId) =>
+    private static Task<BookmarkResponse?> BookmarkOf(AppDbContext db, int transactionId) =>
         db.Bookmarks
             .Where(b => b.TransactionId == transactionId)
             .Select(b => new BookmarkResponse(b.FolderId))
