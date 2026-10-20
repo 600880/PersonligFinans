@@ -5,7 +5,7 @@ A personal finance web app for tracking spending from uploaded bank transactions
 ## Language
 
 **User**:
-Someone who signs in with an email and password, or the Guest. Each User has their own Transactions, Bank Statements, Uploads, Categories and Categorization Rules, and no User ever sees another's. A new User starts with the seeded Categories and Categorization Rules and no Transactions.
+Someone who signs in with an email and password, or the Guest. Each User has their own Transactions, Bank Statements, Uploads, Categories, Categorization Rules, Bookmarks and Folders, and no User ever sees another's. A new User starts with the seeded Categories and Categorization Rules and no Transactions.
 _Avoid_: Account, profile, member
 
 **Guest**:
@@ -63,6 +63,14 @@ _Avoid_: Balance change, sum, value
 **Note**:
 An optional, free-form annotation a user attaches to any Transaction — imported or manually-entered — to record anything relevant: a reimbursement, a disputed charge, an external reference number. Distinct from Description, which is the merchant or payee name and cannot be changed.
 _Avoid_: Reference, memo, comment
+
+**Bookmark**:
+A mark a User puts on a Transaction to find it again, filed in one Folder or in none; those in none are listed as "Bookmarks". A Transaction has at most one Bookmark, which goes when the Transaction is deleted and changes nothing else about it. Distinct from a Note, which records something about a Transaction rather than marking it to come back to.
+_Avoid_: Favourite, star, saved transaction
+
+**Folder**:
+A named group a User creates to file Bookmarks in, such as "Tax deductible". Has a name unique among the User's Folders (ignoring case) that is never "Bookmarks". Deleting a Folder deletes the Bookmarks in it, but never their Transactions.
+_Avoid_: Bookmark folder, list, collection
 
 **Category**:
 A label classifying a Transaction by type of spending (e.g. "Restaurants", "Groceries"), used to group spending on the Dashboard. Has a name unique among the User's Categories (ignoring case) and a short description of what belongs in it, which the LLM also reads when creating AI-generated rules. Each User manages their own list (adding, editing and deleting Categories), which starts from a seeded set. Deleting a Category that is in use means choosing either a replacement Category, which its Transactions and Categorization Rules move to (each Transaction keeping whether it was categorized manually or by a rule), or to delete its Categorization Rules, after which its Transactions are matched against the remaining rules like any rule change, and those left without a Category become Uncategorized.
