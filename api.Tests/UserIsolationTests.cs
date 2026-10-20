@@ -10,6 +10,7 @@ using PersonligFinans.Api.BankStatements;
 using PersonligFinans.Api.Categories;
 using PersonligFinans.Api.CategorizationRules;
 using PersonligFinans.Api.Data;
+using PersonligFinans.Api.Folders;
 using PersonligFinans.Api.Receipts;
 using PersonligFinans.Api.Spending;
 using PersonligFinans.Api.Transactions;
@@ -17,7 +18,7 @@ using PersonligFinans.Api.Transactions;
 namespace PersonligFinans.Api.Tests;
 
 // Two Users side by side: each has their own Transactions, Bank Statements, Uploads, Categories,
-// Categorization Rules and Bookmarks, and never sees or changes the other's.
+// Categorization Rules, Bookmarks and Folders, and never sees or changes the other's.
 [Collection(ApiCollection.Name)]
 public class UserIsolationTests : IAsyncLifetime
 {
@@ -207,6 +208,49 @@ public class UserIsolationTests : IAsyncLifetime
         Assert.Equal(
             [bookmarkedId],
             (await _a.GetFromJsonAsync<List<TransactionResponse>>("/api/bookmarks"))!.Select(t => t.Id));
+    }
+
+    private static Task<HttpResponseMessage> PostFolder(HttpClient client, string name) =>
+        client.PostAsJsonAsync("/api/folders", new { name });
+
+    private static async Task<List<FolderResponse>> Folders(HttpClient client) =>
+        (await client.GetFromJsonAsync<List<FolderResponse>>("/api/folders"))!;
+
+    [Fact]
+    public async Task AnotherUsersFolders_CantBeSeenNorTheirBookmarksListed()
+    {
+        var created = await PostFolder(_a, "Tax deductible");
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        var folderId = (await created.Content.ReadFromJsonAsync<FolderResponse>())!.Id;
+        // Bookmarked in the first User's Folder straight in the database, since the API can't file
+        // Bookmarks yet.
+        var transactionId = await AddTransaction(_a, _categoriesA.Other);
+        Assert.Equal(HttpStatusCode.OK, (await _a.PostAsync($"/api/transactions/{transactionId}/bookmark", null)).StatusCode);
+        await using (var user = await UserDatabase.OfAsync(_factory, _emailA))
+        {
+            (await user.Db.Bookmarks.SingleAsync(b => b.TransactionId == transactionId)).FolderId = folderId;
+            await user.Db.SaveChangesAsync();
+        }
+
+        Assert.Empty(await Folders(_b));
+        Assert.Equal(HttpStatusCode.NotFound, (await _b.GetAsync($"/api/bookmarks?folderId={folderId}")).StatusCode);
+
+        // Nothing of the first User's changed.
+        Assert.Equal([("Tax deductible", folderId)], (await Folders(_a)).Select(f => (f.Name, f.Id)));
+        Assert.Equal(
+            [transactionId],
+            (await _a.GetFromJsonAsync<List<TransactionResponse>>($"/api/bookmarks?folderId={folderId}"))!.Select(t => t.Id));
+    }
+
+    [Fact]
+    public async Task FolderNames_MayRepeatAcrossUsers_ButNotWithinOne()
+    {
+        Assert.Equal(HttpStatusCode.Created, (await PostFolder(_a, "Tax deductible")).StatusCode);
+        Assert.Equal(HttpStatusCode.Created, (await PostFolder(_b, "TAX DEDUCTIBLE")).StatusCode);
+
+        var again = await PostFolder(_a, "tax deductible");
+
+        Assert.Equal(["A folder named 'Tax deductible' already exists."], (await ValidationErrors(again))["name"]);
     }
 
     [Fact]

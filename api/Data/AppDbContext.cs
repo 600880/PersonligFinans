@@ -18,22 +18,24 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, CurrentUser cu
     public const int CategoryNameMaxLength = 50;
     public const int CategoryDescriptionMaxLength = 200;
     public const int CategoryColourMaxLength = 7;
+    public const int FolderNameMaxLength = 50;
 
     public DbSet<Category> Categories => Set<Category>();
     public DbSet<Transaction> Transactions => Set<Transaction>();
     public DbSet<BankStatement> BankStatements => Set<BankStatement>();
     public DbSet<CategorizationRule> CategorizationRules => Set<CategorizationRule>();
     public DbSet<Bookmark> Bookmarks => Set<Bookmark>();
+    public DbSet<Folder> Folders => Set<Folder>();
     public DbSet<AiRequest> AiRequests => Set<AiRequest>();
     public DbSet<SentPasswordResetEmail> SentPasswordResetEmails => Set<SentPasswordResetEmail>();
 
     // The User this context works for, or null for nobody. Its queries see only that User's
-    // Transactions, Bank Statements, Categories, Categorization Rules and Bookmarks, through the query
-    // filters. Read at each query.
+    // Transactions, Bank Statements, Categories, Categorization Rules, Bookmarks and Folders, through
+    // the query filters. Read at each query.
     public string? CurrentUserId => currentUser.Id;
 
-    // The owner every write gives a new Transaction, Bank Statement, Category, Categorization Rule or
-    // Bookmark explicitly: the current User. Acting for nobody, there is no one to own it, so the write fails
+    // The owner every write gives a new Transaction, Bank Statement, Category, Categorization Rule,
+    // Bookmark or Folder explicitly: the current User. Acting for nobody, there is no one to own it, so the write fails
     // here rather than in the database.
     public string OwnerOfNewRows => CurrentUserId
         ?? throw new InvalidOperationException("Only a signed-in User can own new rows.");
@@ -105,6 +107,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, CurrentUser cu
 
         // A Transaction has at most one Bookmark, through the unique index on the Transaction, and
         // deleting the Transaction, or anything that deletes Transactions, deletes it in the database.
+        // Deleting its Folder deletes it too, but never its Transaction.
         modelBuilder.Entity<Bookmark>(bookmark =>
         {
             OwnedByAUser(bookmark);
@@ -112,6 +115,19 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, CurrentUser cu
                 .WithOne()
                 .HasForeignKey<Bookmark>(b => b.TransactionId)
                 .OnDelete(DeleteBehavior.Cascade);
+            bookmark.HasOne<Folder>()
+                .WithMany()
+                .HasForeignKey(b => b.FolderId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // Names are unique among the User's Folders ignoring case, through an index on
+        // (user_id, lower(name)) that the migration creates by hand, since EF Core can't model an
+        // expression index.
+        modelBuilder.Entity<Folder>(folder =>
+        {
+            OwnedByAUser(folder);
+            folder.Property(f => f.Name).HasMaxLength(FolderNameMaxLength);
         });
 
         // Not owned like the rows above: the AI request ledger counts every User's AI requests

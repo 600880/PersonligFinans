@@ -1,4 +1,3 @@
-using System.Globalization;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 using PersonligFinans.Api.CategorizationRules;
@@ -26,9 +25,6 @@ public record DeletedCategoryResponse(int TransactionsChanged);
 
 public static class CategoryEndpoints
 {
-    private static readonly StringComparer ByNorwegianName =
-        StringComparer.Create(CultureInfo.GetCultureInfo("nb-NO"), ignoreCase: true);
-
     public static void MapCategoryEndpoints(this IEndpointRouteBuilder app)
     {
         var api = app.MapGroup("/api/categories");
@@ -47,7 +43,7 @@ public static class CategoryEndpoints
                     db.CategorizationRules.Count(r => r.CategoryId == c.Id)))
                 .ToListAsync())
             .OrderBy(c => c.BuiltIn ? Array.IndexOf(Seeds.BuiltInOrder, c.Name) : Seeds.BuiltInOrder.Length)
-            .ThenBy(c => c.Name, ByNorwegianName)
+            .ThenBy(c => c.Name, NorwegianAlphabet.IgnoringCase)
             .ToList());
 
         api.MapPost("/", AddCategory);
