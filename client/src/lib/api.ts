@@ -378,6 +378,56 @@ async function saveCategory(
   return { ok: false, fieldErrors: {}, message: `Saving failed (${response.status}).` }
 }
 
+// A named group the User files Bookmarks in, such as "Tax deductible".
+export interface Folder {
+  id: number
+  name: string
+}
+
+// The User's Folders, by name in the Norwegian alphabet, ignoring case.
+export async function fetchFolders(): Promise<Folder[]> {
+  const response = await apiFetch('/api/folders')
+  if (!response.ok) throw new Error(`Loading folders failed (${response.status})`)
+  return (await response.json()) as Folder[]
+}
+
+export type FolderFieldErrors = { name?: string }
+
+export type SaveFolderResult =
+  | { ok: true; folder: Folder }
+  | { ok: false; fieldErrors: FolderFieldErrors; message: string | null }
+
+// Creates a Folder. The server refuses a blank name, one already used ignoring case, or "Bookmarks",
+// with a field error on the name.
+export async function addFolder(name: string): Promise<SaveFolderResult> {
+  let response: Response
+  try {
+    response = await apiFetch('/api/folders', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    })
+  } catch {
+    return { ok: false, fieldErrors: {}, message: 'Could not reach the server.' }
+  }
+
+  if (response.ok) return { ok: true, folder: (await response.json()) as Folder }
+
+  if (response.status === 400) {
+    const { fieldErrors } = await readProblem<{ name: string }>(response)
+    if (Object.keys(fieldErrors).length > 0) return { ok: false, fieldErrors, message: null }
+  }
+
+  return { ok: false, fieldErrors: {}, message: `Saving failed (${response.status}).` }
+}
+
+// The bookmarked Transactions in the Folder, from any date, newest first.
+export async function fetchFolderBookmarks(folderId: number): Promise<Transaction[]> {
+  const response = await apiFetch(`/api/bookmarks?folderId=${folderId}`)
+  if (!response.ok) throw new Error(`Loading bookmarks failed (${response.status})`)
+  return (await response.json()) as Transaction[]
+}
+
 // categoryId is null for an Uncategorized Transaction. locked is set when the Categorization Rules
 // will never change its Category: it was entered manually, or its Category was chosen manually.
 // imported is set when it came from a Bank Statement, so it can't be deleted. bookmarked is set when
