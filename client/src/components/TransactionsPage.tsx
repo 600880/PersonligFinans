@@ -518,15 +518,15 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
       {/* The switch wraps under the heading when the line has no room for both. */}
       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
         <h2 className="text-lg font-semibold text-slate-900">Transactions</h2>
-        <div role="group" aria-label="Show" className="flex rounded-lg border border-slate-300 p-0.5 text-sm font-medium">
+        <div role="group" aria-label="Show" className="flex rounded-lg bg-slate-100 p-0.5 text-sm font-medium">
           {LISTS.map((option) => (
             <button
               key={option.list}
               type="button"
               aria-pressed={list === option.list}
               onClick={() => chooseList(option.list)}
-              className={`rounded-md px-3 py-1 ${
-                list === option.list ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'
+              className={`rounded-md px-2.5 py-0.5 ${
+                list === option.list ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-900'
               }`}
             >
               {option.label}
