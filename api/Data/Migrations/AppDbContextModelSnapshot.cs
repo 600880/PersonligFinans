@@ -296,6 +296,9 @@ namespace PersonligFinans.Api.Data.Migrations
                     b.HasKey("Id")
                         .HasName("pk_bookmarks");
 
+                    b.HasIndex("FolderId")
+                        .HasDatabaseName("ix_bookmarks_folder_id");
+
                     b.HasIndex("TransactionId")
                         .IsUnique()
                         .HasDatabaseName("ix_bookmarks_transaction_id");
@@ -397,6 +400,35 @@ namespace PersonligFinans.Api.Data.Migrations
                         .HasDatabaseName("ix_categories_user_id");
 
                     b.ToTable("categories", (string)null);
+                });
+
+            modelBuilder.Entity("PersonligFinans.Api.Data.Folder", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("name");
+
+                    b.Property<string>("UserId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_folders");
+
+                    b.HasIndex("UserId")
+                        .HasDatabaseName("ix_folders_user_id");
+
+                    b.ToTable("folders", (string)null);
                 });
 
             modelBuilder.Entity("PersonligFinans.Api.Data.SentPasswordResetEmail", b =>
@@ -548,6 +580,12 @@ namespace PersonligFinans.Api.Data.Migrations
 
             modelBuilder.Entity("PersonligFinans.Api.Data.Bookmark", b =>
                 {
+                    b.HasOne("PersonligFinans.Api.Data.Folder", null)
+                        .WithMany()
+                        .HasForeignKey("FolderId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .HasConstraintName("fk_bookmarks_folders_folder_id");
+
                     b.HasOne("PersonligFinans.Api.Data.Transaction", null)
                         .WithOne()
                         .HasForeignKey("PersonligFinans.Api.Data.Bookmark", "TransactionId")
@@ -590,6 +628,16 @@ namespace PersonligFinans.Api.Data.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_categories_asp_net_users_user_id");
+                });
+
+            modelBuilder.Entity("PersonligFinans.Api.Data.Folder", b =>
+                {
+                    b.HasOne("Microsoft.AspNetCore.Identity.IdentityUser", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_folders_asp_net_users_user_id");
                 });
 
             modelBuilder.Entity("PersonligFinans.Api.Data.SentPasswordResetEmail", b =>

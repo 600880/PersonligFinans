@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using PersonligFinans.Api.Bookmarks;
+using PersonligFinans.Api.Folders;
 using PersonligFinans.Api.Spending;
 using PersonligFinans.Api.Transactions;
 
@@ -11,6 +12,7 @@ namespace PersonligFinans.Api.Tests;
 public class BookmarkEndpointsTests : IAsyncLifetime
 {
     private readonly PostgresApiFactory _factory;
+    private readonly string _email = SignedInClient.UniqueEmail();
     private HttpClient _client = null!;
     private TestCategories _categories = null!;
 
@@ -21,7 +23,7 @@ public class BookmarkEndpointsTests : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        _client = await _factory.CreateSignedInClientAsync();
+        _client = await _factory.CreateSignedInClientAsync(_email);
         _categories = await TestCategories.Of(_client);
     }
 
@@ -200,6 +202,86 @@ public class BookmarkEndpointsTests : IAsyncLifetime
         var spendingAfter = await SpendingOfAugust();
         Assert.Equal(spendingBefore.Total, spendingAfter.Total);
         Assert.Equal(spendingBefore.Slices, spendingAfter.Slices);
+    }
+
+    private async Task<int> AddFolder(string name)
+    {
+        var response = await _client.PostAsJsonAsync("/api/folders", new { name });
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        return (await response.Content.ReadFromJsonAsync<FolderResponse>())!.Id;
+    }
+
+    private async Task BookmarkInFolder(int transactionId, int folderId)
+    {
+        await Bookmark(transactionId);
+        await _factory.FileBookmarkAsync(_email, transactionId, folderId);
+    }
+
+    private Task<HttpResponseMessage> GetBookmarksIn(int folderId) =>
+        _client.GetAsync($"/api/bookmarks?folderId={folderId}");
+
+    private async Task<List<TransactionResponse>> BookmarksIn(int folderId)
+    {
+        var response = await GetBookmarksIn(folderId);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        return (await response.Content.ReadFromJsonAsync<List<TransactionResponse>>())!;
+    }
+
+    [Fact]
+    public async Task Get_BookmarksOfAFolder_ListsOnlyThatFoldersBookmarks_AndTheUnfiledListNone()
+    {
+        var tax = await AddFolder("Tax deductible");
+        var warranty = await AddFolder("Warranty");
+        var inTax = await AddTransaction(description: "in Tax deductible");
+        var inWarranty = await AddTransaction(description: "in Warranty");
+        var unfiled = await AddTransaction(description: "in no Folder");
+        await AddTransaction(description: "not bookmarked");
+        await BookmarkInFolder(inTax.Id, tax);
+        await BookmarkInFolder(inWarranty.Id, warranty);
+        await Bookmark(unfiled.Id);
+
+        Assert.Equal(["in Tax deductible"], (await BookmarksIn(tax)).Select(t => t.Description));
+        Assert.Equal(["in Warranty"], (await BookmarksIn(warranty)).Select(t => t.Description));
+        Assert.Equal(["in no Folder"], (await Bookmarks()).Select(t => t.Description));
+    }
+
+    [Fact]
+    public async Task Get_BookmarksOfAFolder_ListsThemFromAnyDateNewestFirst_AsThePeriodsListDoes()
+    {
+        var tax = await AddFolder("Tax deductible");
+        var older = await AddTransaction(date: "2019-03-01", description: "older");
+        var sameDayFirst = await AddTransaction(date: "2031-06-15", description: "same day, added first");
+        var sameDaySecond = await AddTransaction(date: "2031-06-15", description: "same day, added second");
+        var september = await AddTransaction(date: "2026-09-24", description: "Rema 1000");
+        await _client.PutAsJsonAsync($"/api/transactions/{september.Id}/note", new { note = "Warranty" });
+        // Filed in another order than they are listed.
+        foreach (var transaction in new[] { sameDayFirst, september, older, sameDaySecond })
+            await BookmarkInFolder(transaction.Id, tax);
+
+        var bookmarks = await BookmarksIn(tax);
+
+        Assert.Equal(
+            ["same day, added second", "same day, added first", "Rema 1000", "older"],
+            bookmarks.Select(t => t.Description));
+        Assert.Equal((await TransactionsOf(2026, 9)).Single(), bookmarks.Single(t => t.Id == september.Id));
+        Assert.Equal(september with { Note = "Warranty", Bookmarked = true }, bookmarks.Single(t => t.Id == september.Id));
+    }
+
+    [Fact]
+    public async Task Get_BookmarksOfAnEmptyFolder_ListsNone()
+    {
+        var tax = await AddFolder("Tax deductible");
+        await Bookmark((await AddTransaction()).Id);
+
+        Assert.Empty(await BookmarksIn(tax));
+    }
+
+    [Fact]
+    public async Task Get_BookmarksOfAnUnknownFolder_ReturnsNotFound()
+    {
+        var response = await GetBookmarksIn(int.MaxValue);
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
     private async Task Upload(byte[] pdf)

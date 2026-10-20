@@ -17,11 +17,19 @@ public static class BookmarkEndpoints
         api.MapPost("/transactions/{id:int}/bookmark", AddBookmark);
         api.MapDelete("/transactions/{id:int}/bookmark", RemoveBookmark);
 
-        // The bookmarked Transactions in no Folder, from any date, listed like a Period's.
-        api.MapGet("/bookmarks", async (AppDbContext db) =>
-            await TransactionEndpoints.ListNewestFirst(
-                db.Transactions.Where(t => db.Bookmarks.Any(b => b.TransactionId == t.Id && b.FolderId == null)),
-                db));
+        api.MapGet("/bookmarks", ListBookmarks);
+    }
+
+    // The bookmarked Transactions in the Folder, or in no Folder without one, from any date, listed
+    // like a Period's.
+    private static async Task<IResult> ListBookmarks(int? folderId, AppDbContext db)
+    {
+        if (folderId is not null && !await db.Folders.AnyAsync(f => f.Id == folderId))
+            return Results.NotFound();
+
+        return Results.Ok(await TransactionEndpoints.ListNewestFirst(
+            db.Transactions.Where(t => db.Bookmarks.Any(b => b.TransactionId == t.Id && b.FolderId == folderId)),
+            db));
     }
 
     // Bookmarks the Transaction in no Folder. One already bookmarked is left as it is and answers with

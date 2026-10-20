@@ -2,15 +2,20 @@ import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
 import { flushSync } from 'react-dom'
 import {
   addBookmark,
+  addFolder,
   changeTransactionCategory,
   changeTransactionNote,
   deleteTransaction,
   fetchBookmarks,
   fetchCategories,
+  fetchFolderBookmarks,
+  fetchFolders,
   fetchTransactionMonths,
   fetchTransactions,
   removeBookmark,
   type Category,
+  type Folder,
+  type SaveFolderResult,
   type Transaction,
   type TransactionMonth,
   type YearOrMonth,
@@ -18,14 +23,17 @@ import {
 import { categoryFilterOf, matchesCategory, UNCATEGORIZED } from '../lib/categoryFilter'
 import { formatAmount } from '../lib/amount'
 import { formatNorwegianDate } from '../lib/date'
+import { inFolderOrder } from '../lib/folders'
 import { currentMonth, MONTH_NAMES } from '../lib/month'
 import { periodLabel, periodValue, type Period } from '../lib/period'
 import { firstMonthWithTransactions, monthsOfQuarter } from '../lib/quarter'
 import { BookmarkAddedPopup } from './BookmarkAddedPopup'
+import { FolderDropdown } from './FolderDropdown'
 import { ErrorMessage, StatusMessage } from './Messages'
 
 const LOAD_ERROR = 'Could not load the transactions.'
 const BOOKMARKS_LOAD_ERROR = 'Could not load the bookmarks.'
+const FOLDERS_LOAD_ERROR = 'Could not load the folders.'
 
 const inputClass = 'rounded-lg border border-slate-300 px-3 py-2 font-normal'
 const smallButtonClass =
@@ -96,10 +104,15 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
   // Set when a Transaction is deleted while Bookmarks is shown, so the Period and the months are
   // loaded again the next time All is shown.
   const [isAllStale, setIsAllStale] = useState(false)
-  // The bookmarked Transactions while Bookmarks is shown; null while they load, and while All is
-  // shown, so choosing Bookmarks always loads them afresh. A row whose Bookmark is removed stays, with
+  // The chosen Folder's bookmarked Transactions while Bookmarks is shown; null while they load, and
+  // while All is shown, so choosing Bookmarks or a Folder always loads them afresh. A row whose Bookmark is removed stays, with
   // its star empty, so it can be bookmarked again with one click.
   const [bookmarks, setBookmarks] = useState<Transaction[] | null>(null)
+  // The Folder whose bookmarks Bookmarks lists, or null for those in no Folder.
+  const [chosenFolderId, setChosenFolderId] = useState<number | null>(null)
+  // The User's Folders, in the API's order. Null until first needed and loaded, then kept for the
+  // rest of the visit to the page.
+  const [folders, setFolders] = useState<Folder[] | null>(null)
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   // The Transactions whose Category is being saved. Their selects are disabled until it is, so a
@@ -161,7 +174,8 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
   useEffect(() => {
     if (list !== 'bookmarks') return
     let ignore = false
-    fetchBookmarks()
+    const loading = chosenFolderId === null ? fetchBookmarks() : fetchFolderBookmarks(chosenFolderId)
+    loading
       .then((loadedBookmarks) => {
         if (!ignore) setBookmarks(loadedBookmarks)
       })
@@ -171,7 +185,25 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
     return () => {
       ignore = true
     }
-  }, [list])
+  }, [list, chosenFolderId])
+
+  // The Folders are loaded the first time they are needed. Failing, they are tried again the next
+  // time Bookmarks is shown.
+  const needsFolders = list === 'bookmarks'
+  useEffect(() => {
+    if (!needsFolders || folders !== null) return
+    let ignore = false
+    fetchFolders()
+      .then((loadedFolders) => {
+        if (!ignore) setFolders(loadedFolders)
+      })
+      .catch(() => {
+        if (!ignore) setErrorMessage(FOLDERS_LOAD_ERROR)
+      })
+    return () => {
+      ignore = true
+    }
+  }, [needsFolders, folders])
 
   // The chosen year stays offered even once its last Transaction is deleted.
   const years = [
@@ -184,6 +216,7 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
   const transactions =
     loaded && selected && periodValue(loaded.period) === periodValue(selected) ? loaded.transactions : null
   const isFiltering = categoryFilter !== '' || search.trim() !== ''
+  const chosenFolder = folders?.find((f) => f.id === chosenFolderId) ?? null
   const shownTransactions =
     list === 'bookmarks'
       ? bookmarks
@@ -191,7 +224,7 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
 
   // The Year, Month, Category and Search are kept while Bookmarks is shown, and so is the Period's
   // list, so All comes back as it was left: unless a Transaction was deleted meanwhile, when the
-  // Period and the months are loaded again.
+  // Period and the months are loaded again. Bookmarks always opens on the bookmarks in no Folder.
   function chooseList(next: List) {
     if (next === list) return
     setStatusMessage(null)
@@ -200,6 +233,7 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
     setEditingNoteId(null)
     setPopupId(null)
     setBookmarks(null)
+    setChosenFolderId(null)
     if (next === 'all' && isAllStale) {
       setIsAllStale(false)
       // The same Period as a new object, so the effect loads it again.
@@ -214,6 +248,32 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
     fetchTransactionMonths()
       .then(setMonthsWithTransactions)
       .catch(() => {})
+  }
+
+  // Loads the Folder's bookmarks afresh, so rows whose Bookmark was removed meanwhile are gone.
+  function chooseFolder(folderId: number | null) {
+    setStatusMessage(null)
+    setErrorMessage(null)
+    setConfirmingDeleteId(null)
+    setEditingNoteId(null)
+    setPopupId(null)
+    setBookmarks(null)
+    setChosenFolderId(folderId)
+  }
+
+  // Adds the new Folder in the API's order and shows it, empty.
+  async function createFolder(name: string): Promise<SaveFolderResult> {
+    setStatusMessage(null)
+    setErrorMessage(null)
+    const result = await addFolder(name)
+    if (result.ok) {
+      setFolders((current) => inFolderOrder([...(current ?? []), result.folder]))
+      chooseFolder(result.folder.id)
+      setStatusMessage('Folder created')
+    } else {
+      setErrorMessage(result.message)
+    }
+    return result
   }
 
   function choosePeriod(period: YearOrMonth) {
@@ -399,8 +459,16 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
         </div>
       </div>
 
-      {/* Every Bookmark is in no Folder, which the page calls "Bookmarks". */}
-      {list === 'bookmarks' && <h3 className="mt-4 py-2 font-medium text-slate-900">Bookmarks</h3>}
+      {list === 'bookmarks' && (
+        <div className="mt-4 flex flex-wrap gap-3">
+          <FolderDropdown
+            folders={folders}
+            chosenId={chosenFolderId}
+            onChoose={chooseFolder}
+            createFolder={createFolder}
+          />
+        </div>
+      )}
 
       {list === 'all' && selected && (
         <div className="mt-4 flex flex-wrap gap-3">
@@ -480,7 +548,9 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
       )}
 
       {list === 'bookmarks' && shownTransactions?.length === 0 && (
-        <p className="mt-6 text-sm text-slate-500">No bookmarks</p>
+        <p className="mt-6 text-sm text-slate-500">
+          {chosenFolder ? `No bookmarks in ${chosenFolder.name}` : 'No bookmarks'}
+        </p>
       )}
 
       {shownTransactions && shownTransactions.length > 0 && (
