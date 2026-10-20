@@ -1,7 +1,7 @@
 import { useId, useState, type FormEvent, type ReactNode, type Ref } from 'react'
 import type { Folder, FolderFieldErrors, SaveFolderResult } from '../lib/api'
 
-// The select's values for "Bookmarks", the bookmarks in no Folder, and for "Create folder". A
+// The select's values for "Bookmarks", the bookmarks in no Folder, and for "New folder…". A
 // Folder's value is its id.
 const NO_FOLDER = ''
 const CREATE_FOLDER = 'create'
@@ -11,9 +11,9 @@ const smallButtonClass =
   'rounded-lg px-2 py-1 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-300'
 
 // The Folder dropdown: "Bookmarks" for the bookmarks in no Folder, then the Folders in the order
-// given, then "Create folder" last. chosenId is null for "Bookmarks". Disabled while the Folders are
+// given, then "New folder…" last. chosenId is null for "Bookmarks". Disabled while the Folders are
 // null, as they are until loaded, offering only the chosen option meanwhile, and while disabled is set.
-// "Create folder" swaps the dropdown for a name field with Create and Cancel. Create hands the
+// "New folder…" swaps the dropdown for a name field with Create and Cancel. Create hands the
 // trimmed name to createFolder, which makes the Folder and chooses it; the field stays, with its
 // input, until that succeeds. Cancel brings back the dropdown with the same option chosen.
 // The children are shown next to the dropdown, and hidden with it while the name field shows.
@@ -79,7 +79,7 @@ export function FolderDropdown({
                   {folder.name}
                 </option>
               ))}
-              <option value={CREATE_FOLDER}>Create folder</option>
+              <option value={CREATE_FOLDER}>New folder…</option>
             </>
           )}
         </select>

@@ -2830,11 +2830,11 @@ describe('Transactions page', () => {
           return user
         }
 
-        it('shows the Folder the Bookmark went into, among "Bookmarks", the Folders A–Z and "Create folder" last', async () => {
+        it('shows the Folder the Bookmark went into, among "Bookmarks", the Folders A–Z and "New folder…" last', async () => {
           await openPopupIn(21)
 
           expect(popupFolderSelect()).toHaveDisplayValue('Warranty')
-          expect(popupFolderOptions()).toEqual(['Bookmarks', 'Tax deductible', 'Warranty', 'Create folder'])
+          expect(popupFolderOptions()).toEqual(['Bookmarks', 'Tax deductible', 'Warranty', 'New folder…'])
           expect(popupFolderSelect()).toHaveFocus()
         })
 
@@ -2959,7 +2959,7 @@ describe('Transactions page', () => {
             }
             const user = await openPopupIn(null)
 
-            await user.selectOptions(popupFolderSelect(), 'Create folder')
+            await user.selectOptions(popupFolderSelect(), 'New folder…')
 
             expect(within(popup()).queryByLabelText('Folder')).not.toBeInTheDocument()
             expect(nameField()).toHaveFocus()
@@ -2970,7 +2970,7 @@ describe('Transactions page', () => {
             await waitFor(() => expect(popupFolderSelect()).toHaveDisplayValue('Kvitteringer'))
             expect(created).toEqual([{ name: 'Kvitteringer' }])
             expect(filings).toEqual([[5, { folderId: 30 }]])
-            expect(popupFolderOptions()).toEqual(['Bookmarks', 'Kvitteringer', 'Tax deductible', 'Warranty', 'Create folder'])
+            expect(popupFolderOptions()).toEqual(['Bookmarks', 'Kvitteringer', 'Tax deductible', 'Warranty', 'New folder…'])
             expect(popupFolderSelect()).toHaveFocus()
 
             await user.click(within(popup()).getByRole('button', { name: 'Done' }))
@@ -2981,18 +2981,18 @@ describe('Transactions page', () => {
               within(screen.getByLabelText('Folder'))
                 .getAllByRole('option')
                 .map((option) => option.textContent),
-            ).toEqual(['Bookmarks', 'Kvitteringer', 'Tax deductible', 'Warranty', 'Create folder'])
+            ).toEqual(['Bookmarks', 'Kvitteringer', 'Tax deductible', 'Warranty', 'New folder…'])
           })
 
           it('brings back the dropdown with the Bookmark\'s Folder on Cancel', async () => {
             const user = await openPopupIn(21)
-            await user.selectOptions(popupFolderSelect(), 'Create folder')
+            await user.selectOptions(popupFolderSelect(), 'New folder…')
             await user.type(nameField(), 'Kvitteringer')
 
             await user.click(within(popup()).getByRole('button', { name: 'Cancel' }))
 
             expect(popupFolderSelect()).toHaveDisplayValue('Warranty')
-            expect(popupFolderOptions()).toEqual(['Bookmarks', 'Tax deductible', 'Warranty', 'Create folder'])
+            expect(popupFolderOptions()).toEqual(['Bookmarks', 'Tax deductible', 'Warranty', 'New folder…'])
             expect(fetchMock.mock.calls.filter(([url, init]) => url === '/api/folders' && init?.method === 'POST')).toEqual([])
             expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'PUT')).toEqual([])
           })
@@ -3001,7 +3001,7 @@ describe('Transactions page', () => {
             handleAddFolder = () =>
               Response.json({ errors: { name: ["A folder named 'Warranty' already exists."] } }, { status: 400 })
             const user = await openPopupIn(null)
-            await user.selectOptions(popupFolderSelect(), 'Create folder')
+            await user.selectOptions(popupFolderSelect(), 'New folder…')
             await user.type(nameField(), 'warranty')
 
             await user.click(within(popup()).getByRole('button', { name: 'Create' }))
@@ -3015,7 +3015,7 @@ describe('Transactions page', () => {
           it('says so in the popup, keeping the input, when the Folder could not be created', async () => {
             handleAddFolder = () => new Response(null, { status: 500 })
             const user = await openPopupIn(null)
-            await user.selectOptions(popupFolderSelect(), 'Create folder')
+            await user.selectOptions(popupFolderSelect(), 'New folder…')
             await user.type(nameField(), 'Kvitteringer')
 
             await user.click(within(popup()).getByRole('button', { name: 'Create' }))
@@ -3028,14 +3028,14 @@ describe('Transactions page', () => {
             handleAddFolder = () => Response.json({ id: 30, name: 'Kvitteringer' }, { status: 201 })
             handleFileBookmark = () => new Response(null, { status: 500 })
             const user = await openPopupIn(21)
-            await user.selectOptions(popupFolderSelect(), 'Create folder')
+            await user.selectOptions(popupFolderSelect(), 'New folder…')
             await user.type(nameField(), 'Kvitteringer')
 
             await user.click(within(popup()).getByRole('button', { name: 'Create' }))
 
             expect(await within(popup()).findByRole('alert')).toHaveTextContent('Could not move the bookmark.')
             expect(popupFolderSelect()).toHaveDisplayValue('Warranty')
-            expect(popupFolderOptions()).toEqual(['Bookmarks', 'Kvitteringer', 'Tax deductible', 'Warranty', 'Create folder'])
+            expect(popupFolderOptions()).toEqual(['Bookmarks', 'Kvitteringer', 'Tax deductible', 'Warranty', 'New folder…'])
           })
         })
       })
@@ -3471,10 +3471,10 @@ describe('Transactions page', () => {
         return user
       }
 
-      it('offers "Bookmarks", then the Folders A–Z, then "Create folder" last, with "Bookmarks" chosen', async () => {
+      it('offers "Bookmarks", then the Folders A–Z, then "New folder…" last, with "Bookmarks" chosen', async () => {
         await showBookmarksWithFolders()
 
-        expect(folderOptions()).toEqual(['Bookmarks', 'Tax deductible', 'Warranty', 'Create folder'])
+        expect(folderOptions()).toEqual(['Bookmarks', 'Tax deductible', 'Warranty', 'New folder…'])
         expect(folderSelect()).toHaveDisplayValue('Bookmarks')
         expect(listedDescriptions()).toEqual(['Rema 1000', 'Elkjøp'])
       })
@@ -3571,7 +3571,7 @@ describe('Transactions page', () => {
           }
           const user = await showBookmarksWithFolders()
 
-          await user.selectOptions(folderSelect(), 'Create folder')
+          await user.selectOptions(folderSelect(), 'New folder…')
 
           expect(screen.queryByLabelText('Folder')).not.toBeInTheDocument()
           expect(nameField()).toHaveValue('')
@@ -3584,7 +3584,7 @@ describe('Transactions page', () => {
           expect(await screen.findByRole('status')).toHaveTextContent('Folder created')
           expect(created).toEqual([{ name: 'kvitteringer' }])
           expect(folderSelect()).toHaveDisplayValue('kvitteringer')
-          expect(folderOptions()).toEqual(['Bookmarks', 'kvitteringer', 'Tax deductible', 'Warranty', 'Create folder'])
+          expect(folderOptions()).toEqual(['Bookmarks', 'kvitteringer', 'Tax deductible', 'Warranty', 'New folder…'])
           expect(await screen.findByText('No bookmarks in kvitteringer')).toBeInTheDocument()
           expect(screen.queryByRole('textbox', { name: 'Folder name' })).not.toBeInTheDocument()
         })
@@ -3594,13 +3594,13 @@ describe('Transactions page', () => {
           await user.selectOptions(folderSelect(), 'Warranty')
           await screen.findByRole('cell', { name: 'Power' })
 
-          await user.selectOptions(folderSelect(), 'Create folder')
+          await user.selectOptions(folderSelect(), 'New folder…')
           await user.type(nameField(), 'Receipts')
           await user.click(screen.getByRole('button', { name: 'Cancel' }))
 
           expect(folderSelect()).toHaveDisplayValue('Warranty')
           expect(listedDescriptions()).toEqual(['Power'])
-          expect(folderOptions()).toEqual(['Bookmarks', 'Tax deductible', 'Warranty', 'Create folder'])
+          expect(folderOptions()).toEqual(['Bookmarks', 'Tax deductible', 'Warranty', 'New folder…'])
           expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'POST')).toEqual([])
         })
 
@@ -3608,7 +3608,7 @@ describe('Transactions page', () => {
           handleAddFolder = () =>
             Response.json({ errors: { name: ["A folder can't be named 'Bookmarks'."] } }, { status: 400 })
           const user = await showBookmarksWithFolders()
-          await user.selectOptions(folderSelect(), 'Create folder')
+          await user.selectOptions(folderSelect(), 'New folder…')
           await user.type(nameField(), 'bookmarks')
 
           await user.click(screen.getByRole('button', { name: 'Create' }))
@@ -3624,7 +3624,7 @@ describe('Transactions page', () => {
         it('says so, keeping the input, when the Folder could not be created', async () => {
           handleAddFolder = () => new Response(null, { status: 500 })
           const user = await showBookmarksWithFolders()
-          await user.selectOptions(folderSelect(), 'Create folder')
+          await user.selectOptions(folderSelect(), 'New folder…')
           await user.type(nameField(), 'Receipts')
 
           await user.click(screen.getByRole('button', { name: 'Create' }))
@@ -3765,7 +3765,7 @@ describe('Transactions page', () => {
           expect(await screen.findByRole('status')).toHaveTextContent('Folder renamed')
           expect(renamed).toEqual([[21, { name: 'Abonnement' }]])
           expect(folderSelect()).toHaveDisplayValue('Abonnement')
-          expect(folderOptions()).toEqual(['Bookmarks', 'Abonnement', 'Tax deductible', 'Create folder'])
+          expect(folderOptions()).toEqual(['Bookmarks', 'Abonnement', 'Tax deductible', 'New folder…'])
           expect(listedDescriptions()).toEqual(['Power'])
           expect(screen.queryByRole('textbox', { name: 'Folder name' })).not.toBeInTheDocument()
         })
@@ -3796,7 +3796,7 @@ describe('Transactions page', () => {
           await user.click(screen.getByRole('button', { name: 'Cancel' }))
 
           expect(folderSelect()).toHaveDisplayValue('Warranty')
-          expect(folderOptions()).toEqual(['Bookmarks', 'Tax deductible', 'Warranty', 'Create folder'])
+          expect(folderOptions()).toEqual(['Bookmarks', 'Tax deductible', 'Warranty', 'New folder…'])
           expect(listedDescriptions()).toEqual(['Power'])
           expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'PUT')).toEqual([])
 
@@ -3825,7 +3825,7 @@ describe('Transactions page', () => {
           expect(await screen.findByRole('status')).toHaveTextContent('Folder deleted')
           expect(deleted).toEqual([21])
           expect(folderSelect()).toHaveDisplayValue('Bookmarks')
-          expect(folderOptions()).toEqual(['Bookmarks', 'Tax deductible', 'Create folder'])
+          expect(folderOptions()).toEqual(['Bookmarks', 'Tax deductible', 'New folder…'])
           expect(await screen.findByRole('cell', { name: 'Elkjøp' })).toBeInTheDocument()
           expect(listedDescriptions()).toEqual(['Rema 1000', 'Elkjøp'])
           expect(screen.queryByText("Delete 'Warranty' and its bookmarks?")).not.toBeInTheDocument()
@@ -3840,7 +3840,7 @@ describe('Transactions page', () => {
 
           expect(screen.queryByText("Delete 'Warranty' and its bookmarks?")).not.toBeInTheDocument()
           expect(folderSelect()).toHaveDisplayValue('Warranty')
-          expect(folderOptions()).toEqual(['Bookmarks', 'Tax deductible', 'Warranty', 'Create folder'])
+          expect(folderOptions()).toEqual(['Bookmarks', 'Tax deductible', 'Warranty', 'New folder…'])
           expect(listedDescriptions()).toEqual(['Power'])
           expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'DELETE')).toEqual([])
         })
@@ -3854,7 +3854,7 @@ describe('Transactions page', () => {
 
           expect(await screen.findByRole('alert')).toHaveTextContent('Deleting failed (500).')
           expect(folderSelect()).toHaveDisplayValue('Warranty')
-          expect(folderOptions()).toEqual(['Bookmarks', 'Tax deductible', 'Warranty', 'Create folder'])
+          expect(folderOptions()).toEqual(['Bookmarks', 'Tax deductible', 'Warranty', 'New folder…'])
           expect(listedDescriptions()).toEqual(['Power'])
         })
 
@@ -3867,7 +3867,7 @@ describe('Transactions page', () => {
 
           expect(await screen.findByRole('status')).toHaveTextContent('The folder was already deleted.')
           expect(folderSelect()).toHaveDisplayValue('Bookmarks')
-          expect(folderOptions()).toEqual(['Bookmarks', 'Tax deductible', 'Create folder'])
+          expect(folderOptions()).toEqual(['Bookmarks', 'Tax deductible', 'New folder…'])
         })
 
         it('shows the stars of its bookmarks empty once All is shown again', async () => {
