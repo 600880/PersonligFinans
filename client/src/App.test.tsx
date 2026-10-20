@@ -67,7 +67,18 @@ let months: { year: number; month: number }[] | Response
 // month is undefined for a whole year.
 let handleListPeriod: (year: number, month: number | undefined) => Response | Promise<Response>
 let handleChangeCategory: (id: number, body: unknown) => Response | Promise<Response>
+let handleChangeNote: (id: number, body: unknown) => Response
 let handleDeleteTransaction: (id: number) => Response | Promise<Response>
+let handleAddBookmark: (id: number) => Response | Promise<Response>
+let handleRemoveBookmark: (id: number) => Response | Promise<Response>
+let handleFileBookmark: (id: number, body: unknown) => Response | Promise<Response>
+let handleListBookmarks: () => Response | Promise<Response>
+// The bookmarks in one Folder, and the User's Folders as the folders endpoint lists them.
+let handleListFolderBookmarks: (folderId: number) => Response | Promise<Response>
+let folders: { id: number; name: string }[] | Response | Promise<Response>
+let handleAddFolder: PostHandler
+let handleRenameFolder: (id: number, body: unknown) => Response | Promise<Response>
+let handleDeleteFolder: (id: number) => Response | Promise<Response>
 // What the categories endpoint returns: `categories` unless a test adds to it or makes it fail.
 let categoriesServed: ServedCategory[] | Response
 // The month or quarter is undefined when the Spending of a whole year, or of a quarter, is asked for.
@@ -131,6 +142,22 @@ const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
   if (categoryUrl && init?.method === 'PUT') {
     return handleChangeCategory(Number(categoryUrl[1]), JSON.parse(init.body as string))
   }
+  const noteUrl = /^\/api\/transactions\/(\d+)\/note$/.exec(url)
+  if (noteUrl && init?.method === 'PUT') return handleChangeNote(Number(noteUrl[1]), JSON.parse(init.body as string))
+  const bookmarkUrl = /^\/api\/transactions\/(\d+)\/bookmark$/.exec(url)
+  if (bookmarkUrl && init?.method === 'POST') return handleAddBookmark(Number(bookmarkUrl[1]))
+  if (bookmarkUrl && init?.method === 'DELETE') return handleRemoveBookmark(Number(bookmarkUrl[1]))
+  if (bookmarkUrl && init?.method === 'PUT') return handleFileBookmark(Number(bookmarkUrl[1]), JSON.parse(init.body as string))
+  if (url === '/api/bookmarks') return handleListBookmarks()
+  const folderBookmarksUrl = /^\/api\/bookmarks\?folderId=(\d+)$/.exec(url)
+  if (folderBookmarksUrl) return handleListFolderBookmarks(Number(folderBookmarksUrl[1]))
+  if (url === '/api/folders' && init?.method === 'POST') return handleAddFolder(JSON.parse(init.body as string))
+  if (url === '/api/folders') {
+    return folders instanceof Response || folders instanceof Promise ? folders : Response.json(folders)
+  }
+  const folderUrl = /^\/api\/folders\/(\d+)$/.exec(url)
+  if (folderUrl && init?.method === 'PUT') return handleRenameFolder(Number(folderUrl[1]), JSON.parse(init.body as string))
+  if (folderUrl && init?.method === 'DELETE') return handleDeleteFolder(Number(folderUrl[1]))
   const transactionUrl = /^\/api\/transactions\/(\d+)$/.exec(url)
   if (transactionUrl && init?.method === 'DELETE') return handleDeleteTransaction(Number(transactionUrl[1]))
   if (url === '/api/transactions/months') {
@@ -194,7 +221,17 @@ beforeEach(() => {
   months = []
   handleListPeriod = () => Response.json([])
   handleChangeCategory = () => new Response(null, { status: 500 })
+  handleChangeNote = () => new Response(null, { status: 500 })
   handleDeleteTransaction = () => new Response(null, { status: 204 })
+  handleAddBookmark = () => Response.json({ folderId: null })
+  handleRemoveBookmark = () => new Response(null, { status: 204 })
+  handleFileBookmark = (_id, body) => Response.json(body)
+  handleListBookmarks = () => Response.json([])
+  handleListFolderBookmarks = () => Response.json([])
+  folders = []
+  handleAddFolder = (body) => Response.json({ id: 30, ...(body as object) }, { status: 201 })
+  handleRenameFolder = (id, body) => Response.json({ id, ...(body as object) })
+  handleDeleteFolder = () => new Response(null, { status: 204 })
   handleSpending = () => Response.json({ total: 0, slices: [] })
   handleMonthlySpending = (from, to) => Response.json(monthlySpending(from, to))
   categoriesServed = categories
@@ -2039,6 +2076,7 @@ describe('Transactions page', () => {
       categoryId: 1,
       locked: false,
       imported: true,
+      bookmarked: false,
     },
     {
       id: 4,
@@ -2049,6 +2087,7 @@ describe('Transactions page', () => {
       categoryId: null,
       locked: false,
       imported: true,
+      bookmarked: false,
     },
   ]
 
@@ -2061,6 +2100,7 @@ describe('Transactions page', () => {
     categoryId: 1,
     locked: false,
     imported: true,
+    bookmarked: false,
   }
 
   // A month with a Transaction a rule put in Other, one the user put in Other (so Locked), and one a
@@ -2076,6 +2116,7 @@ describe('Transactions page', () => {
       categoryId: 13,
       locked: false,
       imported: true,
+      bookmarked: false,
     },
     {
       id: 7,
@@ -2086,6 +2127,7 @@ describe('Transactions page', () => {
       categoryId: 13,
       locked: true,
       imported: true,
+      bookmarked: false,
     },
   ]
 
@@ -2160,8 +2202,8 @@ describe('Transactions page', () => {
 
     await screen.findByRole('cell', { name: 'Rema 1000' })
     expect(rowCells()).toEqual([
-      ['24.09.2026', 'Rema 1000', 'Groceries', '-1\u00a0249,90\u00a0kr', '', ''],
-      ['03.09.2026', 'Lønn Fra: Testfirma AS', 'Uncategorized', '24\u00a0500,00\u00a0kr', '', ''],
+      ['24.09.2026', 'Rema 1000', 'Groceries', '-1\u00a0249,90\u00a0kr', '', '', ''],
+      ['03.09.2026', 'Lønn Fra: Testfirma AS', 'Uncategorized', '24\u00a0500,00\u00a0kr', '', '', ''],
     ])
   })
 
@@ -2465,6 +2507,7 @@ describe('Transactions page', () => {
       categoryId: 13,
       locked: true,
       imported: false,
+      bookmarked: false,
     }
 
     // getByText collapses the Amount's no-break space into a plain one.
@@ -2633,6 +2676,1239 @@ describe('Transactions page', () => {
 
       expect(await screen.findByRole('alert')).toHaveTextContent('Could not reach the server.')
       expect(screen.getByRole('cell', { name: 'Frisør' })).toBeInTheDocument()
+    })
+  })
+
+  describe('bookmarking with the star', () => {
+    // A request kept waiting until the test answers it.
+    function waitingAnswer() {
+      let answer!: (response: Response) => void
+      const response = new Promise<Response>((resolve) => {
+        answer = resolve
+      })
+      return { response, answer }
+    }
+
+    it('bookmarks a Transaction with its empty star, which fills at once and waits for the save', async () => {
+      const added = waitingAnswer()
+      const bookmarkedIds: number[] = []
+      handleAddBookmark = (id) => {
+        bookmarkedIds.push(id)
+        return added.response
+      }
+      const user = await openSeptember()
+      const star = within(transactionRow('Rema 1000')).getByRole('button', { name: 'Bookmark Rema 1000' })
+      expect(star).toHaveAttribute('aria-pressed', 'false')
+
+      await user.click(star)
+
+      const filled = screen.getByRole('button', { name: 'Remove bookmark for Rema 1000' })
+      expect(filled).toHaveAttribute('aria-pressed', 'true')
+      expect(filled).toBeDisabled()
+      expect(bookmarkedIds).toEqual([5])
+
+      added.answer(Response.json({ folderId: null }))
+      await waitFor(() => expect(filled).toBeEnabled())
+      expect(filled).toHaveAttribute('aria-pressed', 'true')
+    })
+
+    // September with Rema 1000 bookmarked.
+    async function openSeptemberWithABookmark() {
+      months = [{ year: 2026, month: 9 }]
+      handleListPeriod = () =>
+        Response.json([{ ...septemberTransactions[0], bookmarked: true }, septemberTransactions[1]])
+      const user = await openTransactionsPage()
+      await screen.findByRole('cell', { name: 'Rema 1000' })
+      return user
+    }
+
+    it('removes the Bookmark with a filled star, which empties at once, with no popup', async () => {
+      const removed = waitingAnswer()
+      const removedIds: number[] = []
+      handleRemoveBookmark = (id) => {
+        removedIds.push(id)
+        return removed.response
+      }
+      const user = await openSeptemberWithABookmark()
+      const star = within(transactionRow('Rema 1000')).getByRole('button', { name: 'Remove bookmark for Rema 1000' })
+      expect(star).toHaveAttribute('aria-pressed', 'true')
+
+      await user.click(star)
+
+      const empty = screen.getByRole('button', { name: 'Bookmark Rema 1000' })
+      expect(empty).toHaveAttribute('aria-pressed', 'false')
+      expect(empty).toBeDisabled()
+      expect(removedIds).toEqual([5])
+
+      removed.answer(new Response(null, { status: 204 }))
+      await waitFor(() => expect(empty).toBeEnabled())
+      expect(empty).toHaveAttribute('aria-pressed', 'false')
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    })
+
+    it('empties the star again and says so when adding the Bookmark fails', async () => {
+      handleAddBookmark = () => new Response(null, { status: 500 })
+      const user = await openSeptember()
+
+      await user.click(screen.getByRole('button', { name: 'Bookmark Rema 1000' }))
+
+      expect(await screen.findByRole('alert')).toHaveTextContent('Could not add the bookmark.')
+      expect(screen.getByRole('button', { name: 'Bookmark Rema 1000' })).toHaveAttribute('aria-pressed', 'false')
+    })
+
+    it('fills the star again and says so when removing the Bookmark fails', async () => {
+      handleRemoveBookmark = () => new Response(null, { status: 500 })
+      const user = await openSeptemberWithABookmark()
+
+      await user.click(screen.getByRole('button', { name: 'Remove bookmark for Rema 1000' }))
+
+      expect(await screen.findByRole('alert')).toHaveTextContent('Could not remove the bookmark.')
+      expect(screen.getByRole('button', { name: 'Remove bookmark for Rema 1000' })).toHaveAttribute('aria-pressed', 'true')
+    })
+
+    it('says the same when the server cannot be reached', async () => {
+      handleAddBookmark = () => Promise.reject(new TypeError('Failed to fetch'))
+      handleRemoveBookmark = () => Promise.reject(new TypeError('Failed to fetch'))
+      const user = await openSeptemberWithABookmark()
+
+      await user.click(screen.getByRole('button', { name: 'Bookmark Lønn Fra: Testfirma AS' }))
+      expect(await screen.findByRole('alert')).toHaveTextContent('Could not add the bookmark.')
+
+      await user.click(screen.getByRole('button', { name: 'Remove bookmark for Rema 1000' }))
+      expect(await screen.findByRole('alert')).toHaveTextContent('Could not remove the bookmark.')
+      expect(screen.getByRole('button', { name: 'Bookmark Lønn Fra: Testfirma AS' })).toBeEnabled()
+      expect(screen.getByRole('button', { name: 'Remove bookmark for Rema 1000' })).toBeEnabled()
+    })
+
+    describe('"Bookmark added" popup', () => {
+      function popup() {
+        return screen.getByRole('dialog', { name: 'Bookmark added' })
+      }
+
+      function popupFolderSelect() {
+        return within(popup()).getByLabelText<HTMLSelectElement>('Folder')
+      }
+
+      function popupFolderOptions() {
+        return within(popupFolderSelect())
+          .getAllByRole('option')
+          .map((option) => option.textContent)
+      }
+
+      it('opens in the row once its empty star has added the Bookmark, with focus on its Folder', async () => {
+        const added = waitingAnswer()
+        handleAddBookmark = () => added.response
+        const user = await openSeptember()
+
+        await user.click(screen.getByRole('button', { name: 'Bookmark Rema 1000' }))
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+        added.answer(Response.json({ folderId: null }))
+
+        const dialog = await screen.findByRole('dialog', { name: 'Bookmark added' })
+        expect(transactionRow('Rema 1000')).toContainElement(dialog)
+        await waitFor(() => expect(popupFolderSelect()).toHaveFocus())
+        expect(popupFolderSelect()).toHaveDisplayValue('Bookmarks')
+        expect(within(dialog).getByRole('button', { name: 'Done' })).toBeInTheDocument()
+        expect(within(dialog).getByRole('button', { name: 'Remove' })).toBeInTheDocument()
+      })
+
+      describe('Folder', () => {
+        beforeEach(() => {
+          folders = [
+            { id: 20, name: 'Tax deductible' },
+            { id: 21, name: 'Warranty' },
+          ]
+        })
+
+        // The popup open on Rema 1000, bookmarked in the Folder adding answered with, once the Folders
+        // are loaded.
+        async function openPopupIn(folderId: number | null) {
+          handleAddBookmark = () => Response.json({ folderId })
+          const user = await openSeptember()
+          await user.click(screen.getByRole('button', { name: 'Bookmark Rema 1000' }))
+          await within(await screen.findByRole('dialog')).findByRole('option', { name: 'Warranty' })
+          return user
+        }
+
+        it('shows the Folder the Bookmark went into, among "Bookmarks", the Folders A–Z and "New folder…" last', async () => {
+          await openPopupIn(21)
+
+          expect(popupFolderSelect()).toHaveDisplayValue('Warranty')
+          expect(popupFolderOptions()).toEqual(['Bookmarks', 'Tax deductible', 'Warranty', 'New folder…'])
+          expect(popupFolderSelect()).toHaveFocus()
+        })
+
+        it('files the Bookmark in the chosen Folder at once, disabled while saving', async () => {
+          const filed = waitingAnswer()
+          const filings: [number, unknown][] = []
+          handleFileBookmark = (id, body) => {
+            filings.push([id, body])
+            return filed.response
+          }
+          const user = await openPopupIn(null)
+
+          await user.selectOptions(popupFolderSelect(), 'Tax deductible')
+
+          expect(filings).toEqual([[5, { folderId: 20 }]])
+          expect(popupFolderSelect()).toHaveDisplayValue('Tax deductible')
+          expect(popupFolderSelect()).toBeDisabled()
+
+          filed.answer(Response.json({ folderId: 20 }))
+
+          await waitFor(() => expect(popupFolderSelect()).toBeEnabled())
+          expect(popupFolderSelect()).toHaveDisplayValue('Tax deductible')
+          expect(within(popup()).queryByRole('alert')).not.toBeInTheDocument()
+
+          await user.selectOptions(popupFolderSelect(), 'Bookmarks')
+
+          await waitFor(() => expect(popupFolderSelect()).toBeEnabled())
+          expect(filings).toEqual([
+            [5, { folderId: 20 }],
+            [5, { folderId: null }],
+          ])
+          expect(popupFolderSelect()).toHaveDisplayValue('Bookmarks')
+        })
+
+        it('stays open on Escape while the filing is being saved', async () => {
+          const filed = waitingAnswer()
+          handleFileBookmark = () => filed.response
+          const user = await openPopupIn(null)
+          await user.selectOptions(popupFolderSelect(), 'Warranty')
+
+          await user.keyboard('{Escape}')
+
+          expect(popup()).toBeInTheDocument()
+          filed.answer(Response.json({ folderId: 21 }))
+          await waitFor(() => expect(popupFolderSelect()).toBeEnabled())
+
+          await user.keyboard('{Escape}')
+
+          expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+        })
+
+        it('goes back to the Folder the Bookmark is in, saying so, when filing fails', async () => {
+          handleFileBookmark = () => new Response(null, { status: 500 })
+          const user = await openPopupIn(21)
+
+          await user.selectOptions(popupFolderSelect(), 'Tax deductible')
+
+          expect(await within(popup()).findByRole('alert')).toHaveTextContent('Could not move the bookmark.')
+          expect(popupFolderSelect()).toHaveDisplayValue('Warranty')
+          expect(popupFolderSelect()).toBeEnabled()
+          expect(screen.getByRole('button', { name: 'Remove bookmark for Rema 1000' })).toHaveAttribute('aria-pressed', 'true')
+        })
+
+        it('says when the chosen Folder no longer exists', async () => {
+          handleFileBookmark = () =>
+            Response.json({ errors: { folderId: ['The folder no longer exists.'] } }, { status: 400 })
+          const user = await openPopupIn(null)
+
+          await user.selectOptions(popupFolderSelect(), 'Warranty')
+
+          expect(await within(popup()).findByRole('alert')).toHaveTextContent('The folder no longer exists.')
+          expect(popupFolderSelect()).toHaveDisplayValue('Bookmarks')
+        })
+
+        it('offers only the chosen option, disabled, until the Folders are loaded', async () => {
+          const loaded = waitingAnswer()
+          folders = loaded.response
+          handleAddBookmark = () => Response.json({ folderId: 21 })
+          const user = await openSeptember()
+
+          await user.click(screen.getByRole('button', { name: 'Bookmark Rema 1000' }))
+          await screen.findByRole('dialog')
+
+          expect(popupFolderSelect()).toBeDisabled()
+          expect(popupFolderOptions()).toEqual(['Loading…'])
+
+          loaded.answer(Response.json([{ id: 21, name: 'Warranty' }]))
+
+          await waitFor(() => expect(popupFolderSelect()).toBeEnabled())
+          expect(popupFolderSelect()).toHaveDisplayValue('Warranty')
+          expect(popupFolderSelect()).toHaveFocus()
+        })
+
+        it('loads the Folders once for both the popup and Bookmarks', async () => {
+          const user = await openPopupIn(null)
+          await user.click(within(popup()).getByRole('button', { name: 'Done' }))
+          await user.click(screen.getByRole('button', { name: 'Bookmark Lønn Fra: Testfirma AS' }))
+          await within(await screen.findByRole('dialog')).findByRole('option', { name: 'Warranty' })
+          await user.click(within(popup()).getByRole('button', { name: 'Done' }))
+
+          await user.click(screen.getByRole('button', { name: 'Bookmarks' }))
+
+          expect(await screen.findByRole('option', { name: 'Warranty' })).toBeInTheDocument()
+          expect(fetchMock.mock.calls.filter(([url]) => url === '/api/folders')).toHaveLength(1)
+        })
+
+        describe('creating a Folder', () => {
+          function nameField() {
+            return within(popup()).getByRole('textbox', { name: 'Folder name' })
+          }
+
+          it('swaps the dropdown for a name field, then files the Bookmark in the new Folder, offered in Bookmarks too', async () => {
+            const created: unknown[] = []
+            const filings: [number, unknown][] = []
+            handleAddFolder = (body) => {
+              created.push(body)
+              return Response.json({ id: 30, name: 'Kvitteringer' }, { status: 201 })
+            }
+            handleFileBookmark = (id, body) => {
+              filings.push([id, body])
+              return Response.json(body)
+            }
+            const user = await openPopupIn(null)
+
+            await user.selectOptions(popupFolderSelect(), 'New folder…')
+
+            expect(within(popup()).queryByLabelText('Folder')).not.toBeInTheDocument()
+            expect(nameField()).toHaveFocus()
+
+            await user.type(nameField(), 'Kvitteringer')
+            await user.click(within(popup()).getByRole('button', { name: 'Create' }))
+
+            await waitFor(() => expect(popupFolderSelect()).toHaveDisplayValue('Kvitteringer'))
+            expect(created).toEqual([{ name: 'Kvitteringer' }])
+            expect(filings).toEqual([[5, { folderId: 30 }]])
+            expect(popupFolderOptions()).toEqual(['Bookmarks', 'Kvitteringer', 'Tax deductible', 'Warranty', 'New folder…'])
+            expect(popupFolderSelect()).toHaveFocus()
+
+            await user.click(within(popup()).getByRole('button', { name: 'Done' }))
+            await user.click(screen.getByRole('button', { name: 'Bookmarks' }))
+
+            expect(await screen.findByRole('option', { name: 'Kvitteringer' })).toBeInTheDocument()
+            expect(
+              within(screen.getByLabelText('Folder'))
+                .getAllByRole('option')
+                .map((option) => option.textContent),
+            ).toEqual(['Bookmarks', 'Kvitteringer', 'Tax deductible', 'Warranty', 'New folder…'])
+          })
+
+          it('hides Remove and Done while the new Folder is named, and brings them back on Cancel', async () => {
+            const user = await openPopupIn(21)
+
+            await user.selectOptions(popupFolderSelect(), 'New folder…')
+
+            expect(within(popup()).queryByRole('button', { name: 'Remove' })).not.toBeInTheDocument()
+            expect(within(popup()).queryByRole('button', { name: 'Done' })).not.toBeInTheDocument()
+
+            await user.click(within(popup()).getByRole('button', { name: 'Cancel' }))
+
+            expect(within(popup()).getByRole('button', { name: 'Remove' })).toBeInTheDocument()
+            expect(within(popup()).getByRole('button', { name: 'Done' })).toBeInTheDocument()
+          })
+
+          it('brings back the dropdown with the Bookmark\'s Folder on Cancel', async () => {
+            const user = await openPopupIn(21)
+            await user.selectOptions(popupFolderSelect(), 'New folder…')
+            await user.type(nameField(), 'Kvitteringer')
+
+            await user.click(within(popup()).getByRole('button', { name: 'Cancel' }))
+
+            expect(popupFolderSelect()).toHaveDisplayValue('Warranty')
+            expect(popupFolderOptions()).toEqual(['Bookmarks', 'Tax deductible', 'Warranty', 'New folder…'])
+            expect(fetchMock.mock.calls.filter(([url, init]) => url === '/api/folders' && init?.method === 'POST')).toEqual([])
+            expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'PUT')).toEqual([])
+          })
+
+          it('shows a field error under the name field and keeps the input', async () => {
+            handleAddFolder = () =>
+              Response.json({ errors: { name: ["A folder named 'Warranty' already exists."] } }, { status: 400 })
+            const user = await openPopupIn(null)
+            await user.selectOptions(popupFolderSelect(), 'New folder…')
+            await user.type(nameField(), 'warranty')
+
+            await user.click(within(popup()).getByRole('button', { name: 'Create' }))
+
+            expect(await within(popup()).findByText("A folder named 'Warranty' already exists.")).toBeInTheDocument()
+            expect(nameField()).toHaveAccessibleDescription("A folder named 'Warranty' already exists.")
+            expect(nameField()).toHaveValue('warranty')
+            expect(within(popup()).queryByRole('alert')).not.toBeInTheDocument()
+          })
+
+          it('says so in the popup, keeping the input, when the Folder could not be created', async () => {
+            handleAddFolder = () => new Response(null, { status: 500 })
+            const user = await openPopupIn(null)
+            await user.selectOptions(popupFolderSelect(), 'New folder…')
+            await user.type(nameField(), 'Kvitteringer')
+
+            await user.click(within(popup()).getByRole('button', { name: 'Create' }))
+
+            expect(await within(popup()).findByRole('alert')).toHaveTextContent('Saving failed (500).')
+            expect(nameField()).toHaveValue('Kvitteringer')
+          })
+
+          it('keeps the new Folder, with the dropdown back on the Bookmark\'s Folder, when filing in it fails', async () => {
+            handleAddFolder = () => Response.json({ id: 30, name: 'Kvitteringer' }, { status: 201 })
+            handleFileBookmark = () => new Response(null, { status: 500 })
+            const user = await openPopupIn(21)
+            await user.selectOptions(popupFolderSelect(), 'New folder…')
+            await user.type(nameField(), 'Kvitteringer')
+
+            await user.click(within(popup()).getByRole('button', { name: 'Create' }))
+
+            expect(await within(popup()).findByRole('alert')).toHaveTextContent('Could not move the bookmark.')
+            expect(popupFolderSelect()).toHaveDisplayValue('Warranty')
+            expect(popupFolderOptions()).toEqual(['Bookmarks', 'Kvitteringer', 'Tax deductible', 'Warranty', 'New folder…'])
+          })
+        })
+      })
+
+      it('opens nothing when adding the Bookmark fails', async () => {
+        handleAddBookmark = () => new Response(null, { status: 500 })
+        const user = await openSeptember()
+
+        await user.click(screen.getByRole('button', { name: 'Bookmark Rema 1000' }))
+
+        expect(await screen.findByRole('alert')).toHaveTextContent('Could not add the bookmark.')
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+      })
+
+      it('closes on Done, leaving the Bookmark, with focus back on the star', async () => {
+        const user = await openSeptember()
+        await user.click(screen.getByRole('button', { name: 'Bookmark Rema 1000' }))
+
+        await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Done' }))
+
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+        const star = screen.getByRole('button', { name: 'Remove bookmark for Rema 1000' })
+        expect(star).toHaveAttribute('aria-pressed', 'true')
+        expect(star).toHaveFocus()
+      })
+
+      it('closes on Escape or a click outside it, leaving the Bookmark', async () => {
+        const user = await openSeptember()
+        await user.click(screen.getByRole('button', { name: 'Bookmark Rema 1000' }))
+        await screen.findByRole('dialog')
+
+        await user.keyboard('{Escape}')
+
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+        expect(screen.getByRole('button', { name: 'Remove bookmark for Rema 1000' })).toHaveFocus()
+
+        await user.click(screen.getByRole('button', { name: 'Bookmark Lønn Fra: Testfirma AS' }))
+        await screen.findByRole('dialog')
+        await user.click(screen.getByRole('heading', { name: 'Transactions' }))
+
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+        for (const description of ['Rema 1000', 'Lønn Fra: Testfirma AS']) {
+          expect(screen.getByRole('button', { name: `Remove bookmark for ${description}` })).toHaveAttribute('aria-pressed', 'true')
+        }
+      })
+
+      it('removes the Bookmark with Remove, emptying the star and closing', async () => {
+        const removedIds: number[] = []
+        handleRemoveBookmark = (id) => {
+          removedIds.push(id)
+          return new Response(null, { status: 204 })
+        }
+        const user = await openSeptember()
+        await user.click(screen.getByRole('button', { name: 'Bookmark Rema 1000' }))
+
+        await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Remove' }))
+
+        await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+        expect(removedIds).toEqual([5])
+        const star = screen.getByRole('button', { name: 'Bookmark Rema 1000' })
+        expect(star).toHaveAttribute('aria-pressed', 'false')
+        expect(star).toHaveFocus()
+        expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+      })
+
+      it('stays open, saying so, with the star filled, when Remove fails', async () => {
+        handleRemoveBookmark = () => new Response(null, { status: 500 })
+        const user = await openSeptember()
+        await user.click(screen.getByRole('button', { name: 'Bookmark Rema 1000' }))
+
+        await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Remove' }))
+
+        expect(await within(popup()).findByRole('alert')).toHaveTextContent('Could not remove the bookmark.')
+        expect(screen.getByRole('button', { name: 'Remove bookmark for Rema 1000' })).toHaveAttribute('aria-pressed', 'true')
+      })
+
+      it("closes when another row's star opens its own, so only one is open at a time", async () => {
+        const user = await openSeptember()
+        await user.click(screen.getByRole('button', { name: 'Bookmark Rema 1000' }))
+        await screen.findByRole('dialog')
+
+        // From the keyboard, so nothing is clicked outside the first popup.
+        act(() => screen.getByRole('button', { name: 'Bookmark Lønn Fra: Testfirma AS' }).focus())
+        await user.keyboard('{Enter}')
+
+        await waitFor(() => expect(transactionRow('Lønn Fra: Testfirma AS')).toContainElement(popup()))
+        expect(screen.getAllByRole('dialog')).toHaveLength(1)
+      })
+
+      it('closes when its own star, filled now, removes the Bookmark from the keyboard', async () => {
+        const user = await openSeptember()
+        await user.click(screen.getByRole('button', { name: 'Bookmark Rema 1000' }))
+        await waitFor(() => expect(within(screen.getByRole('dialog')).getByLabelText('Folder')).toHaveFocus())
+
+        await user.tab({ shift: true })
+        expect(screen.getByRole('button', { name: 'Remove bookmark for Rema 1000' })).toHaveFocus()
+        await user.keyboard('{Enter}')
+
+        await waitFor(() => expect(screen.getByRole('button', { name: 'Bookmark Rema 1000' })).toBeEnabled())
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+      })
+
+      // From the keyboard, so nothing is clicked outside the popup.
+      it('closes when switching between All and Bookmarks, or searching', async () => {
+        const user = await openSeptember()
+        await user.click(screen.getByRole('button', { name: 'Bookmark Rema 1000' }))
+        await screen.findByRole('dialog')
+
+        act(() => screen.getByRole('button', { name: 'Bookmarks' }).focus())
+        await user.keyboard('{Enter}')
+        await screen.findByText('No bookmarks')
+        act(() => screen.getByRole('button', { name: 'All' }).focus())
+        await user.keyboard('{Enter}')
+
+        expect(screen.getByRole('cell', { name: 'Rema 1000' })).toBeInTheDocument()
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+
+        await user.click(screen.getByRole('button', { name: 'Bookmark Lønn Fra: Testfirma AS' }))
+        await screen.findByRole('dialog')
+        act(() => screen.getByLabelText('Search').focus())
+        await user.keyboard('Lønn')
+
+        expect(screen.getByRole('cell', { name: 'Lønn Fra: Testfirma AS' })).toBeInTheDocument()
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+      })
+
+      it('opens when adding a Bookmark back in Bookmarks, whose Remove keeps the row with an empty star', async () => {
+        handleListBookmarks = () => Response.json([{ ...septemberTransactions[0], bookmarked: true }])
+        const user = await openSeptember()
+        await user.click(screen.getByRole('button', { name: 'Bookmarks' }))
+        await user.click(await screen.findByRole('button', { name: 'Remove bookmark for Rema 1000' }))
+        await waitFor(() => expect(screen.getByRole('button', { name: 'Bookmark Rema 1000' })).toBeEnabled())
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+
+        await user.click(screen.getByRole('button', { name: 'Bookmark Rema 1000' }))
+
+        expect(transactionRow('Rema 1000')).toContainElement(await screen.findByRole('dialog', { name: 'Bookmark added' }))
+
+        await user.click(within(popup()).getByRole('button', { name: 'Remove' }))
+
+        await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+        expect(screen.getByRole('button', { name: 'Bookmark Rema 1000' })).toHaveAttribute('aria-pressed', 'false')
+      })
+    })
+  })
+
+  describe('All | Bookmarks switch', () => {
+    // Bookmarked Transactions from any date, newest first, as the bookmarks endpoint lists them.
+    const bookmarks = [
+      { ...septemberTransactions[0], bookmarked: true },
+      {
+        id: 2,
+        date: '2024-05-17',
+        description: 'Elkjøp',
+        amount: -4990,
+        note: 'Warranty until 2027',
+        categoryId: 13,
+        locked: true,
+        imported: false,
+        bookmarked: true,
+      },
+    ]
+
+    function switchButton(name: 'All' | 'Bookmarks') {
+      return within(screen.getByRole('group', { name: 'Show' })).getByRole('button', { name })
+    }
+
+    function listedDescriptions() {
+      return rowCells().map((cells) => cells[1])
+    }
+
+    function bookmarksRequests() {
+      return fetchMock.mock.calls.filter(([url]) => url === '/api/bookmarks').length
+    }
+
+    async function showBookmarks(user: ReturnType<typeof userEvent.setup>) {
+      await user.click(switchButton('Bookmarks'))
+    }
+
+    it('opens on All, with no Bookmarks entry in the header', async () => {
+      await openSeptember()
+
+      expect(switchButton('All')).toHaveAttribute('aria-pressed', 'true')
+      expect(switchButton('Bookmarks')).toHaveAttribute('aria-pressed', 'false')
+      expect(within(screen.getByRole('navigation')).queryByRole('button', { name: /bookmark/i })).not.toBeInTheDocument()
+      expect(bookmarksRequests()).toBe(0)
+    })
+
+    it('lists the bookmarks from any date in place of the Year, Month, Category and Search', async () => {
+      handleListBookmarks = () => Response.json(bookmarks)
+      const user = await openSeptember()
+
+      await showBookmarks(user)
+
+      expect(await screen.findByRole('cell', { name: 'Elkjøp' })).toBeInTheDocument()
+      expect(switchButton('Bookmarks')).toHaveAttribute('aria-pressed', 'true')
+      expect(switchButton('All')).toHaveAttribute('aria-pressed', 'false')
+      expect(screen.getByLabelText('Folder')).toHaveDisplayValue('Bookmarks')
+      for (const field of ['Year', 'Month', 'Category', 'Search']) {
+        expect(screen.queryByLabelText(field)).not.toBeInTheDocument()
+      }
+      expect(rowCells()).toEqual([
+        ['24.09.2026', 'Rema 1000', 'Groceries', '-1 249,90 kr', '', '', ''],
+        ['17.05.2024', 'Elkjøp', 'Other', '-4 990,00 kr', '', '', ''],
+      ])
+      expect(screen.getByRole('button', { name: 'Remove bookmark for Elkjøp' })).toHaveAttribute('aria-pressed', 'true')
+    })
+
+    it('says when there are no bookmarks', async () => {
+      const user = await openSeptember()
+
+      await showBookmarks(user)
+
+      expect(await screen.findByText('No bookmarks')).toBeInTheDocument()
+      expect(screen.queryByRole('table')).not.toBeInTheDocument()
+    })
+
+    it('says when the bookmarks could not be loaded', async () => {
+      handleListBookmarks = () => new Response(null, { status: 500 })
+      const user = await openSeptember()
+
+      await showBookmarks(user)
+
+      expect(await screen.findByRole('alert')).toHaveTextContent('Could not load the bookmarks.')
+      expect(screen.queryByText('No bookmarks')).not.toBeInTheDocument()
+    })
+
+    it('restores the Year, Month, Category, Search and listed Transactions when switching back to All', async () => {
+      months = [
+        { year: 2026, month: 9 },
+        { year: 2025, month: 3 },
+      ]
+      handleListPeriod = (_year, month) =>
+        Response.json(month === undefined ? [octoberTransaction, ...septemberTransactions] : septemberTransactions)
+      handleListBookmarks = () => Response.json(bookmarks)
+      const user = await openTransactionsPage()
+      await screen.findByRole('cell', { name: 'Rema 1000' })
+      await user.selectOptions(screen.getByLabelText('Month'), 'All months')
+      await screen.findByRole('cell', { name: 'Kiwi' })
+      await user.selectOptions(screen.getByLabelText('Category'), 'Groceries')
+      await user.type(screen.getByLabelText('Search'), 'i')
+      await showBookmarks(user)
+      await screen.findByRole('cell', { name: 'Elkjøp' })
+      const periodsRequested = requestedPeriods().length
+
+      await user.click(switchButton('All'))
+
+      expect(switchButton('All')).toHaveAttribute('aria-pressed', 'true')
+      expect(screen.getByLabelText('Year')).toHaveValue('2026')
+      expect(screen.getByLabelText('Month')).toHaveValue('')
+      expect(screen.getByLabelText('Category')).toHaveValue('1')
+      expect(screen.getByLabelText('Search')).toHaveValue('i')
+      expect(listedDescriptions()).toEqual(['Kiwi'])
+      expect(screen.queryByLabelText('Folder')).not.toBeInTheDocument()
+      expect(requestedPeriods()).toHaveLength(periodsRequested)
+    })
+
+    it('opens on All again after leaving the page', async () => {
+      const user = await openSeptember()
+      await showBookmarks(user)
+      await screen.findByText('No bookmarks')
+
+      await user.click(screen.getByRole('button', { name: 'Categories' }))
+      await user.click(screen.getByRole('button', { name: 'Transactions' }))
+
+      expect(await screen.findByRole('cell', { name: 'Rema 1000' })).toBeInTheDocument()
+      expect(switchButton('All')).toHaveAttribute('aria-pressed', 'true')
+      expect(screen.getByLabelText('Month')).toHaveValue('9')
+    })
+
+    it('closes an open Note editor or delete confirmation when switching', async () => {
+      handleListBookmarks = () => Response.json(bookmarks)
+      const user = await openSeptember()
+      await user.click(screen.getByRole('button', { name: 'Add note for Rema 1000' }))
+      expect(screen.getByRole('textbox', { name: 'Note' })).toBeInTheDocument()
+
+      await showBookmarks(user)
+      await screen.findByRole('cell', { name: 'Elkjøp' })
+      expect(screen.queryByRole('textbox', { name: 'Note' })).not.toBeInTheDocument()
+
+      await user.click(screen.getByRole('button', { name: 'Delete Elkjøp' }))
+      expect(screen.getByText(/^Delete "Elkjøp"/)).toBeInTheDocument()
+      await user.click(switchButton('All'))
+      await showBookmarks(user)
+      await screen.findByRole('cell', { name: 'Elkjøp' })
+      expect(screen.queryByText(/^Delete "Elkjøp"/)).not.toBeInTheDocument()
+    })
+
+    it('keeps a row whose Bookmark is removed, with an empty star, until All is shown, and can bookmark it again', async () => {
+      const addedIds: number[] = []
+      handleAddBookmark = (id) => {
+        addedIds.push(id)
+        return Response.json({ folderId: null })
+      }
+      handleListBookmarks = () => Response.json(bookmarks)
+      const user = await openSeptember()
+      await showBookmarks(user)
+      await screen.findByRole('cell', { name: 'Elkjøp' })
+
+      await user.click(screen.getByRole('button', { name: 'Remove bookmark for Elkjøp' }))
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Bookmark Elkjøp' })).toBeEnabled())
+      expect(listedDescriptions()).toEqual(['Rema 1000', 'Elkjøp'])
+
+      await user.click(screen.getByRole('button', { name: 'Bookmark Elkjøp' }))
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Remove bookmark for Elkjøp' })).toBeEnabled())
+      expect(addedIds).toEqual([2])
+
+      await user.click(screen.getByRole('button', { name: 'Remove bookmark for Elkjøp' }))
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Bookmark Elkjøp' })).toBeEnabled())
+      handleListBookmarks = () => Response.json([bookmarks[0]])
+      await user.click(switchButton('All'))
+      await showBookmarks(user)
+
+      expect(await screen.findByRole('cell', { name: 'Rema 1000' })).toBeInTheDocument()
+      expect(listedDescriptions()).toEqual(['Rema 1000'])
+    })
+
+    it('shows a star changed in Bookmarks the same in All', async () => {
+      months = [{ year: 2026, month: 9 }]
+      handleListPeriod = () => Response.json([bookmarks[0], septemberTransactions[1]])
+      handleListBookmarks = () => Response.json(bookmarks)
+      const user = await openTransactionsPage()
+      await screen.findByRole('cell', { name: 'Rema 1000' })
+      await showBookmarks(user)
+      await screen.findByRole('cell', { name: 'Elkjøp' })
+
+      await user.click(screen.getByRole('button', { name: 'Remove bookmark for Rema 1000' }))
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Bookmark Rema 1000' })).toBeEnabled())
+      await user.click(switchButton('All'))
+
+      expect(screen.getByRole('button', { name: 'Bookmark Rema 1000' })).toHaveAttribute('aria-pressed', 'false')
+    })
+
+    it("changes a bookmarked Transaction's Category and Note in Bookmarks", async () => {
+      handleListBookmarks = () => Response.json(bookmarks)
+      handleChangeCategory = (_id, body) => Response.json({ ...bookmarks[1], ...(body as object) })
+      handleChangeNote = (_id, body) => Response.json({ ...bookmarks[1], ...(body as object) })
+      const user = await openSeptember()
+      await showBookmarks(user)
+      await screen.findByRole('cell', { name: 'Elkjøp' })
+
+      await user.selectOptions(categorySelect('Elkjøp'), 'Groceries')
+
+      expect(await screen.findByRole('status')).toHaveTextContent('Category changed')
+      expect(categorySelect('Elkjøp')).toHaveValue('1')
+
+      await user.click(screen.getByRole('button', { name: 'Edit note for Elkjøp' }))
+      const note = screen.getByRole('textbox', { name: 'Note' })
+      await user.clear(note)
+      await user.type(note, 'Warranty until 2028')
+      await user.click(screen.getByRole('button', { name: 'Save' }))
+
+      expect(await screen.findByText('Note saved.')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Edit note for Elkjøp' })).toHaveAttribute('title', 'Warranty until 2028')
+      expect(listedDescriptions()).toEqual(['Rema 1000', 'Elkjøp'])
+    })
+
+    it('deletes a bookmarked Transaction in Bookmarks, and loads the Period and months again once All is shown', async () => {
+      let deletedId: number | undefined
+      handleDeleteTransaction = (id) => {
+        deletedId = id
+        return new Response(null, { status: 204 })
+      }
+      handleListBookmarks = () => Response.json(bookmarks)
+      const monthsRequests = () => fetchMock.mock.calls.filter(([url]) => url === '/api/transactions/months').length
+      const user = await openSeptember()
+      await showBookmarks(user)
+      await screen.findByRole('cell', { name: 'Elkjøp' })
+      const periodsRequested = requestedPeriods().length
+      const monthsRequested = monthsRequests()
+
+      await user.click(screen.getByRole('button', { name: 'Delete Elkjøp' }))
+      await user.click(screen.getByRole('button', { name: 'Confirm delete' }))
+
+      expect(await screen.findByRole('status')).toHaveTextContent('Transaction deleted.')
+      expect(deletedId).toBe(2)
+      expect(listedDescriptions()).toEqual(['Rema 1000'])
+      expect(monthsRequests()).toBe(monthsRequested)
+
+      await user.click(switchButton('All'))
+
+      expect(await screen.findByRole('cell', { name: 'Lønn Fra: Testfirma AS' })).toBeInTheDocument()
+      expect(requestedPeriods()).toHaveLength(periodsRequested + 1)
+      expect(requestedPeriods().at(-1)).toBe('/api/transactions?year=2026&month=9')
+      expect(monthsRequests()).toBe(monthsRequested + 1)
+    })
+
+    describe('Folders', () => {
+      // The bookmarks filed in the Warranty Folder, which has id 21.
+      const warrantyBookmarks = [
+        {
+          id: 3,
+          date: '2025-11-28',
+          description: 'Power',
+          amount: -12990,
+          note: null,
+          categoryId: 13,
+          locked: true,
+          imported: false,
+          bookmarked: true,
+        },
+      ]
+
+      beforeEach(() => {
+        folders = [
+          { id: 20, name: 'Tax deductible' },
+          { id: 21, name: 'Warranty' },
+        ]
+        handleListBookmarks = () => Response.json(bookmarks)
+        handleListFolderBookmarks = (folderId) => Response.json(folderId === 21 ? warrantyBookmarks : [])
+      })
+
+      function folderSelect() {
+        return screen.getByLabelText<HTMLSelectElement>('Folder')
+      }
+
+      function folderOptions() {
+        return within(folderSelect())
+          .getAllByRole('option')
+          .map((option) => option.textContent)
+      }
+
+      function foldersRequests() {
+        return fetchMock.mock.calls.filter(([url]) => url === '/api/folders').length
+      }
+
+      // Bookmarks shown, with the Folders loaded into the dropdown.
+      async function showBookmarksWithFolders() {
+        const user = await openSeptember()
+        await showBookmarks(user)
+        await screen.findByRole('option', { name: 'Warranty' })
+        await screen.findByRole('cell', { name: 'Elkjøp' })
+        return user
+      }
+
+      it('offers "Bookmarks", then the Folders A–Z, then "New folder…" last, with "Bookmarks" chosen', async () => {
+        await showBookmarksWithFolders()
+
+        expect(folderOptions()).toEqual(['Bookmarks', 'Tax deductible', 'Warranty', 'New folder…'])
+        expect(folderSelect()).toHaveDisplayValue('Bookmarks')
+        expect(listedDescriptions()).toEqual(['Rema 1000', 'Elkjøp'])
+      })
+
+      it('lists the chosen Folder\'s bookmarks', async () => {
+        const user = await showBookmarksWithFolders()
+
+        await user.selectOptions(folderSelect(), 'Warranty')
+
+        expect(await screen.findByRole('cell', { name: 'Power' })).toBeInTheDocument()
+        expect(folderSelect()).toHaveDisplayValue('Warranty')
+        expect(listedDescriptions()).toEqual(['Power'])
+      })
+
+      it('clears rows whose Bookmark was removed once another option is chosen', async () => {
+        const user = await showBookmarksWithFolders()
+        await user.selectOptions(folderSelect(), 'Warranty')
+        await user.click(await screen.findByRole('button', { name: 'Remove bookmark for Power' }))
+        await waitFor(() => expect(screen.getByRole('button', { name: 'Bookmark Power' })).toBeEnabled())
+        expect(listedDescriptions()).toEqual(['Power'])
+        handleListFolderBookmarks = () => Response.json([])
+
+        await user.selectOptions(folderSelect(), 'Bookmarks')
+        await screen.findByRole('cell', { name: 'Elkjøp' })
+        await user.selectOptions(folderSelect(), 'Warranty')
+
+        expect(await screen.findByText('No bookmarks in Warranty')).toBeInTheDocument()
+        expect(screen.queryByRole('table')).not.toBeInTheDocument()
+      })
+
+      it('says when a Folder has no bookmarks', async () => {
+        const user = await showBookmarksWithFolders()
+
+        await user.selectOptions(folderSelect(), 'Tax deductible')
+
+        expect(await screen.findByText('No bookmarks in Tax deductible')).toBeInTheDocument()
+        expect(screen.queryByText('No bookmarks')).not.toBeInTheDocument()
+        expect(screen.queryByRole('table')).not.toBeInTheDocument()
+      })
+
+      it('always chooses "Bookmarks" when switching to Bookmarks', async () => {
+        const user = await showBookmarksWithFolders()
+        await user.selectOptions(folderSelect(), 'Warranty')
+        await screen.findByRole('cell', { name: 'Power' })
+
+        await user.click(switchButton('All'))
+        await showBookmarks(user)
+
+        expect(await screen.findByRole('cell', { name: 'Elkjøp' })).toBeInTheDocument()
+        expect(folderSelect()).toHaveDisplayValue('Bookmarks')
+        expect(listedDescriptions()).toEqual(['Rema 1000', 'Elkjøp'])
+      })
+
+      it('loads the Folders once per visit to the page, the first time Bookmarks is shown', async () => {
+        const user = await openSeptember()
+        expect(foldersRequests()).toBe(0)
+
+        await showBookmarks(user)
+        await screen.findByRole('option', { name: 'Warranty' })
+        await user.click(switchButton('All'))
+        await showBookmarks(user)
+        await screen.findByRole('cell', { name: 'Elkjøp' })
+        expect(foldersRequests()).toBe(1)
+
+        await user.click(screen.getByRole('button', { name: 'Categories' }))
+        await user.click(screen.getByRole('button', { name: 'Transactions' }))
+        await screen.findByRole('cell', { name: 'Rema 1000' })
+        await showBookmarks(user)
+        await screen.findByRole('option', { name: 'Warranty' })
+        expect(foldersRequests()).toBe(2)
+      })
+
+      it('says when the Folders could not be loaded, still listing the bookmarks in no Folder', async () => {
+        folders = new Response(null, { status: 500 })
+        const user = await openSeptember()
+
+        await showBookmarks(user)
+
+        expect(await screen.findByRole('alert')).toHaveTextContent('Could not load the folders.')
+        expect(await screen.findByRole('cell', { name: 'Elkjøp' })).toBeInTheDocument()
+        expect(folderSelect()).toBeDisabled()
+      })
+
+      describe('creating a Folder', () => {
+        function nameField() {
+          return screen.getByRole('textbox', { name: 'Folder name' })
+        }
+
+        it('swaps the dropdown for a name field, and shows the new Folder, empty, in its place A–Z', async () => {
+          const created: unknown[] = []
+          handleAddFolder = (body) => {
+            created.push(body)
+            return Response.json({ id: 30, name: 'kvitteringer' }, { status: 201 })
+          }
+          const user = await showBookmarksWithFolders()
+
+          await user.selectOptions(folderSelect(), 'New folder…')
+
+          expect(screen.queryByLabelText('Folder')).not.toBeInTheDocument()
+          expect(nameField()).toHaveValue('')
+          expect(nameField()).toHaveFocus()
+          expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument()
+
+          await user.type(nameField(), 'kvitteringer')
+          await user.click(screen.getByRole('button', { name: 'Create' }))
+
+          expect(await screen.findByRole('status')).toHaveTextContent('Folder created')
+          expect(created).toEqual([{ name: 'kvitteringer' }])
+          expect(folderSelect()).toHaveDisplayValue('kvitteringer')
+          expect(folderOptions()).toEqual(['Bookmarks', 'kvitteringer', 'Tax deductible', 'Warranty', 'New folder…'])
+          expect(await screen.findByText('No bookmarks in kvitteringer')).toBeInTheDocument()
+          expect(screen.queryByRole('textbox', { name: 'Folder name' })).not.toBeInTheDocument()
+        })
+
+        it('goes back to the Folder being viewed on Cancel', async () => {
+          const user = await showBookmarksWithFolders()
+          await user.selectOptions(folderSelect(), 'Warranty')
+          await screen.findByRole('cell', { name: 'Power' })
+
+          await user.selectOptions(folderSelect(), 'New folder…')
+          await user.type(nameField(), 'Receipts')
+          await user.click(screen.getByRole('button', { name: 'Cancel' }))
+
+          expect(folderSelect()).toHaveDisplayValue('Warranty')
+          expect(listedDescriptions()).toEqual(['Power'])
+          expect(folderOptions()).toEqual(['Bookmarks', 'Tax deductible', 'Warranty', 'New folder…'])
+          expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'POST')).toEqual([])
+        })
+
+        it('shows a field error under the name field and keeps the input', async () => {
+          handleAddFolder = () =>
+            Response.json({ errors: { name: ["A folder can't be named 'Bookmarks'."] } }, { status: 400 })
+          const user = await showBookmarksWithFolders()
+          await user.selectOptions(folderSelect(), 'New folder…')
+          await user.type(nameField(), 'bookmarks')
+
+          await user.click(screen.getByRole('button', { name: 'Create' }))
+
+          expect(await screen.findByText("A folder can't be named 'Bookmarks'.")).toBeInTheDocument()
+          expect(nameField()).toHaveAccessibleDescription("A folder can't be named 'Bookmarks'.")
+          expect(nameField()).toHaveValue('bookmarks')
+          expect(screen.queryByLabelText('Folder')).not.toBeInTheDocument()
+          expect(screen.queryByText('Folder created')).not.toBeInTheDocument()
+          expect(listedDescriptions()).toEqual(['Rema 1000', 'Elkjøp'])
+        })
+
+        it('says so, keeping the input, when the Folder could not be created', async () => {
+          handleAddFolder = () => new Response(null, { status: 500 })
+          const user = await showBookmarksWithFolders()
+          await user.selectOptions(folderSelect(), 'New folder…')
+          await user.type(nameField(), 'Receipts')
+
+          await user.click(screen.getByRole('button', { name: 'Create' }))
+
+          expect(await screen.findByRole('alert')).toHaveTextContent('Saving failed (500).')
+          expect(nameField()).toHaveValue('Receipts')
+        })
+      })
+
+      it('offers Rename and Delete only while a Folder is chosen', async () => {
+        const user = await showBookmarksWithFolders()
+        expect(screen.queryByRole('button', { name: 'Rename' })).not.toBeInTheDocument()
+        expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument()
+
+        await user.selectOptions(folderSelect(), 'Warranty')
+        await screen.findByRole('cell', { name: 'Power' })
+
+        expect(screen.getByRole('button', { name: 'Rename' })).toBeInTheDocument()
+        expect(screen.getByRole('button', { name: 'Delete' })).toBeInTheDocument()
+
+        await user.selectOptions(folderSelect(), 'Bookmarks')
+        await screen.findByRole('cell', { name: 'Elkjøp' })
+
+        expect(screen.queryByRole('button', { name: 'Rename' })).not.toBeInTheDocument()
+        expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument()
+      })
+
+      // Bookmarks shown, with the Warranty Folder chosen and its bookmarks listed.
+      async function showWarranty() {
+        const user = await showBookmarksWithFolders()
+        await user.selectOptions(folderSelect(), 'Warranty')
+        await screen.findByRole('cell', { name: 'Power' })
+        return user
+      }
+
+      it('closes the open popup, Note editor or delete confirmation when Rename or Delete opens', async () => {
+        const user = await showWarranty()
+        const folderDeleteQuestion = "Delete 'Warranty' and its bookmarks?"
+        await user.click(screen.getByRole('button', { name: 'Remove bookmark for Power' }))
+        await user.click(await screen.findByRole('button', { name: 'Bookmark Power' }))
+        await screen.findByRole('dialog', { name: 'Bookmark added' })
+
+        await user.click(screen.getByRole('button', { name: 'Delete' }))
+
+        expect(screen.queryByRole('dialog', { name: 'Bookmark added' })).not.toBeInTheDocument()
+        expect(screen.getByText(folderDeleteQuestion)).toBeInTheDocument()
+
+        await user.click(screen.getByRole('button', { name: 'Add note for Power' }))
+
+        expect(screen.queryByText(folderDeleteQuestion)).not.toBeInTheDocument()
+
+        await user.click(screen.getByRole('button', { name: 'Delete' }))
+
+        expect(screen.queryByRole('textbox', { name: 'Note' })).not.toBeInTheDocument()
+
+        await user.click(screen.getByRole('button', { name: 'Delete Power' }))
+        await user.click(screen.getByRole('button', { name: 'Delete' }))
+
+        expect(screen.queryByText(/Delete "Power"/)).not.toBeInTheDocument()
+
+        await user.click(screen.getByRole('button', { name: 'Rename' }))
+
+        expect(screen.queryByText(folderDeleteQuestion)).not.toBeInTheDocument()
+        expect(screen.getByRole('textbox', { name: 'Folder name' })).toHaveValue('Warranty')
+      })
+
+      it('keeps a row moved to another Folder from the popup, star filled, until another option is chosen', async () => {
+        // Added back into the last used folder, Warranty.
+        handleAddBookmark = () => Response.json({ folderId: 21 })
+        const user = await showWarranty()
+        await user.click(screen.getByRole('button', { name: 'Remove bookmark for Power' }))
+        await user.click(await screen.findByRole('button', { name: 'Bookmark Power' }))
+        const popupFolder = within(await screen.findByRole('dialog', { name: 'Bookmark added' })).getByLabelText('Folder')
+        expect(popupFolder).toHaveDisplayValue('Warranty')
+
+        await user.selectOptions(popupFolder, 'Tax deductible')
+        await waitFor(() => expect(popupFolder).toBeEnabled())
+        await user.click(screen.getByRole('button', { name: 'Done' }))
+
+        expect(listedDescriptions()).toEqual(['Power'])
+        expect(screen.getByRole('button', { name: 'Remove bookmark for Power' })).toHaveAttribute('aria-pressed', 'true')
+        expect(folderSelect()).toHaveDisplayValue('Warranty')
+
+        handleListFolderBookmarks = (folderId) => Response.json(folderId === 20 ? warrantyBookmarks : [])
+        await user.selectOptions(folderSelect(), 'Tax deductible')
+        expect(await screen.findByRole('cell', { name: 'Power' })).toBeInTheDocument()
+        await user.selectOptions(folderSelect(), 'Warranty')
+
+        expect(await screen.findByText('No bookmarks in Warranty')).toBeInTheDocument()
+        expect(screen.queryByRole('table')).not.toBeInTheDocument()
+      })
+
+      it('closes Rename or Delete when another option is chosen or All is shown', async () => {
+        const user = await showWarranty()
+        await user.click(screen.getByRole('button', { name: 'Delete' }))
+
+        await user.selectOptions(folderSelect(), 'Tax deductible')
+
+        expect(await screen.findByText('No bookmarks in Tax deductible')).toBeInTheDocument()
+        expect(screen.queryByText(/and its bookmarks\?/)).not.toBeInTheDocument()
+
+        await user.click(screen.getByRole('button', { name: 'Rename' }))
+        await user.click(switchButton('All'))
+        await showBookmarks(user)
+        await screen.findByRole('cell', { name: 'Elkjøp' })
+        await user.selectOptions(folderSelect(), 'Tax deductible')
+
+        expect(await screen.findByText('No bookmarks in Tax deductible')).toBeInTheDocument()
+        expect(screen.queryByRole('textbox', { name: 'Folder name' })).not.toBeInTheDocument()
+        expect(screen.getByRole('button', { name: 'Rename' })).toBeInTheDocument()
+      })
+
+      describe('renaming a Folder', () => {
+        function nameField() {
+          return screen.getByRole('textbox', { name: 'Folder name' })
+        }
+
+        it('swaps the dropdown for the name, and moves the renamed Folder to its place A–Z, still chosen', async () => {
+          const renamed: [number, unknown][] = []
+          handleRenameFolder = (id, body) => {
+            renamed.push([id, body])
+            return Response.json({ id, name: 'Abonnement' })
+          }
+          const user = await showWarranty()
+
+          await user.click(screen.getByRole('button', { name: 'Rename' }))
+
+          expect(screen.queryByLabelText('Folder')).not.toBeInTheDocument()
+          expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument()
+          expect(nameField()).toHaveValue('Warranty')
+          expect(nameField()).toHaveFocus()
+          expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument()
+
+          await user.clear(nameField())
+          await user.type(nameField(), ' Abonnement ')
+          await user.click(screen.getByRole('button', { name: 'Save' }))
+
+          expect(await screen.findByRole('status')).toHaveTextContent('Folder renamed')
+          expect(renamed).toEqual([[21, { name: 'Abonnement' }]])
+          expect(folderSelect()).toHaveDisplayValue('Abonnement')
+          expect(folderOptions()).toEqual(['Bookmarks', 'Abonnement', 'Tax deductible', 'New folder…'])
+          expect(listedDescriptions()).toEqual(['Power'])
+          expect(screen.queryByRole('textbox', { name: 'Folder name' })).not.toBeInTheDocument()
+        })
+
+        it('shows a field error under the name field and keeps the input', async () => {
+          handleRenameFolder = () =>
+            Response.json({ errors: { name: ["A folder named 'Tax deductible' already exists."] } }, { status: 400 })
+          const user = await showWarranty()
+          await user.click(screen.getByRole('button', { name: 'Rename' }))
+          await user.clear(nameField())
+          await user.type(nameField(), 'tax deductible')
+
+          await user.click(screen.getByRole('button', { name: 'Save' }))
+
+          expect(await screen.findByText("A folder named 'Tax deductible' already exists.")).toBeInTheDocument()
+          expect(nameField()).toHaveAccessibleDescription("A folder named 'Tax deductible' already exists.")
+          expect(nameField()).toHaveValue('tax deductible')
+          expect(screen.queryByLabelText('Folder')).not.toBeInTheDocument()
+          expect(screen.queryByText('Folder renamed')).not.toBeInTheDocument()
+        })
+
+        it('puts the name back on Cancel', async () => {
+          const user = await showWarranty()
+          await user.click(screen.getByRole('button', { name: 'Rename' }))
+          await user.clear(nameField())
+          await user.type(nameField(), 'Abonnement')
+
+          await user.click(screen.getByRole('button', { name: 'Cancel' }))
+
+          expect(folderSelect()).toHaveDisplayValue('Warranty')
+          expect(folderOptions()).toEqual(['Bookmarks', 'Tax deductible', 'Warranty', 'New folder…'])
+          expect(listedDescriptions()).toEqual(['Power'])
+          expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'PUT')).toEqual([])
+
+          await user.click(screen.getByRole('button', { name: 'Rename' }))
+
+          expect(nameField()).toHaveValue('Warranty')
+        })
+      })
+
+      describe('deleting a Folder', () => {
+        it('asks first, then deletes the Folder and shows "Bookmarks"', async () => {
+          const deleted: number[] = []
+          handleDeleteFolder = (id) => {
+            deleted.push(id)
+            return new Response(null, { status: 204 })
+          }
+          const user = await showWarranty()
+
+          await user.click(screen.getByRole('button', { name: 'Delete' }))
+
+          expect(screen.getByText("Delete 'Warranty' and its bookmarks?")).toBeInTheDocument()
+          expect(deleted).toEqual([])
+
+          await user.click(screen.getByRole('button', { name: 'Confirm delete' }))
+
+          expect(await screen.findByRole('status')).toHaveTextContent('Folder deleted')
+          expect(deleted).toEqual([21])
+          expect(folderSelect()).toHaveDisplayValue('Bookmarks')
+          expect(folderOptions()).toEqual(['Bookmarks', 'Tax deductible', 'New folder…'])
+          expect(await screen.findByRole('cell', { name: 'Elkjøp' })).toBeInTheDocument()
+          expect(listedDescriptions()).toEqual(['Rema 1000', 'Elkjøp'])
+          expect(screen.queryByText("Delete 'Warranty' and its bookmarks?")).not.toBeInTheDocument()
+          expect(screen.queryByRole('button', { name: 'Rename' })).not.toBeInTheDocument()
+        })
+
+        it('keeps the Folder on Cancel', async () => {
+          const user = await showWarranty()
+          await user.click(screen.getByRole('button', { name: 'Delete' }))
+
+          await user.click(screen.getByRole('button', { name: 'Cancel' }))
+
+          expect(screen.queryByText("Delete 'Warranty' and its bookmarks?")).not.toBeInTheDocument()
+          expect(folderSelect()).toHaveDisplayValue('Warranty')
+          expect(folderOptions()).toEqual(['Bookmarks', 'Tax deductible', 'Warranty', 'New folder…'])
+          expect(listedDescriptions()).toEqual(['Power'])
+          expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'DELETE')).toEqual([])
+        })
+
+        it('says so, keeping the Folder, when it could not be deleted', async () => {
+          handleDeleteFolder = () => new Response(null, { status: 500 })
+          const user = await showWarranty()
+          await user.click(screen.getByRole('button', { name: 'Delete' }))
+
+          await user.click(screen.getByRole('button', { name: 'Confirm delete' }))
+
+          expect(await screen.findByRole('alert')).toHaveTextContent('Deleting failed (500).')
+          expect(folderSelect()).toHaveDisplayValue('Warranty')
+          expect(folderOptions()).toEqual(['Bookmarks', 'Tax deductible', 'Warranty', 'New folder…'])
+          expect(listedDescriptions()).toEqual(['Power'])
+        })
+
+        it('says so when the Folder was already deleted, and shows "Bookmarks"', async () => {
+          handleDeleteFolder = () => new Response(null, { status: 404 })
+          const user = await showWarranty()
+          await user.click(screen.getByRole('button', { name: 'Delete' }))
+
+          await user.click(screen.getByRole('button', { name: 'Confirm delete' }))
+
+          expect(await screen.findByRole('status')).toHaveTextContent('The folder was already deleted.')
+          expect(folderSelect()).toHaveDisplayValue('Bookmarks')
+          expect(folderOptions()).toEqual(['Bookmarks', 'Tax deductible', 'New folder…'])
+        })
+
+        it('shows the stars of its bookmarks empty once All is shown again', async () => {
+          // Power, filed in Warranty, is in the Period All shows too.
+          let powerBookmarked = true
+          months = [{ year: 2026, month: 9 }]
+          handleListPeriod = () =>
+            Response.json([{ ...warrantyBookmarks[0], date: '2026-09-10', bookmarked: powerBookmarked }])
+          handleDeleteFolder = () => {
+            powerBookmarked = false
+            return new Response(null, { status: 204 })
+          }
+          const user = await openTransactionsPage()
+          await screen.findByRole('button', { name: 'Remove bookmark for Power' })
+          await showBookmarks(user)
+          await screen.findByRole('option', { name: 'Warranty' })
+          await user.selectOptions(folderSelect(), 'Warranty')
+          await screen.findByRole('cell', { name: 'Power' })
+          await user.click(screen.getByRole('button', { name: 'Delete' }))
+          await user.click(screen.getByRole('button', { name: 'Confirm delete' }))
+          await screen.findByText('Folder deleted')
+
+          await user.click(switchButton('All'))
+
+          expect(await screen.findByRole('button', { name: 'Bookmark Power' })).toHaveAttribute('aria-pressed', 'false')
+        })
+      })
     })
   })
 })
@@ -2988,6 +4264,7 @@ describe('Dashboard', () => {
         categoryId: null,
         locked: false,
         imported: true,
+        bookmarked: false,
       }
       handleListPeriod = () => Response.json([transaction])
       handleChangeCategory = () => {
@@ -3191,6 +4468,7 @@ describe('Dashboard', () => {
         categoryId: 1,
         locked: false,
         imported: true,
+        bookmarked: false,
       },
       {
         id: 4,
@@ -3201,6 +4479,7 @@ describe('Dashboard', () => {
         categoryId: null,
         locked: false,
         imported: true,
+        bookmarked: false,
       },
     ]
 
@@ -3382,6 +4661,22 @@ describe('Dashboard', () => {
         expect(await screen.findByRole('cell', { name: 'Kiwi' })).toBeInTheDocument()
         expect(chosenFilters()).toEqual(['2025', 'November', 'Groceries'])
       })
+    })
+
+    it('opens the Transactions page on All, even after Bookmarks was shown there before', async () => {
+      const user = await openDashboard()
+      await user.click(screen.getByRole('button', { name: 'Transactions' }))
+      const switchTo = (name: string) =>
+        within(screen.getByRole('group', { name: 'Show' })).getByRole('button', { name })
+      await user.click(switchTo('Bookmarks'))
+      await screen.findByText('No bookmarks')
+      await user.click(screen.getByRole('button', { name: 'PersonligFinans' }))
+
+      await user.click(await legendButton('Groceries'))
+
+      expect(await screen.findByRole('cell', { name: 'Rema 1000' })).toBeInTheDocument()
+      expect(switchTo('All')).toHaveAttribute('aria-pressed', 'true')
+      expect(chosenFilters()).toEqual(['2026', 'September', 'Groceries'])
     })
 
     it('still opens on the latest month, all Categories and no search from the header', async () => {

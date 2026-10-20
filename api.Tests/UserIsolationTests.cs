@@ -7,17 +7,19 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using PersonligFinans.Api.BankStatements;
+using PersonligFinans.Api.Bookmarks;
 using PersonligFinans.Api.Categories;
 using PersonligFinans.Api.CategorizationRules;
 using PersonligFinans.Api.Data;
+using PersonligFinans.Api.Folders;
 using PersonligFinans.Api.Receipts;
 using PersonligFinans.Api.Spending;
 using PersonligFinans.Api.Transactions;
 
 namespace PersonligFinans.Api.Tests;
 
-// Two Users side by side: each has their own Transactions, Bank Statements, Uploads, Categories and
-// Categorization Rules, and never sees or changes the other's.
+// Two Users side by side: each has their own Transactions, Bank Statements, Uploads, Categories,
+// Categorization Rules, Bookmarks and Folders, and never sees or changes the other's.
 [Collection(ApiCollection.Name)]
 public class UserIsolationTests : IAsyncLifetime
 {
@@ -187,6 +189,140 @@ public class UserIsolationTests : IAsyncLifetime
         Assert.Equal((null, _categoriesA.Other), (await August(_a)).Select(t => (t.Note, t.CategoryId)).Single());
         Assert.Contains(await Categories(_a), c => c.Id == categoryId && c.Name == "Hobbies");
         Assert.Contains(await Rules(_a), r => r.Id == ruleId && r.Keyword == "kafé");
+    }
+
+    [Fact]
+    public async Task AnotherUsersBookmarks_CantBeSeenAddedOrRemoved()
+    {
+        var bookmarkedId = await AddTransaction(_a, _categoriesA.Other, "Bookmarked");
+        var notBookmarkedId = await AddTransaction(_a, _categoriesA.Other, "Not bookmarked");
+        Assert.Equal(HttpStatusCode.OK, (await _a.PostAsync($"/api/transactions/{bookmarkedId}/bookmark", null)).StatusCode);
+
+        Assert.Empty((await _b.GetFromJsonAsync<List<TransactionResponse>>("/api/bookmarks"))!);
+        Assert.Equal(HttpStatusCode.NotFound, (await _b.PostAsync($"/api/transactions/{notBookmarkedId}/bookmark", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await _b.DeleteAsync($"/api/transactions/{bookmarkedId}/bookmark")).StatusCode);
+
+        // Nothing of the first User's changed.
+        Assert.Equal(
+            [("Bookmarked", true), ("Not bookmarked", false)],
+            (await August(_a)).Select(t => (t.Description, t.Bookmarked)).Order());
+        Assert.Equal(
+            [bookmarkedId],
+            (await _a.GetFromJsonAsync<List<TransactionResponse>>("/api/bookmarks"))!.Select(t => t.Id));
+    }
+
+    private static Task<HttpResponseMessage> PostFolder(HttpClient client, string name) =>
+        client.PostAsJsonAsync("/api/folders", new { name });
+
+    private static async Task<int> AddFolder(HttpClient client, string name)
+    {
+        var response = await PostFolder(client, name);
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        return (await response.Content.ReadFromJsonAsync<FolderResponse>())!.Id;
+    }
+
+    private static Task<HttpResponseMessage> PutBookmark(HttpClient client, int transactionId, int? folderId) =>
+        client.PutAsJsonAsync($"/api/transactions/{transactionId}/bookmark", new { folderId });
+
+    private static async Task FileBookmark(HttpClient client, int transactionId, int? folderId) =>
+        Assert.Equal(HttpStatusCode.OK, (await PutBookmark(client, transactionId, folderId)).StatusCode);
+
+    // The Folder a new Bookmark of the User's went into, as adding answered.
+    private static async Task<int?> FolderOfNewBookmark(HttpClient client, int categoryId)
+    {
+        var response = await client.PostAsync($"/api/transactions/{await AddTransaction(client, categoryId)}/bookmark", null);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        return (await response.Content.ReadFromJsonAsync<BookmarkResponse>())!.FolderId;
+    }
+
+    private static async Task<List<FolderResponse>> Folders(HttpClient client) =>
+        (await client.GetFromJsonAsync<List<FolderResponse>>("/api/folders"))!;
+
+    [Fact]
+    public async Task AnotherUsersFolders_CantBeSeenNorTheirBookmarksListed()
+    {
+        var created = await PostFolder(_a, "Tax deductible");
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        var folderId = (await created.Content.ReadFromJsonAsync<FolderResponse>())!.Id;
+        var transactionId = await AddTransaction(_a, _categoriesA.Other);
+        await FileBookmark(_a, transactionId, folderId);
+
+        Assert.Empty(await Folders(_b));
+        Assert.Equal(HttpStatusCode.NotFound, (await _b.GetAsync($"/api/bookmarks?folderId={folderId}")).StatusCode);
+
+        // Nothing of the first User's changed.
+        Assert.Equal([("Tax deductible", folderId)], (await Folders(_a)).Select(f => (f.Name, f.Id)));
+        Assert.Equal(
+            [transactionId],
+            (await _a.GetFromJsonAsync<List<TransactionResponse>>($"/api/bookmarks?folderId={folderId}"))!.Select(t => t.Id));
+    }
+
+    [Fact]
+    public async Task AnotherUsersFolders_CantBeRenamedOrDeleted()
+    {
+        var created = await PostFolder(_a, "Tax deductible");
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        var folderId = (await created.Content.ReadFromJsonAsync<FolderResponse>())!.Id;
+        var transactionId = await AddTransaction(_a, _categoriesA.Other);
+        await FileBookmark(_a, transactionId, folderId);
+
+        Assert.Equal(HttpStatusCode.NotFound,
+            (await _b.PutAsJsonAsync($"/api/folders/{folderId}", new { name = "Mine now" })).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await _b.DeleteAsync($"/api/folders/{folderId}")).StatusCode);
+
+        // Nothing of the first User's changed.
+        Assert.Equal([("Tax deductible", folderId)], (await Folders(_a)).Select(f => (f.Name, f.Id)));
+        Assert.Equal(
+            [transactionId],
+            (await _a.GetFromJsonAsync<List<TransactionResponse>>($"/api/bookmarks?folderId={folderId}"))!.Select(t => t.Id));
+    }
+
+    [Fact]
+    public async Task EachUsersLastUsedFolder_IsTheirOwn()
+    {
+        var folderA = await AddFolder(_a, "Tax deductible");
+        var folderB = await AddFolder(_b, "Warranty");
+        await FileBookmark(_a, await AddTransaction(_a, _categoriesA.Other), folderA);
+
+        Assert.Null(await FolderOfNewBookmark(_b, _categoriesB.Other));
+
+        await FileBookmark(_b, await AddTransaction(_b, _categoriesB.Other), folderB);
+
+        Assert.Equal(folderA, await FolderOfNewBookmark(_a, _categoriesA.Other));
+        Assert.Equal(folderB, await FolderOfNewBookmark(_b, _categoriesB.Other));
+    }
+
+    [Fact]
+    public async Task AnotherUsersFolder_CantBeFiledIn_NorTheirBookmarksFiled()
+    {
+        var folderA = await AddFolder(_a, "Tax deductible");
+        var transactionA = await AddTransaction(_a, _categoriesA.Other, "Bookmarked");
+        await FileBookmark(_a, transactionA, folderId: null);
+        var transactionB = await AddTransaction(_b, _categoriesB.Other);
+
+        var intoTheirFolder = await PutBookmark(_b, transactionB, folderA);
+        var theirBookmark = await PutBookmark(_b, transactionA, folderId: null);
+
+        Assert.Equal(["The folder no longer exists."], (await ValidationErrors(intoTheirFolder))["folderId"]);
+        Assert.Equal(HttpStatusCode.NotFound, theirBookmark.StatusCode);
+        Assert.Empty((await _b.GetFromJsonAsync<List<TransactionResponse>>("/api/bookmarks"))!);
+        Assert.Null(await FolderOfNewBookmark(_b, _categoriesB.Other));
+        // Nothing of the first User's changed.
+        Assert.Empty((await _a.GetFromJsonAsync<List<TransactionResponse>>($"/api/bookmarks?folderId={folderA}"))!);
+        Assert.Equal(
+            [transactionA],
+            (await _a.GetFromJsonAsync<List<TransactionResponse>>("/api/bookmarks"))!.Select(t => t.Id));
+    }
+
+    [Fact]
+    public async Task FolderNames_MayRepeatAcrossUsers_ButNotWithinOne()
+    {
+        Assert.Equal(HttpStatusCode.Created, (await PostFolder(_a, "Tax deductible")).StatusCode);
+        Assert.Equal(HttpStatusCode.Created, (await PostFolder(_b, "TAX DEDUCTIBLE")).StatusCode);
+
+        var again = await PostFolder(_a, "tax deductible");
+
+        Assert.Equal(["A folder named 'Tax deductible' already exists."], (await ValidationErrors(again))["name"]);
     }
 
     [Fact]

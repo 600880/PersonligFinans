@@ -18,22 +18,26 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, CurrentUser cu
     public const int CategoryNameMaxLength = 50;
     public const int CategoryDescriptionMaxLength = 200;
     public const int CategoryColourMaxLength = 7;
+    public const int FolderNameMaxLength = 50;
 
     public DbSet<Category> Categories => Set<Category>();
     public DbSet<Transaction> Transactions => Set<Transaction>();
     public DbSet<BankStatement> BankStatements => Set<BankStatement>();
     public DbSet<CategorizationRule> CategorizationRules => Set<CategorizationRule>();
+    public DbSet<Bookmark> Bookmarks => Set<Bookmark>();
+    public DbSet<Folder> Folders => Set<Folder>();
+    public DbSet<LastUsedFolder> LastUsedFolders => Set<LastUsedFolder>();
     public DbSet<AiRequest> AiRequests => Set<AiRequest>();
     public DbSet<SentPasswordResetEmail> SentPasswordResetEmails => Set<SentPasswordResetEmail>();
 
     // The User this context works for, or null for nobody. Its queries see only that User's
-    // Transactions, Bank Statements, Categories and Categorization Rules, through the query filters.
-    // Read at each query.
+    // Transactions, Bank Statements, Categories, Categorization Rules, Bookmarks, Folders and last used
+    // folder, through the query filters. Read at each query.
     public string? CurrentUserId => currentUser.Id;
 
-    // The owner every write gives a new Transaction, Bank Statement, Category or Categorization Rule
-    // explicitly: the current User. Acting for nobody, there is no one to own it, so the write fails
-    // here rather than in the database.
+    // The owner every write gives a new Transaction, Bank Statement, Category, Categorization Rule,
+    // Bookmark, Folder or last used folder explicitly: the current User. Acting for nobody, there is no
+    // one to own it, so the write fails here rather than in the database.
     public string OwnerOfNewRows => CurrentUserId
         ?? throw new InvalidOperationException("Only a signed-in User can own new rows.");
 
@@ -100,6 +104,43 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, CurrentUser cu
             statement.Property(s => s.ClosingBalance).HasPrecision(12, 2);
             // A User imports a Bank Statement at most once.
             statement.HasIndex(s => new { s.UserId, s.AccountNumber, s.PeriodStart, s.PeriodEnd }).IsUnique();
+        });
+
+        // A Transaction has at most one Bookmark, through the unique index on the Transaction, and
+        // deleting the Transaction, or anything that deletes Transactions, deletes it in the database.
+        // Deleting its Folder deletes it too, but never its Transaction.
+        modelBuilder.Entity<Bookmark>(bookmark =>
+        {
+            OwnedByAUser(bookmark);
+            bookmark.HasOne<Transaction>()
+                .WithOne()
+                .HasForeignKey<Bookmark>(b => b.TransactionId)
+                .OnDelete(DeleteBehavior.Cascade);
+            bookmark.HasOne<Folder>()
+                .WithMany()
+                .HasForeignKey(b => b.FolderId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // Names are unique among the User's Folders ignoring case, through an index on
+        // (user_id, lower(name)) that the migration creates by hand, since EF Core can't model an
+        // expression index.
+        modelBuilder.Entity<Folder>(folder =>
+        {
+            OwnedByAUser(folder);
+            folder.Property(f => f.Name).HasMaxLength(FolderNameMaxLength);
+        });
+
+        // One row per User at most, through the unique index on the User. Deleting the Folder makes
+        // "Bookmarks" the last used folder again, rather than deleting the row.
+        modelBuilder.Entity<LastUsedFolder>(lastUsed =>
+        {
+            OwnedByAUser(lastUsed);
+            lastUsed.HasIndex(l => l.UserId).IsUnique();
+            lastUsed.HasOne<Folder>()
+                .WithMany()
+                .HasForeignKey(l => l.FolderId)
+                .OnDelete(DeleteBehavior.SetNull);
         });
 
         // Not owned like the rows above: the AI request ledger counts every User's AI requests

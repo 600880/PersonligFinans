@@ -378,9 +378,89 @@ async function saveCategory(
   return { ok: false, fieldErrors: {}, message: `Saving failed (${response.status}).` }
 }
 
+// A named group the User files Bookmarks in, such as "Tax deductible".
+export interface Folder {
+  id: number
+  name: string
+}
+
+// The User's Folders, by name in the Norwegian alphabet, ignoring case.
+export async function fetchFolders(): Promise<Folder[]> {
+  const response = await apiFetch('/api/folders')
+  if (!response.ok) throw new Error(`Loading folders failed (${response.status})`)
+  return (await response.json()) as Folder[]
+}
+
+export type FolderFieldErrors = { name?: string }
+
+export type SaveFolderResult =
+  | { ok: true; folder: Folder }
+  | { ok: false; fieldErrors: FolderFieldErrors; message: string | null }
+
+// Creates a Folder. The server refuses a blank name, one already used ignoring case, or "Bookmarks",
+// with a field error on the name.
+export function addFolder(name: string): Promise<SaveFolderResult> {
+  return saveFolder('/api/folders', 'POST', name)
+}
+
+// Renames a Folder, with the same rules as creating one, except that its own name isn't taken, so
+// only its letter case can change.
+export function renameFolder(id: number, name: string): Promise<SaveFolderResult> {
+  return saveFolder(`/api/folders/${id}`, 'PUT', name)
+}
+
+async function saveFolder(url: string, method: 'POST' | 'PUT', name: string): Promise<SaveFolderResult> {
+  let response: Response
+  try {
+    response = await apiFetch(url, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    })
+  } catch {
+    return { ok: false, fieldErrors: {}, message: 'Could not reach the server.' }
+  }
+
+  if (response.ok) return { ok: true, folder: (await response.json()) as Folder }
+
+  if (response.status === 400) {
+    const { fieldErrors } = await readProblem<{ name: string }>(response)
+    if (Object.keys(fieldErrors).length > 0) return { ok: false, fieldErrors, message: null }
+  }
+
+  return { ok: false, fieldErrors: {}, message: `Saving failed (${response.status}).` }
+}
+
+// alreadyDeleted: the Folder was gone before this delete, so nothing changed.
+export type DeleteFolderResult = { ok: true; alreadyDeleted: boolean } | { ok: false; message: string }
+
+// Deletes a Folder and the Bookmarks in it, but never their Transactions.
+export async function deleteFolder(id: number): Promise<DeleteFolderResult> {
+  let response: Response
+  try {
+    response = await apiFetch(`/api/folders/${id}`, { method: 'DELETE' })
+  } catch {
+    return { ok: false, message: 'Could not reach the server.' }
+  }
+
+  if (response.ok) return { ok: true, alreadyDeleted: false }
+
+  if (response.status === 404) return { ok: true, alreadyDeleted: true }
+
+  return { ok: false, message: `Deleting failed (${response.status}).` }
+}
+
+// The bookmarked Transactions in the Folder, from any date, newest first.
+export async function fetchFolderBookmarks(folderId: number): Promise<Transaction[]> {
+  const response = await apiFetch(`/api/bookmarks?folderId=${folderId}`)
+  if (!response.ok) throw new Error(`Loading bookmarks failed (${response.status})`)
+  return (await response.json()) as Transaction[]
+}
+
 // categoryId is null for an Uncategorized Transaction. locked is set when the Categorization Rules
 // will never change its Category: it was entered manually, or its Category was chosen manually.
-// imported is set when it came from a Bank Statement, so it can't be deleted.
+// imported is set when it came from a Bank Statement, so it can't be deleted. bookmarked is set when
+// the User has put a Bookmark on it.
 export interface Transaction {
   id: number
   date: string
@@ -390,6 +470,7 @@ export interface Transaction {
   categoryId: number | null
   locked: boolean
   imported: boolean
+  bookmarked: boolean
 }
 
 export interface TransactionMonth {
@@ -516,6 +597,68 @@ export async function deleteTransaction(id: number): Promise<DeleteTransactionRe
   }
 
   return { ok: false, message: `Deleting failed (${response.status}).` }
+}
+
+// folderId is the Folder the Bookmark is filed in, or null for none.
+export type AddBookmarkResult = { ok: true; folderId: number | null } | { ok: false }
+
+// Bookmarks the Transaction in the User's last used folder. One already bookmarked is left as it is,
+// in its Folder.
+export async function addBookmark(id: number): Promise<AddBookmarkResult> {
+  try {
+    const response = await apiFetch(`/api/transactions/${id}/bookmark`, { method: 'POST' })
+    if (!response.ok) return { ok: false }
+    const { folderId } = (await response.json()) as { folderId: number | null }
+    return { ok: true, folderId }
+  } catch {
+    return { ok: false }
+  }
+}
+
+export type FileBookmarkResult = { ok: true } | { ok: false; message: string }
+
+const FILE_BOOKMARK_ERROR = 'Could not move the bookmark.'
+
+// Files the Transaction's Bookmark in the Folder, or in none for null, bookmarking it if it isn't,
+// and makes that the User's last used folder. A Folder deleted meanwhile, for example by another
+// visitor using the Guest, is refused with the server's message saying so.
+export async function fileBookmark(id: number, folderId: number | null): Promise<FileBookmarkResult> {
+  let response: Response
+  try {
+    response = await apiFetch(`/api/transactions/${id}/bookmark`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ folderId }),
+    })
+  } catch {
+    return { ok: false, message: FILE_BOOKMARK_ERROR }
+  }
+
+  if (response.ok) return { ok: true }
+
+  if (response.status === 400) {
+    const { fieldErrors } = await readProblem<{ folderId: number }>(response)
+    if (fieldErrors.folderId) return { ok: false, message: fieldErrors.folderId }
+  }
+
+  return { ok: false, message: FILE_BOOKMARK_ERROR }
+}
+
+// Removes the Transaction's Bookmark, if it has one. Resolves false when it couldn't be removed.
+export async function removeBookmark(id: number): Promise<boolean> {
+  try {
+    const response = await apiFetch(`/api/transactions/${id}/bookmark`, { method: 'DELETE' })
+    return response.ok
+  } catch {
+    return false
+  }
+}
+
+// The bookmarked Transactions in no Folder, from any date, newest first.
+export async function fetchBookmarks(): Promise<Transaction[]> {
+  const response = await apiFetch('/api/bookmarks')
+  if (!response.ok) throw new Error(`Loading bookmarks failed (${response.status})`)
+  return (await response.json()) as Transaction[]
 }
 
 // An existing Transaction, imported or manually-entered, with the same Amount and a posted date
