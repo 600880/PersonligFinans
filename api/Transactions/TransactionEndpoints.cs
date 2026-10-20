@@ -25,7 +25,9 @@ public record TransactionResponse(
     int? CategoryId,
     // Locked: the rules will never change its Category.
     bool Locked,
-    bool Imported);
+    bool Imported,
+    // Bookmarked: the User has put a Bookmark on it.
+    bool Bookmarked);
 
 public record TransactionMonthResponse(int Year, int Month);
 
@@ -75,13 +77,17 @@ public static class TransactionEndpoints
         // starts on 1 January.
         var first = new DateOnly(year!.Value, month ?? 1, 1);
         var next = month is null ? first.AddYears(1) : first.AddMonths(1);
-        return Results.Ok(await db.Transactions
-            .Where(t => t.PostedDate >= first && t.PostedDate < next)
+        return Results.Ok(await ListNewestFirst(db.Transactions.Where(t => t.PostedDate >= first && t.PostedDate < next), db));
+    }
+
+    // The Transactions as responses, newest first with the id as a stable tie-break, each saying
+    // whether it is bookmarked. Every list of Transactions has this order and shape.
+    internal static Task<List<TransactionResponse>> ListNewestFirst(IQueryable<Transaction> transactions, AppDbContext db) =>
+        transactions
             .OrderByDescending(t => t.PostedDate)
             .ThenByDescending(t => t.Id)
-            .Select(t => ToResponse(t))
-            .ToListAsync());
-    }
+            .Select(t => ToResponse(t, db.Bookmarks.Any(b => b.TransactionId == t.Id)))
+            .ToListAsync();
 
     // The Possible duplicates of a Transaction being entered by hand: every Transaction, imported or
     // manually-entered, with exactly the same signed Amount and a posted date within three days of the given
@@ -181,7 +187,8 @@ public static class TransactionEndpoints
         db.Transactions.Add(transaction);
         await db.SaveChangesAsync();
 
-        return Results.Created($"/api/transactions/{transaction.Id}", ToResponse(transaction));
+        // A new Transaction has no Bookmark yet.
+        return Results.Created($"/api/transactions/{transaction.Id}", ToResponse(transaction, bookmarked: false));
     }
 
     // Sets the Note on any Transaction — imported or manual. Blank and null both clear it.
@@ -199,7 +206,7 @@ public static class TransactionEndpoints
         transaction.Note = note;
         await db.SaveChangesAsync();
 
-        return Results.Ok(ToResponse(transaction));
+        return Results.Ok(ToResponse(transaction, await IsBookmarked(db, id)));
     }
 
     // Why an Amount can't be a Transaction's, or null when it can.
@@ -238,7 +245,7 @@ public static class TransactionEndpoints
         await db.SaveChangesAsync();
         await dbTransaction.CommitAsync();
 
-        return Results.Ok(ToResponse(transaction));
+        return Results.Ok(ToResponse(transaction, await IsBookmarked(db, id)));
     }
 
     // Deletes a manually-entered Transaction for good. An imported one can't be deleted, so every
@@ -263,7 +270,10 @@ public static class TransactionEndpoints
     private static IResult CategoryProblem(string message) =>
         Results.ValidationProblem(new Dictionary<string, string[]> { ["categoryId"] = [message] });
 
-    private static TransactionResponse ToResponse(Transaction transaction) =>
+    private static Task<bool> IsBookmarked(AppDbContext db, int transactionId) =>
+        db.Bookmarks.AnyAsync(b => b.TransactionId == transactionId);
+
+    private static TransactionResponse ToResponse(Transaction transaction, bool bookmarked) =>
         new(
             transaction.Id,
             transaction.PostedDate,
@@ -272,5 +282,6 @@ public static class TransactionEndpoints
             transaction.Note,
             transaction.CategoryId,
             Categorizer.IsLocked(transaction),
-            transaction.IsImported);
+            transaction.IsImported,
+            bookmarked);
 }

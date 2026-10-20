@@ -16,8 +16,8 @@ using PersonligFinans.Api.Transactions;
 
 namespace PersonligFinans.Api.Tests;
 
-// Two Users side by side: each has their own Transactions, Bank Statements, Uploads, Categories and
-// Categorization Rules, and never sees or changes the other's.
+// Two Users side by side: each has their own Transactions, Bank Statements, Uploads, Categories,
+// Categorization Rules and Bookmarks, and never sees or changes the other's.
 [Collection(ApiCollection.Name)]
 public class UserIsolationTests : IAsyncLifetime
 {
@@ -187,6 +187,26 @@ public class UserIsolationTests : IAsyncLifetime
         Assert.Equal((null, _categoriesA.Other), (await August(_a)).Select(t => (t.Note, t.CategoryId)).Single());
         Assert.Contains(await Categories(_a), c => c.Id == categoryId && c.Name == "Hobbies");
         Assert.Contains(await Rules(_a), r => r.Id == ruleId && r.Keyword == "kafé");
+    }
+
+    [Fact]
+    public async Task AnotherUsersBookmarks_CantBeSeenAddedOrRemoved()
+    {
+        var bookmarkedId = await AddTransaction(_a, _categoriesA.Other, "Bookmarked");
+        var notBookmarkedId = await AddTransaction(_a, _categoriesA.Other, "Not bookmarked");
+        Assert.Equal(HttpStatusCode.OK, (await _a.PostAsync($"/api/transactions/{bookmarkedId}/bookmark", null)).StatusCode);
+
+        Assert.Empty((await _b.GetFromJsonAsync<List<TransactionResponse>>("/api/bookmarks"))!);
+        Assert.Equal(HttpStatusCode.NotFound, (await _b.PostAsync($"/api/transactions/{notBookmarkedId}/bookmark", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await _b.DeleteAsync($"/api/transactions/{bookmarkedId}/bookmark")).StatusCode);
+
+        // Nothing of the first User's changed.
+        Assert.Equal(
+            [("Bookmarked", true), ("Not bookmarked", false)],
+            (await August(_a)).Select(t => (t.Description, t.Bookmarked)).Order());
+        Assert.Equal(
+            [bookmarkedId],
+            (await _a.GetFromJsonAsync<List<TransactionResponse>>("/api/bookmarks"))!.Select(t => t.Id));
     }
 
     [Fact]

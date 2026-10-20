@@ -23,16 +23,17 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, CurrentUser cu
     public DbSet<Transaction> Transactions => Set<Transaction>();
     public DbSet<BankStatement> BankStatements => Set<BankStatement>();
     public DbSet<CategorizationRule> CategorizationRules => Set<CategorizationRule>();
+    public DbSet<Bookmark> Bookmarks => Set<Bookmark>();
     public DbSet<AiRequest> AiRequests => Set<AiRequest>();
     public DbSet<SentPasswordResetEmail> SentPasswordResetEmails => Set<SentPasswordResetEmail>();
 
     // The User this context works for, or null for nobody. Its queries see only that User's
-    // Transactions, Bank Statements, Categories and Categorization Rules, through the query filters.
-    // Read at each query.
+    // Transactions, Bank Statements, Categories, Categorization Rules and Bookmarks, through the query
+    // filters. Read at each query.
     public string? CurrentUserId => currentUser.Id;
 
-    // The owner every write gives a new Transaction, Bank Statement, Category or Categorization Rule
-    // explicitly: the current User. Acting for nobody, there is no one to own it, so the write fails
+    // The owner every write gives a new Transaction, Bank Statement, Category, Categorization Rule or
+    // Bookmark explicitly: the current User. Acting for nobody, there is no one to own it, so the write fails
     // here rather than in the database.
     public string OwnerOfNewRows => CurrentUserId
         ?? throw new InvalidOperationException("Only a signed-in User can own new rows.");
@@ -100,6 +101,17 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, CurrentUser cu
             statement.Property(s => s.ClosingBalance).HasPrecision(12, 2);
             // A User imports a Bank Statement at most once.
             statement.HasIndex(s => new { s.UserId, s.AccountNumber, s.PeriodStart, s.PeriodEnd }).IsUnique();
+        });
+
+        // A Transaction has at most one Bookmark, through the unique index on the Transaction, and
+        // deleting the Transaction, or anything that deletes Transactions, deletes it in the database.
+        modelBuilder.Entity<Bookmark>(bookmark =>
+        {
+            OwnedByAUser(bookmark);
+            bookmark.HasOne<Transaction>()
+                .WithOne()
+                .HasForeignKey<Bookmark>(b => b.TransactionId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         // Not owned like the rows above: the AI request ledger counts every User's AI requests

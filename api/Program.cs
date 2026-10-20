@@ -1,5 +1,6 @@
 using PersonligFinans.Api.AiRequests;
 using PersonligFinans.Api.BankStatements;
+using PersonligFinans.Api.Bookmarks;
 using PersonligFinans.Api.Categories;
 using PersonligFinans.Api.CategorizationRules;
 using PersonligFinans.Api.Data;
@@ -44,6 +45,7 @@ app.MapUserEndpoints();
 app.MapPasswordResetEndpoints();
 app.MapAntiforgeryTokenEndpoint();
 app.MapTransactionEndpoints();
+app.MapBookmarkEndpoints();
 app.MapCategoryEndpoints();
 app.MapBankStatementEndpoints();
 app.MapCategorizationRuleEndpoints();

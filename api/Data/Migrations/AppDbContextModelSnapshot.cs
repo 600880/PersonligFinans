@@ -271,6 +271,41 @@ namespace PersonligFinans.Api.Data.Migrations
                     b.ToTable("bank_statements", (string)null);
                 });
 
+            modelBuilder.Entity("PersonligFinans.Api.Data.Bookmark", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int?>("FolderId")
+                        .HasColumnType("integer")
+                        .HasColumnName("folder_id");
+
+                    b.Property<int>("TransactionId")
+                        .HasColumnType("integer")
+                        .HasColumnName("transaction_id");
+
+                    b.Property<string>("UserId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_bookmarks");
+
+                    b.HasIndex("TransactionId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_bookmarks_transaction_id");
+
+                    b.HasIndex("UserId")
+                        .HasDatabaseName("ix_bookmarks_user_id");
+
+                    b.ToTable("bookmarks", (string)null);
+                });
+
             modelBuilder.Entity("PersonligFinans.Api.Data.CategorizationRule", b =>
                 {
                     b.Property<int>("Id")
@@ -509,6 +544,23 @@ namespace PersonligFinans.Api.Data.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_bank_statements_asp_net_users_user_id");
+                });
+
+            modelBuilder.Entity("PersonligFinans.Api.Data.Bookmark", b =>
+                {
+                    b.HasOne("PersonligFinans.Api.Data.Transaction", null)
+                        .WithOne()
+                        .HasForeignKey("PersonligFinans.Api.Data.Bookmark", "TransactionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_bookmarks_transactions_transaction_id");
+
+                    b.HasOne("Microsoft.AspNetCore.Identity.IdentityUser", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_bookmarks_asp_net_users_user_id");
                 });
 
             modelBuilder.Entity("PersonligFinans.Api.Data.CategorizationRule", b =>
