@@ -2984,6 +2984,20 @@ describe('Transactions page', () => {
             ).toEqual(['Bookmarks', 'Kvitteringer', 'Tax deductible', 'Warranty', 'New folder…'])
           })
 
+          it('hides Remove and Done while the new Folder is named, and brings them back on Cancel', async () => {
+            const user = await openPopupIn(21)
+
+            await user.selectOptions(popupFolderSelect(), 'New folder…')
+
+            expect(within(popup()).queryByRole('button', { name: 'Remove' })).not.toBeInTheDocument()
+            expect(within(popup()).queryByRole('button', { name: 'Done' })).not.toBeInTheDocument()
+
+            await user.click(within(popup()).getByRole('button', { name: 'Cancel' }))
+
+            expect(within(popup()).getByRole('button', { name: 'Remove' })).toBeInTheDocument()
+            expect(within(popup()).getByRole('button', { name: 'Done' })).toBeInTheDocument()
+          })
+
           it('brings back the dropdown with the Bookmark\'s Folder on Cancel', async () => {
             const user = await openPopupIn(21)
             await user.selectOptions(popupFolderSelect(), 'New folder…')

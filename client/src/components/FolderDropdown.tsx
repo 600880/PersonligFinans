@@ -16,14 +16,16 @@ const smallButtonClass =
 // "New folder…" swaps the dropdown for a name field with Create and Cancel. Create hands the
 // trimmed name to createFolder, which makes the Folder and chooses it; the field stays, with its
 // input, until that succeeds. Cancel brings back the dropdown with the same option chosen.
-// The children are shown next to the dropdown, and hidden with it while the name field shows.
-// With autoFocus, the dropdown takes the focus whenever it shows, including when the name field
-// closes.
+// The children are shown next to the dropdown, and hidden with it while the name field shows;
+// onCreatingChange tells whoever shows it when the name field opens and closes, for anything else
+// to hide meanwhile. With autoFocus, the dropdown takes the focus whenever it shows, including when
+// the name field closes.
 export function FolderDropdown({
   folders,
   chosenId,
   onChoose,
   createFolder,
+  onCreatingChange,
   disabled = false,
   autoFocus = false,
   selectRef,
@@ -33,6 +35,7 @@ export function FolderDropdown({
   chosenId: number | null
   onChoose: (folderId: number | null) => void
   createFolder: (name: string) => Promise<SaveFolderResult>
+  onCreatingChange?: (isCreating: boolean) => void
   disabled?: boolean
   autoFocus?: boolean
   selectRef?: Ref<HTMLSelectElement>
@@ -41,19 +44,24 @@ export function FolderDropdown({
   // Whether the name field for a new Folder shows in place of the dropdown.
   const [isCreating, setIsCreating] = useState(false)
 
+  function showNameField(show: boolean) {
+    setIsCreating(show)
+    onCreatingChange?.(show)
+  }
+
   function choose(value: string) {
-    if (value === CREATE_FOLDER) setIsCreating(true)
+    if (value === CREATE_FOLDER) showNameField(true)
     else onChoose(value === NO_FOLDER ? null : Number(value))
   }
 
   async function create(name: string) {
     const result = await createFolder(name)
-    if (result.ok) setIsCreating(false)
+    if (result.ok) showNameField(false)
     return result
   }
 
   if (isCreating) {
-    return <FolderNameForm initialName="" submitLabel="Create" save={create} onCancel={() => setIsCreating(false)} />
+    return <FolderNameForm initialName="" submitLabel="Create" save={create} onCancel={() => showNameField(false)} />
   }
 
   return (

@@ -38,6 +38,9 @@ export function BookmarkAddedPopup({
   // What is being saved, if anything. Nothing else can be done in the popup meanwhile.
   const [saving, setSaving] = useState<'file' | 'remove' | null>(null)
   const [error, setError] = useState<string | null>(null)
+  // Whether a new Folder is being named, when the name field's own Create and Cancel are the only
+  // buttons, so Remove and Done are hidden.
+  const [isNamingFolder, setIsNamingFolder] = useState(false)
   // Cleared once the popup is gone, such as when the list shown changes, so a save that finishes
   // afterwards changes nothing in it.
   const isOpenRef = useRef(false)
@@ -127,6 +130,7 @@ export function BookmarkAddedPopup({
         chosenId={folderId}
         onChoose={(chosenId) => void file(chosenId)}
         createFolder={createAndFile}
+        onCreatingChange={setIsNamingFolder}
         disabled={saving !== null}
         autoFocus
         selectRef={folderSelectRef}
@@ -136,24 +140,26 @@ export function BookmarkAddedPopup({
           {error}
         </p>
       )}
-      <div className="flex justify-end gap-2">
-        <button
-          type="button"
-          disabled={saving !== null}
-          onClick={() => void remove()}
-          className="rounded-lg px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-300"
-        >
-          {saving === 'remove' ? 'Removing…' : 'Remove'}
-        </button>
-        <button
-          type="button"
-          disabled={saving !== null}
-          onClick={onDone}
-          className="rounded-lg bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-300"
-        >
-          Done
-        </button>
-      </div>
+      {!isNamingFolder && (
+        <div className="flex justify-end gap-2">
+          <button
+            type="button"
+            disabled={saving !== null}
+            onClick={() => void remove()}
+            className="rounded-lg px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-300"
+          >
+            {saving === 'remove' ? 'Removing…' : 'Remove'}
+          </button>
+          <button
+            type="button"
+            disabled={saving !== null}
+            onClick={onDone}
+            className="rounded-lg bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+          >
+            Done
+          </button>
+        </div>
+      )}
     </div>
   )
 }
