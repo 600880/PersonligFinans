@@ -14,8 +14,9 @@ function validForm(overrides: Partial<TransactionFormValues> = {}): TransactionF
     description: 'Rema 1000',
     amountIn: '100',
     amountOut: '',
-    note: '',
     categoryId: '13',
+    bookmark: '',
+    note: '',
     ...overrides,
   }
 }
@@ -113,14 +114,15 @@ describe('suggestedTransactionForm', () => {
     }
   }
 
-  it('fills a purchase into Out, with the date, Description and Category, and leaves Note empty', () => {
+  it('fills a purchase into Out, with the date, Description and Category, and leaves the Bookmark at - and Note empty', () => {
     expect(suggestedTransactionForm(suggestion())).toEqual({
       date: '2026-10-12',
       description: 'Rema 1000',
       amountIn: '',
       amountOut: '249.90',
-      note: '',
       categoryId: '1',
+      bookmark: '',
+      note: '',
     })
   })
 
@@ -141,8 +143,9 @@ describe('suggestedTransactionForm', () => {
       description: '',
       amountIn: '',
       amountOut: '',
-      note: '',
       categoryId: '',
+      bookmark: '',
+      note: '',
     })
   })
 

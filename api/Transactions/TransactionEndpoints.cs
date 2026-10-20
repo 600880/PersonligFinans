@@ -1,16 +1,20 @@
 using System.Globalization;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
+using PersonligFinans.Api.Bookmarks;
 using PersonligFinans.Api.CategorizationRules;
 using PersonligFinans.Api.Data;
 
 namespace PersonligFinans.Api.Transactions;
 
+// Bookmark is where to bookmark the new Transaction, or null to leave it not bookmarked.
 public record CreateTransactionRequest(
     DateOnly? Date,
     string? Description,
     decimal? Amount,
     string? Note,
-    int? CategoryId);
+    int? CategoryId,
+    FileBookmarkRequest? Bookmark);
 
 public record ChangeNoteRequest(string? Note);
 
@@ -172,6 +176,10 @@ public static class TransactionEndpoints
         else if (!await db.Categories.AnyAsync(c => c.Id == request.CategoryId))
             Fail("categoryId", "Category does not exist.");
 
+        // Another visitor of the Guest, or another tab, may have deleted it since the form was shown.
+        if (request.Bookmark?.FolderId is { } folderId && !await db.Folders.AnyAsync(f => f.Id == folderId))
+            Fail("bookmark", "The folder no longer exists.");
+
         if (errors.Count > 0)
             return Results.ValidationProblem(errors);
 
@@ -185,10 +193,31 @@ public static class TransactionEndpoints
             CategoryId = request.CategoryId,
         };
         db.Transactions.Add(transaction);
-        await db.SaveChangesAsync();
 
-        // A new Transaction has no Bookmark yet.
-        return Results.Created($"/api/transactions/{transaction.Id}", ToResponse(transaction, bookmarked: false));
+        // The Transaction and its Bookmark are saved together or not at all. The Bookmark needs the
+        // Transaction's id, so it is saved second.
+        await using var saving = await db.Database.BeginTransactionAsync();
+        try
+        {
+            await db.SaveChangesAsync();
+            if (request.Bookmark is { } bookmark)
+            {
+                db.Bookmarks.Add(new Bookmark { UserId = db.OwnerOfNewRows, TransactionId = transaction.Id, FolderId = bookmark.FolderId });
+                await BookmarkEndpoints.MakeLastUsedFolder(db, bookmark.FolderId);
+                await db.SaveChangesAsync();
+            }
+            await saving.CommitAsync();
+        }
+        // A first last used folder recorded concurrently, between the lookup and now: creating again
+        // finds that row and changes it instead.
+        catch (DbUpdateException e) when (e.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
+        {
+            await saving.RollbackAsync();
+            db.ChangeTracker.Clear();
+            return await CreateTransaction(request, db);
+        }
+
+        return Results.Created($"/api/transactions/{transaction.Id}", ToResponse(transaction, bookmarked: request.Bookmark is not null));
     }
 
     // Sets the Note on any Transaction — imported or manual. Blank and null both clear it.

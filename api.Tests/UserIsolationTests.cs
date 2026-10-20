@@ -315,6 +315,27 @@ public class UserIsolationTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task AnotherUsersFolder_CantBookmarkANewTransaction()
+    {
+        var folderA = await AddFolder(_a, "Tax deductible");
+
+        var response = await _b.PostAsJsonAsync("/api/transactions", new
+        {
+            date = "2026-08-03",
+            description = "Into their folder",
+            amount = -100m,
+            categoryId = _categoriesB.Other,
+            bookmark = new { folderId = folderA },
+        });
+
+        Assert.Equal(["The folder no longer exists."], (await ValidationErrors(response))["bookmark"]);
+        Assert.Empty(await August(_b));
+        Assert.Null(await FolderOfNewBookmark(_b, _categoriesB.Other));
+        // Nothing of the first User's changed.
+        Assert.Empty((await _a.GetFromJsonAsync<List<TransactionResponse>>($"/api/bookmarks?folderId={folderA}"))!);
+    }
+
+    [Fact]
     public async Task FolderNames_MayRepeatAcrossUsers_ButNotWithinOne()
     {
         Assert.Equal(HttpStatusCode.Created, (await PostFolder(_a, "Tax deductible")).StatusCode);

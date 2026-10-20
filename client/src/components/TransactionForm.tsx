@@ -3,13 +3,17 @@ import { formatAmount } from '../lib/amount'
 import {
   createTransaction,
   fetchCategories,
+  fetchFolders,
   fetchPossibleDuplicates,
   type Category,
   type FieldErrors,
+  type Folder,
   type PossibleDuplicate,
 } from '../lib/api'
 import { formatNorwegianDate } from '../lib/date'
 import {
+  IN_NO_FOLDER,
+  NOT_BOOKMARKED,
   isTransactionFormValid,
   possibleDuplicateQuery,
   toCreateTransactionRequest,
@@ -86,8 +90,10 @@ interface TransactionFormProps {
 // give the form a new key to start it over. disabled keeps the fields and Save from being used,
 // e.g. while a Receipt is still being read. secondaryAction is the button beside Save, such as
 // Add transaction's Cancel, and stays usable while disabled. onSaved is called once the server
-// has recorded the Transaction. Under the fields, a notice lists the Possible duplicates of the
-// date and Amount entered; it only warns and never keeps Save from being used.
+// has recorded the Transaction, along with its Bookmark when one was chosen. The Bookmark is "-"
+// until the user chooses otherwise, and can only be chosen once the Folders are loaded; failing to
+// load them never keeps Save from being used. Under the fields, a notice lists the Possible
+// duplicates of the date and Amount entered; it only warns and never keeps Save from being used.
 export function TransactionForm({
   initialValues,
   disabled = false,
@@ -96,6 +102,9 @@ export function TransactionForm({
 }: TransactionFormProps) {
   const [values, setValues] = useState<TransactionFormValues>(initialValues)
   const [categories, setCategories] = useState<Category[]>([])
+  // The User's Folders, in the API's order; null until loaded.
+  const [folders, setFolders] = useState<Folder[] | null>(null)
+  const [foldersLoadError, setFoldersLoadError] = useState<string | null>(null)
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({})
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [isSaving, setIsSaving] = useState(false)
@@ -111,6 +120,13 @@ export function TransactionForm({
       })
       .catch(() => {
         if (!ignore) setErrorMessage('Could not load categories.')
+      })
+    fetchFolders()
+      .then((loaded) => {
+        if (!ignore) setFolders(loaded)
+      })
+      .catch(() => {
+        if (!ignore) setFoldersLoadError('Could not load folders.')
       })
     return () => {
       ignore = true
@@ -203,17 +219,6 @@ export function TransactionForm({
           )}
         </div>
 
-        <Field label="Note" error={fieldErrors.note}>
-          <input
-            type="text"
-            maxLength={256}
-            value={values.note}
-            disabled={disabled}
-            onChange={(e) => updateField('note', e.target.value)}
-            className={inputClassName}
-          />
-        </Field>
-
         <Field label="Category" error={fieldErrors.categoryId}>
           <select
             value={values.categoryId}
@@ -228,6 +233,38 @@ export function TransactionForm({
               </option>
             ))}
           </select>
+        </Field>
+
+        <Field label="Bookmark" error={fieldErrors.bookmark ?? foldersLoadError ?? undefined}>
+          <select
+            value={values.bookmark}
+            disabled={disabled || folders === null}
+            onChange={(e) => updateField('bookmark', e.target.value)}
+            className={inputClassName}
+          >
+            <option value={NOT_BOOKMARKED}>-</option>
+            {folders !== null && (
+              <>
+                <option value={IN_NO_FOLDER}>Bookmarks</option>
+                {folders.map((folder) => (
+                  <option key={folder.id} value={folder.id}>
+                    {folder.name}
+                  </option>
+                ))}
+              </>
+            )}
+          </select>
+        </Field>
+
+        <Field label="Note" error={fieldErrors.note}>
+          <input
+            type="text"
+            maxLength={256}
+            value={values.note}
+            disabled={disabled}
+            onChange={(e) => updateField('note', e.target.value)}
+            className={inputClassName}
+          />
         </Field>
 
         {possibleDuplicates.length > 0 && (

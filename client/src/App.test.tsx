@@ -294,6 +294,11 @@ async function fillValidForm(user: ReturnType<typeof userEvent.setup>) {
   await user.selectOptions(screen.getByLabelText(/category/i), 'Groceries')
 }
 
+// Chooses the Bookmark once the Folders are loaded.
+async function chooseBookmark(user: ReturnType<typeof userEvent.setup>, name: string) {
+  await user.selectOptions(screen.getByLabelText(/^bookmark/i), await screen.findByRole('option', { name }))
+}
+
 describe('App', () => {
   it('shows the Add transaction button with no modal open', async () => {
     await renderApp()
@@ -316,10 +321,34 @@ describe('App', () => {
   it('offers the categories loaded from the API', async () => {
     await openModal()
 
-    const options = within(screen.getByRole('dialog'))
+    const options = within(screen.getByLabelText(/category/i))
       .getAllByRole('option')
       .map((option) => option.textContent)
     expect(options).toEqual(['Choose…', 'Groceries', 'Other'])
+  })
+
+  it('asks for the Bookmark between Category and Note, offering -, Bookmarks, then the Folders, with - chosen', async () => {
+    folders = [
+      { id: 30, name: 'Tax deductible' },
+      { id: 31, name: 'Warranty' },
+    ]
+    await openModal()
+
+    const fields = [/date/i, /description/i, /^in$/i, /^out$/i, /category/i, /^bookmark/i, /^note$/i].map((label) =>
+      screen.getByLabelText(label),
+    )
+    for (const [earlier, later] of fields.slice(0, -1).map((field, i) => [field, fields[i + 1]])) {
+      expect(earlier.compareDocumentPosition(later) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    }
+    const bookmark = screen.getByLabelText(/^bookmark/i)
+    await waitFor(() => expect(bookmark).toBeEnabled())
+    expect(within(bookmark).getAllByRole('option').map((option) => option.textContent)).toEqual([
+      '-',
+      'Bookmarks',
+      'Tax deductible',
+      'Warranty',
+    ])
+    expect(within(bookmark).getByRole<HTMLOptionElement>('option', { name: '-' }).selected).toBe(true)
   })
 
   it('keeps Save disabled until description, amount and category are filled in', async () => {
@@ -355,6 +384,82 @@ describe('App', () => {
     })
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     expect(screen.getByRole('status')).toHaveTextContent('Transaction saved')
+  })
+
+  it('posts the chosen Folder with the transaction, then closes and confirms', async () => {
+    folders = [{ id: 30, name: 'Tax deductible' }]
+    let posted: unknown
+    handlePost = (body) => {
+      posted = body
+      return Response.json({ id: 1 }, { status: 201 })
+    }
+    const user = await openModal()
+    await fillValidForm(user)
+    await chooseBookmark(user, 'Tax deductible')
+
+    await user.click(screen.getByRole('button', { name: /^save$/i }))
+
+    expect(posted).toEqual(expect.objectContaining({ description: 'Rema 1000', bookmark: { folderId: 30 } }))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('Transaction saved')
+  })
+
+  it('posts no Folder for Bookmarks', async () => {
+    folders = [{ id: 30, name: 'Tax deductible' }]
+    let posted: unknown
+    handlePost = (body) => {
+      posted = body
+      return Response.json({ id: 1 }, { status: 201 })
+    }
+    const user = await openModal()
+    await fillValidForm(user)
+    await chooseBookmark(user, 'Bookmarks')
+
+    await user.click(screen.getByRole('button', { name: /^save$/i }))
+
+    expect(posted).toEqual(expect.objectContaining({ bookmark: { folderId: null } }))
+  })
+
+  it('shows under the Bookmark that the chosen Folder no longer exists, keeping the input', async () => {
+    folders = [{ id: 30, name: 'Tax deductible' }]
+    handlePost = () => Response.json({ errors: { bookmark: ['The folder no longer exists.'] } }, { status: 400 })
+    const user = await openModal()
+    await fillValidForm(user)
+    await chooseBookmark(user, 'Tax deductible')
+
+    await user.click(screen.getByRole('button', { name: /^save$/i }))
+
+    const bookmark = screen.getByLabelText(/^bookmark/i)
+    expect(bookmark.closest('label')).toHaveTextContent('The folder no longer exists.')
+    expect(bookmark).toHaveValue('30')
+    expect(screen.getByLabelText(/^out$/i)).toHaveValue(249.9)
+  })
+
+  it('keeps the Bookmark at - and disabled while the Folders load', async () => {
+    folders = new Promise(() => {})
+    await openModal()
+
+    const bookmark = screen.getByLabelText(/^bookmark/i)
+    expect(bookmark).toBeDisabled()
+    expect(within(bookmark).getAllByRole('option').map((option) => option.textContent)).toEqual(['-'])
+  })
+
+  it('saves without a bookmark when the Folders could not be loaded, saying so under the Bookmark', async () => {
+    folders = new Response(null, { status: 500 })
+    let posted: unknown
+    handlePost = (body) => {
+      posted = body
+      return Response.json({ id: 1 }, { status: 201 })
+    }
+    const user = await openModal()
+    const bookmark = screen.getByLabelText(/^bookmark/i)
+    await waitFor(() => expect(bookmark.closest('label')).toHaveTextContent('Could not load folders.'))
+    await fillValidForm(user)
+
+    await user.click(screen.getByRole('button', { name: /^save$/i }))
+
+    expect(posted).not.toHaveProperty('bookmark')
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 
   it('stays open with the input kept and shows field errors from the server', async () => {
@@ -5963,6 +6068,25 @@ describe('Scan receipts', () => {
     const dialog = await screen.findByRole('dialog', { name: 'Receipt 2 of 2' })
     expect(within(dialog).getByRole('img', { name: 'Receipt' })).toHaveAttribute('src', 'blob:rema.png')
     expect(within(dialog).getByLabelText(/description/i)).toHaveValue('')
+  })
+
+  it('starts the Bookmark of every Receipt at -, whatever the one before was saved with', async () => {
+    folders = [{ id: 30, name: 'Tax deductible' }]
+    const posted: unknown[] = []
+    handlePost = (body) => {
+      posted.push(body)
+      return Response.json({ id: 1 }, { status: 201 })
+    }
+    const user = await scanUntilFormIsReady([kiwi, rema])
+    await fillValidForm(user)
+    await chooseBookmark(user, 'Tax deductible')
+
+    await user.click(screen.getByRole('button', { name: /^save$/i }))
+
+    expect(posted).toEqual([expect.objectContaining({ bookmark: { folderId: 30 } })])
+    await formIsReady('Receipt 2 of 2')
+    expect(screen.getByLabelText(/^bookmark/i)).toHaveValue('')
+    expect(within(screen.getByLabelText(/^bookmark/i)).getByRole<HTMLOptionElement>('option', { name: '-' }).selected).toBe(true)
   })
 
   it('skips a Receipt without saving it', async () => {

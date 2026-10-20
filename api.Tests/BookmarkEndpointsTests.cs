@@ -405,6 +405,76 @@ public class BookmarkEndpointsTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
+    // Adds a manually-entered Transaction in Other, with the bookmark given, as the form for one does.
+    private Task<HttpResponseMessage> PostTransaction(string description, object? bookmark) =>
+        _client.PostAsJsonAsync("/api/transactions", new
+        {
+            date = "2026-09-24",
+            description,
+            amount = -249.90m,
+            categoryId = _categories.Other,
+            bookmark,
+        });
+
+    [Fact]
+    public async Task Post_Transaction_WithAFolder_BookmarksItThere_AndMakesItTheLastUsedFolder()
+    {
+        var tax = await AddFolder("Tax deductible");
+
+        var response = await PostTransaction("Rema 1000", bookmark: new { folderId = tax });
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var created = (await response.Content.ReadFromJsonAsync<TransactionResponse>())!;
+        Assert.True(created.Bookmarked);
+        Assert.Equal([created], await BookmarksIn(tax));
+        Assert.Equal(tax, await FolderOfNewBookmark());
+    }
+
+    [Fact]
+    public async Task Post_Transaction_InNoFolder_BookmarksItInBookmarks_AndMakesBookmarksTheLastUsedFolder()
+    {
+        var tax = await AddFolder("Tax deductible");
+        await FileBookmark((await AddTransaction()).Id, tax);
+
+        var response = await PostTransaction("Rema 1000", bookmark: new { folderId = (int?)null });
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var created = (await response.Content.ReadFromJsonAsync<TransactionResponse>())!;
+        Assert.Equal([created with { Bookmarked = true }], await Bookmarks());
+        Assert.Null(await FolderOfNewBookmark());
+    }
+
+    [Fact]
+    public async Task Post_Transaction_WithNoBookmark_BookmarksNothing_AndLeavesTheLastUsedFolderAlone()
+    {
+        var tax = await AddFolder("Tax deductible");
+        await FileBookmark((await AddTransaction()).Id, tax);
+
+        var response = await PostTransaction("not bookmarked", bookmark: null);
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        Assert.False((await response.Content.ReadFromJsonAsync<TransactionResponse>())!.Bookmarked);
+        Assert.DoesNotContain("not bookmarked", (await BookmarksIn(tax)).Select(t => t.Description));
+        Assert.Empty(await Bookmarks());
+        Assert.Equal(tax, await FolderOfNewBookmark());
+    }
+
+    [Fact]
+    public async Task Post_Transaction_InAnUnknownFolder_IsAFieldError_AndSavesNothing()
+    {
+        var tax = await AddFolder("Tax deductible");
+        await FileBookmark((await AddTransaction()).Id, tax);
+
+        var response = await PostTransaction("in a deleted folder", bookmark: new { folderId = int.MaxValue });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(
+            ["The folder no longer exists."],
+            (await response.Content.ReadFromJsonAsync<ValidationProblemDetails>())!.Errors["bookmark"]);
+        Assert.DoesNotContain("in a deleted folder", (await TransactionsOf(2026, 9)).Select(t => t.Description));
+        Assert.Equal(tax, await FolderOfNewBookmark());
+    }
+
     private async Task Upload(byte[] pdf)
     {
         var file = new ByteArrayContent(pdf);

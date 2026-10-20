@@ -82,11 +82,7 @@ public static class BookmarkEndpoints
         else
             bookmark.FolderId = request.FolderId;
 
-        var lastUsed = await db.LastUsedFolders.SingleOrDefaultAsync();
-        if (lastUsed is null)
-            db.LastUsedFolders.Add(new LastUsedFolder { UserId = db.OwnerOfNewRows, FolderId = request.FolderId });
-        else
-            lastUsed.FolderId = request.FolderId;
+        await MakeLastUsedFolder(db, request.FolderId);
 
         try
         {
@@ -113,6 +109,17 @@ public static class BookmarkEndpoints
         await db.Bookmarks.Where(b => b.TransactionId == id).ExecuteDeleteAsync();
 
         return Results.NoContent();
+    }
+
+    // Makes the Folder, or none for null, the User's last used folder when the context is next saved.
+    // A first one recorded concurrently makes that save fail with a unique violation.
+    internal static async Task MakeLastUsedFolder(AppDbContext db, int? folderId)
+    {
+        var lastUsed = await db.LastUsedFolders.SingleOrDefaultAsync();
+        if (lastUsed is null)
+            db.LastUsedFolders.Add(new LastUsedFolder { UserId = db.OwnerOfNewRows, FolderId = folderId });
+        else
+            lastUsed.FolderId = folderId;
     }
 
     // The Transaction's Bookmark as a response, or null when it isn't bookmarked.
