@@ -13,6 +13,7 @@ import {
   fetchFolders,
   fetchTransactionMonths,
   fetchTransactions,
+  fileBookmark,
   removeBookmark,
   renameFolder,
   type Category,
@@ -116,8 +117,8 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
   const [bookmarks, setBookmarks] = useState<Transaction[] | null>(null)
   // The Folder whose bookmarks Bookmarks lists, or null for those in no Folder.
   const [chosenFolderId, setChosenFolderId] = useState<number | null>(null)
-  // The User's Folders, in the API's order. Null until first needed and loaded, then kept for the
-  // rest of the visit to the page.
+  // The User's Folders, in the API's order, shared by the Bookmarks view and the popup. Null until
+  // first needed and loaded, then kept for the rest of the visit to the page.
   const [folders, setFolders] = useState<Folder[] | null>(null)
   // What is open for the chosen Folder, if anything, and whether its delete is being saved.
   const [folderAction, setFolderAction] = useState<FolderAction | null>(null)
@@ -130,8 +131,9 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
   // The Transactions whose Bookmark is being added or removed. Their stars are disabled until it is,
   // so a failed save never goes back over a later click.
   const [bookmarkSavingIds, setBookmarkSavingIds] = useState<ReadonlySet<number>>(new Set())
-  // The Transaction whose "Bookmark added" popup is open. Only one is ever open.
-  const [popupId, setPopupId] = useState<number | null>(null)
+  // The Transaction whose "Bookmark added" popup is open, with the Folder its Bookmark went into. Only
+  // one is ever open.
+  const [popup, setPopup] = useState<{ transactionId: number; addedFolderId: number | null } | null>(null)
   // The star under the open popup, which gets the focus back when the popup closes.
   const popupStarRef = useRef<HTMLButtonElement>(null)
   // The Transaction whose delete is waiting for confirmation, and whether that delete is being saved.
@@ -196,9 +198,9 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
     }
   }, [list, chosenFolderId])
 
-  // The Folders are loaded the first time they are needed. Failing, they are tried again the next
-  // time Bookmarks is shown.
-  const needsFolders = list === 'bookmarks'
+  // The Folders are loaded the first time Bookmarks or a popup needs them. Failing, they are tried
+  // again the next time either needs them.
+  const needsFolders = list === 'bookmarks' || popup !== null
   useEffect(() => {
     if (!needsFolders || folders !== null) return
     let ignore = false
@@ -236,7 +238,7 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
   function closeOpenActions() {
     setConfirmingDeleteId(null)
     setEditingNoteId(null)
-    setPopupId(null)
+    setPopup(null)
     setFolderAction(null)
   }
 
@@ -276,13 +278,20 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
     setChosenFolderId(folderId)
   }
 
-  // Adds the new Folder in the API's order and shows it, empty.
+  // Adds the new Folder to the User's Folders in the API's order, so both the Bookmarks view and the
+  // popup offer it.
+  async function addToFolders(name: string): Promise<SaveFolderResult> {
+    const result = await addFolder(name)
+    if (result.ok) setFolders((current) => inFolderOrder([...(current ?? []), result.folder]))
+    return result
+  }
+
+  // Shows the new Folder, empty.
   async function createFolder(name: string): Promise<SaveFolderResult> {
     setStatusMessage(null)
     setErrorMessage(null)
-    const result = await addFolder(name)
+    const result = await addToFolders(name)
     if (result.ok) {
-      setFolders((current) => inFolderOrder([...(current ?? []), result.folder]))
       chooseFolder(result.folder.id)
       setStatusMessage('Folder created')
     } else {
@@ -395,26 +404,38 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
 
   // Fills or empties the star at once, and goes back when saving fails, so the page never shows a
   // Bookmark that wasn't saved, nor hides one that still exists. Any star closes the open popup, and
-  // an empty one opens its own once the Bookmark is added.
+  // an empty one opens its own once the Bookmark is added, showing the Folder it went into.
   async function toggleBookmark(transaction: Transaction) {
     const bookmarked = !transaction.bookmarked
     setStatusMessage(null)
     setErrorMessage(null)
-    setPopupId(null)
+    setPopup(null)
     setBookmarkSaving(transaction.id, true)
     showChange(transaction.id, { bookmarked })
 
-    const saved = await (bookmarked
-      ? addBookmark(transaction.id).then((result) => result.ok)
-      : removeBookmark(transaction.id)
-    ).finally(() => setBookmarkSaving(transaction.id, false))
-
-    if (saved) {
-      if (bookmarked) setPopupId(transaction.id)
+    if (bookmarked) {
+      const result = await addBookmark(transaction.id).finally(() => setBookmarkSaving(transaction.id, false))
+      if (result.ok) setPopup({ transactionId: transaction.id, addedFolderId: result.folderId })
+      else undoBookmarkToggle(transaction, 'Could not add the bookmark.')
     } else {
-      showChange(transaction.id, { bookmarked: transaction.bookmarked })
-      setErrorMessage(bookmarked ? 'Could not add the bookmark.' : 'Could not remove the bookmark.')
+      const removed = await removeBookmark(transaction.id).finally(() => setBookmarkSaving(transaction.id, false))
+      if (!removed) undoBookmarkToggle(transaction, 'Could not remove the bookmark.')
     }
+  }
+
+  // Puts the star back as it was before the click, saying what failed.
+  function undoBookmarkToggle(transaction: Transaction, message: string) {
+    showChange(transaction.id, { bookmarked: transaction.bookmarked })
+    setErrorMessage(message)
+  }
+
+  // Files the Bookmark from its popup. Its row stays in the Bookmarks view, star filled, even when
+  // moved to another Folder, until the list is loaded again.
+  async function fileFromPopup(transaction: Transaction, folderId: number | null) {
+    setStatusMessage(null)
+    setErrorMessage(null)
+    setBookmarkSaving(transaction.id, true)
+    return fileBookmark(transaction.id, folderId).finally(() => setBookmarkSaving(transaction.id, false))
   }
 
   // Removes the Bookmark from its popup. Unlike the star, it waits for the save, so when that fails
@@ -432,7 +453,7 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
   // after a Remove.
   const closePopup = useCallback(() => {
     const star = popupStarRef.current
-    flushSync(() => setPopupId(null))
+    flushSync(() => setPopup(null))
     star?.focus()
   }, [])
 
@@ -730,7 +751,7 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
                   </td>
                   <td className="relative py-2 pl-4 text-right max-sm:col-start-2 max-sm:row-start-3 max-sm:p-0">
                     <button
-                      ref={popupId === transaction.id ? popupStarRef : undefined}
+                      ref={popup?.transactionId === transaction.id ? popupStarRef : undefined}
                       type="button"
                       aria-pressed={transaction.bookmarked}
                       aria-label={
@@ -754,8 +775,15 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
                         <path d="M8 1.75 9.93 5.66l4.32.63-3.13 3.04.74 4.3L8 11.6l-3.86 2.03.74-4.3L1.75 6.29l4.32-.63L8 1.75Z" />
                       </svg>
                     </button>
-                    {popupId === transaction.id && (
-                      <BookmarkAddedPopup onDone={closePopup} onRemove={() => removeFromPopup(transaction)} />
+                    {popup?.transactionId === transaction.id && (
+                      <BookmarkAddedPopup
+                        folders={folders}
+                        addedFolderId={popup.addedFolderId}
+                        onDone={closePopup}
+                        onRemove={() => removeFromPopup(transaction)}
+                        onFile={(folderId) => fileFromPopup(transaction, folderId)}
+                        createFolder={addToFolders}
+                      />
                     )}
                   </td>
                   <td className="py-2 pl-1 text-right max-sm:col-start-3 max-sm:row-start-3 max-sm:p-0">

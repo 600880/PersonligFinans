@@ -1,4 +1,4 @@
-import { useId, useState, type FormEvent, type ReactNode } from 'react'
+import { useId, useState, type FormEvent, type ReactNode, type Ref } from 'react'
 import type { Folder, FolderFieldErrors, SaveFolderResult } from '../lib/api'
 
 // The select's values for "Bookmarks", the bookmarks in no Folder, and for "Create folder". A
@@ -12,22 +12,30 @@ const smallButtonClass =
 
 // The Folder dropdown: "Bookmarks" for the bookmarks in no Folder, then the Folders in the order
 // given, then "Create folder" last. chosenId is null for "Bookmarks". Disabled while the Folders are
-// null, as they are until loaded.
+// null, as they are until loaded, offering only the chosen option meanwhile, and while disabled is set.
 // "Create folder" swaps the dropdown for a name field with Create and Cancel. Create hands the
 // trimmed name to createFolder, which makes the Folder and chooses it; the field stays, with its
 // input, until that succeeds. Cancel brings back the dropdown with the same option chosen.
 // The children are shown next to the dropdown, and hidden with it while the name field shows.
+// With autoFocus, the dropdown takes the focus whenever it shows, including when the name field
+// closes.
 export function FolderDropdown({
   folders,
   chosenId,
   onChoose,
   createFolder,
+  disabled = false,
+  autoFocus = false,
+  selectRef,
   children,
 }: {
   folders: Folder[] | null
   chosenId: number | null
   onChoose: (folderId: number | null) => void
   createFolder: (name: string) => Promise<SaveFolderResult>
+  disabled?: boolean
+  autoFocus?: boolean
+  selectRef?: Ref<HTMLSelectElement>
   children?: ReactNode
 }) {
   // Whether the name field for a new Folder shows in place of the dropdown.
@@ -53,18 +61,27 @@ export function FolderDropdown({
       <label className="flex flex-col gap-1 text-sm font-medium text-slate-700">
         Folder
         <select
+          ref={selectRef}
+          autoFocus={autoFocus}
           value={chosenId ?? NO_FOLDER}
-          disabled={folders === null}
+          disabled={disabled || folders === null}
           onChange={(event) => choose(event.target.value)}
-          className={inputClass}
+          className={`${inputClass} disabled:cursor-not-allowed disabled:bg-slate-100`}
         >
-          <option value={NO_FOLDER}>Bookmarks</option>
-          {folders?.map((folder) => (
-            <option key={folder.id} value={folder.id}>
-              {folder.name}
-            </option>
-          ))}
-          <option value={CREATE_FOLDER}>Create folder</option>
+          {folders === null ? (
+            // A chosen Folder's name isn't known until the Folders are loaded.
+            <option value={chosenId ?? NO_FOLDER}>{chosenId === null ? 'Bookmarks' : 'Loading…'}</option>
+          ) : (
+            <>
+              <option value={NO_FOLDER}>Bookmarks</option>
+              {folders.map((folder) => (
+                <option key={folder.id} value={folder.id}>
+                  {folder.name}
+                </option>
+              ))}
+              <option value={CREATE_FOLDER}>Create folder</option>
+            </>
+          )}
         </select>
       </label>
       {children}

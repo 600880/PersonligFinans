@@ -602,7 +602,8 @@ export async function deleteTransaction(id: number): Promise<DeleteTransactionRe
 // folderId is the Folder the Bookmark is filed in, or null for none.
 export type AddBookmarkResult = { ok: true; folderId: number | null } | { ok: false }
 
-// Bookmarks the Transaction. One already bookmarked is left as it is, in its Folder.
+// Bookmarks the Transaction in the User's last used folder. One already bookmarked is left as it is,
+// in its Folder.
 export async function addBookmark(id: number): Promise<AddBookmarkResult> {
   try {
     const response = await apiFetch(`/api/transactions/${id}/bookmark`, { method: 'POST' })
@@ -612,6 +613,35 @@ export async function addBookmark(id: number): Promise<AddBookmarkResult> {
   } catch {
     return { ok: false }
   }
+}
+
+export type FileBookmarkResult = { ok: true } | { ok: false; message: string }
+
+const FILE_BOOKMARK_ERROR = 'Could not move the bookmark.'
+
+// Files the Transaction's Bookmark in the Folder, or in none for null, bookmarking it if it isn't,
+// and makes that the User's last used folder. A Folder deleted meanwhile, for example by another
+// visitor using the Guest, is refused with the server's message saying so.
+export async function fileBookmark(id: number, folderId: number | null): Promise<FileBookmarkResult> {
+  let response: Response
+  try {
+    response = await apiFetch(`/api/transactions/${id}/bookmark`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ folderId }),
+    })
+  } catch {
+    return { ok: false, message: FILE_BOOKMARK_ERROR }
+  }
+
+  if (response.ok) return { ok: true }
+
+  if (response.status === 400) {
+    const { fieldErrors } = await readProblem<{ folderId: number }>(response)
+    if (fieldErrors.folderId) return { ok: false, message: fieldErrors.folderId }
+  }
+
+  return { ok: false, message: FILE_BOOKMARK_ERROR }
 }
 
 // Removes the Transaction's Bookmark, if it has one. Resolves false when it couldn't be removed.
