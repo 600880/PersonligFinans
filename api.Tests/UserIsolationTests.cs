@@ -237,6 +237,27 @@ public class UserIsolationTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task AnotherUsersFolders_CantBeRenamedOrDeleted()
+    {
+        var created = await PostFolder(_a, "Tax deductible");
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        var folderId = (await created.Content.ReadFromJsonAsync<FolderResponse>())!.Id;
+        var transactionId = await AddTransaction(_a, _categoriesA.Other);
+        Assert.Equal(HttpStatusCode.OK, (await _a.PostAsync($"/api/transactions/{transactionId}/bookmark", null)).StatusCode);
+        await _factory.FileBookmarkAsync(_emailA, transactionId, folderId);
+
+        Assert.Equal(HttpStatusCode.NotFound,
+            (await _b.PutAsJsonAsync($"/api/folders/{folderId}", new { name = "Mine now" })).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await _b.DeleteAsync($"/api/folders/{folderId}")).StatusCode);
+
+        // Nothing of the first User's changed.
+        Assert.Equal([("Tax deductible", folderId)], (await Folders(_a)).Select(f => (f.Name, f.Id)));
+        Assert.Equal(
+            [transactionId],
+            (await _a.GetFromJsonAsync<List<TransactionResponse>>($"/api/bookmarks?folderId={folderId}"))!.Select(t => t.Id));
+    }
+
+    [Fact]
     public async Task FolderNames_MayRepeatAcrossUsers_ButNotWithinOne()
     {
         Assert.Equal(HttpStatusCode.Created, (await PostFolder(_a, "Tax deductible")).StatusCode);

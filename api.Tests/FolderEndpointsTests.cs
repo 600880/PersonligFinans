@@ -125,6 +125,70 @@ public class FolderEndpointsTests : IAsyncLifetime
         Assert.Empty(await ListFolders());
     }
 
+    private Task<HttpResponseMessage> RenameFolder(int id, string? name) =>
+        _client.PutAsJsonAsync($"/api/folders/{id}", new { name });
+
+    [Fact]
+    public async Task Put_RenamesTheFolder_TrimmingTheName_AndAnswersWithTheFolder()
+    {
+        var folder = await AddedFolder("Warranty");
+        await AddedFolder("Tax deductible");
+
+        var response = await RenameFolder(folder.Id, "  Abonnement  ");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(new FolderResponse(folder.Id, "Abonnement"), await response.Content.ReadFromJsonAsync<FolderResponse>());
+        Assert.Equal(["Abonnement", "Tax deductible"], (await ListFolders()).Select(f => f.Name));
+    }
+
+    // A Folder's own name isn't taken, so it can change only its letter case.
+    [Fact]
+    public async Task Put_ChangingOnlyTheLetterCase_IsAccepted()
+    {
+        var folder = await AddedFolder("tax deductible");
+
+        var response = await RenameFolder(folder.Id, "Tax deductible");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(["Tax deductible"], (await ListFolders()).Select(f => f.Name));
+    }
+
+    // The validation errors of a rename the API refused, keyed on the request's fields.
+    private async Task<Dictionary<string, string[]>> RenameFolderExpectingValidationErrors(int id, string? name)
+    {
+        var response = await RenameFolder(id, name);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        return new((await response.Content.ReadFromJsonAsync<ValidationProblemDetails>())!.Errors);
+    }
+
+    [Theory]
+    [InlineData(null, "Name is required.")]
+    [InlineData("   ", "Name is required.")]
+    [InlineData("nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn", "Name must be at most 50 characters.")]
+    [InlineData(" TAX DEDUCTIBLE ", "A folder named 'Tax deductible' already exists.")]
+    [InlineData(" bookmarks ", "A folder can't be named 'Bookmarks'.")]
+    public async Task Put_ANameACreateWouldRefuse_IsAValidationProblem_AndKeepsTheName(string? name, string error)
+    {
+        var folder = await AddedFolder("Warranty");
+        await AddedFolder("Tax deductible");
+
+        var errors = await RenameFolderExpectingValidationErrors(folder.Id, name);
+
+        Assert.Equal([error], errors["name"]);
+        Assert.Equal(["Tax deductible", "Warranty"], (await ListFolders()).Select(f => f.Name));
+    }
+
+    [Fact]
+    public async Task Put_UnknownId_IsNotFound()
+    {
+        var folder = await AddedFolder("Warranty");
+
+        var response = await RenameFolder(folder.Id + 1000, "Abonnement");
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.Equal(["Warranty"], (await ListFolders()).Select(f => f.Name));
+    }
+
     [Fact]
     public async Task FolderNames_AreUniqueIgnoringCase_InTheDatabase()
     {
@@ -138,26 +202,56 @@ public class FolderEndpointsTests : IAsyncLifetime
         await Assert.ThrowsAsync<DbUpdateException>(() => db.SaveChangesAsync());
     }
 
-    // Deleted straight in the database, since the API can't delete Folders yet.
-    [Fact]
-    public async Task DeletingAFolder_DeletesItsBookmarks_ButNotTheirTransactions()
+    // A Transaction dated in September 2026, bookmarked and filed in the Folder, or in none for null.
+    private async Task<int> AddBookmarkedTransaction(string description, int? folderId)
     {
-        var folder = await AddedFolder("Tax deductible");
         var categories = await TestCategories.Of(_client);
         var created = await _client.PostAsJsonAsync("/api/transactions", new
         {
-            date = "2026-09-24", description = "Rema 1000", amount = -249.90m, categoryId = categories.Other,
+            date = "2026-09-24", description, amount = -249.90m, categoryId = categories.Other,
         });
         var transaction = (await created.Content.ReadFromJsonAsync<TransactionResponse>())!;
         Assert.Equal(HttpStatusCode.OK, (await _client.PostAsync($"/api/transactions/{transaction.Id}/bookmark", null)).StatusCode);
-        await _factory.FileBookmarkAsync(_email, transaction.Id, folder.Id);
-        await using (var user = await UserDatabase.OfAsync(_factory, _email))
-            await user.Db.Folders.Where(f => f.Id == folder.Id).ExecuteDeleteAsync();
+        if (folderId is { } id)
+            await _factory.FileBookmarkAsync(_email, transaction.Id, id);
+        return transaction.Id;
+    }
 
-        var september = await _client.GetFromJsonAsync<List<TransactionResponse>>("/api/transactions?year=2026&month=9");
+    private async Task<List<int>> ListedBookmarkIds(string url) =>
+        (await _client.GetFromJsonAsync<List<TransactionResponse>>(url))!.Select(t => t.Id).ToList();
 
-        Assert.Equal([transaction], september);
-        Assert.False(september!.Single().Bookmarked);
-        Assert.Empty(await ListFolders());
+    [Fact]
+    public async Task Delete_DeletesTheFolderAndItsBookmarks_ButNotTheirTransactions()
+    {
+        var taxDeductible = await AddedFolder("Tax deductible");
+        var warranty = await AddedFolder("Warranty");
+        await AddBookmarkedTransaction("Rema 1000", taxDeductible.Id);
+        var inWarranty = await AddBookmarkedTransaction("Elkjøp", warranty.Id);
+        var inNoFolder = await AddBookmarkedTransaction("Kiwi", folderId: null);
+
+        var response = await _client.DeleteAsync($"/api/folders/{taxDeductible.Id}");
+
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        Assert.Equal([warranty], await ListFolders());
+        Assert.Equal(HttpStatusCode.NotFound, (await _client.GetAsync($"/api/bookmarks?folderId={taxDeductible.Id}")).StatusCode);
+        // Its Transaction remains, no longer bookmarked, and the other Bookmarks stay where they were.
+        Assert.Equal(
+            [("Elkjøp", true), ("Kiwi", true), ("Rema 1000", false)],
+            (await _client.GetFromJsonAsync<List<TransactionResponse>>("/api/transactions?year=2026&month=9"))!
+                .Select(t => (t.Description, t.Bookmarked))
+                .Order());
+        Assert.Equal([inWarranty], await ListedBookmarkIds($"/api/bookmarks?folderId={warranty.Id}"));
+        Assert.Equal([inNoFolder], await ListedBookmarkIds("/api/bookmarks"));
+    }
+
+    [Fact]
+    public async Task Delete_UnknownId_IsNotFound()
+    {
+        var folder = await AddedFolder("Warranty");
+
+        var response = await _client.DeleteAsync($"/api/folders/{folder.Id + 1000}");
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.Equal([folder], await ListFolders());
     }
 }
