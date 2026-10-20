@@ -1,4 +1,5 @@
-import { Fragment, useEffect, useState } from 'react'
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
+import { flushSync } from 'react-dom'
 import {
   addBookmark,
   changeTransactionCategory,
@@ -20,6 +21,7 @@ import { formatNorwegianDate } from '../lib/date'
 import { currentMonth, MONTH_NAMES } from '../lib/month'
 import { periodLabel, periodValue, type Period } from '../lib/period'
 import { firstMonthWithTransactions, monthsOfQuarter } from '../lib/quarter'
+import { BookmarkAddedPopup } from './BookmarkAddedPopup'
 import { ErrorMessage, StatusMessage } from './Messages'
 
 const LOAD_ERROR = 'Could not load the transactions.'
@@ -106,6 +108,10 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
   // The Transactions whose Bookmark is being added or removed. Their stars are disabled until it is,
   // so a failed save never goes back over a later click.
   const [bookmarkSavingIds, setBookmarkSavingIds] = useState<ReadonlySet<number>>(new Set())
+  // The Transaction whose "Bookmark added" popup is open. Only one is ever open.
+  const [popupId, setPopupId] = useState<number | null>(null)
+  // The star under the open popup, which gets the focus back when the popup closes.
+  const popupStarRef = useRef<HTMLButtonElement>(null)
   // The Transaction whose delete is waiting for confirmation, and whether that delete is being saved.
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<number | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
@@ -192,6 +198,7 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
     setErrorMessage(null)
     setConfirmingDeleteId(null)
     setEditingNoteId(null)
+    setPopupId(null)
     setBookmarks(null)
     if (next === 'all' && isAllStale) {
       setIsAllStale(false)
@@ -214,19 +221,23 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
     setErrorMessage(null)
     setConfirmingDeleteId(null)
     setEditingNoteId(null)
+    setPopupId(null)
     setSelected(period)
   }
 
-  // Changing the filter or search may hide the row whose inline editor is open, so close both.
+  // Changing the filter or search may hide the row whose inline editor or popup is open, so close
+  // them all.
   function chooseCategoryFilter(value: string) {
     setConfirmingDeleteId(null)
     setEditingNoteId(null)
+    setPopupId(null)
     setCategoryFilter(value)
   }
 
   function chooseSearch(value: string) {
     setConfirmingDeleteId(null)
     setEditingNoteId(null)
+    setPopupId(null)
     setSearch(value)
   }
 
@@ -270,11 +281,13 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
   }
 
   // Fills or empties the star at once, and goes back when saving fails, so the page never shows a
-  // Bookmark that wasn't saved, nor hides one that still exists.
+  // Bookmark that wasn't saved, nor hides one that still exists. Any star closes the open popup, and
+  // an empty one opens its own once the Bookmark is added.
   async function toggleBookmark(transaction: Transaction) {
     const bookmarked = !transaction.bookmarked
     setStatusMessage(null)
     setErrorMessage(null)
+    setPopupId(null)
     setBookmarkSaving(transaction.id, true)
     showChange(transaction.id, { bookmarked })
 
@@ -283,11 +296,32 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
       : removeBookmark(transaction.id)
     ).finally(() => setBookmarkSaving(transaction.id, false))
 
-    if (!saved) {
+    if (saved) {
+      if (bookmarked) setPopupId(transaction.id)
+    } else {
       showChange(transaction.id, { bookmarked: transaction.bookmarked })
       setErrorMessage(bookmarked ? 'Could not add the bookmark.' : 'Could not remove the bookmark.')
     }
   }
+
+  // Removes the Bookmark from its popup. Unlike the star, it waits for the save, so when that fails
+  // the star stays filled and the popup stays open, saying so.
+  async function removeFromPopup(transaction: Transaction) {
+    setStatusMessage(null)
+    setErrorMessage(null)
+    setBookmarkSaving(transaction.id, true)
+    const removed = await removeBookmark(transaction.id).finally(() => setBookmarkSaving(transaction.id, false))
+    if (removed) showChange(transaction.id, { bookmarked: false })
+    return removed
+  }
+
+  // Gives the focus back to the star once the page shows the popup closed, and the star enabled again
+  // after a Remove.
+  const closePopup = useCallback(() => {
+    const star = popupStarRef.current
+    flushSync(() => setPopupId(null))
+    star?.focus()
+  }, [])
 
   function openNoteEditor(transaction: Transaction) {
     setStatusMessage(null)
@@ -517,8 +551,9 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
                   <td className="py-2 text-right whitespace-nowrap tabular-nums max-sm:col-span-3 max-sm:col-start-2 max-sm:row-start-1 max-sm:p-0">
                     {formatAmount(transaction.amount)}
                   </td>
-                  <td className="py-2 pl-4 text-right max-sm:col-start-2 max-sm:row-start-3 max-sm:p-0">
+                  <td className="relative py-2 pl-4 text-right max-sm:col-start-2 max-sm:row-start-3 max-sm:p-0">
                     <button
+                      ref={popupId === transaction.id ? popupStarRef : undefined}
                       type="button"
                       aria-pressed={transaction.bookmarked}
                       aria-label={
@@ -542,6 +577,9 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
                         <path d="M8 1.75 9.93 5.66l4.32.63-3.13 3.04.74 4.3L8 11.6l-3.86 2.03.74-4.3L1.75 6.29l4.32-.63L8 1.75Z" />
                       </svg>
                     </button>
+                    {popupId === transaction.id && (
+                      <BookmarkAddedPopup onDone={closePopup} onRemove={() => removeFromPopup(transaction)} />
+                    )}
                   </td>
                   <td className="py-2 pl-1 text-right max-sm:col-start-3 max-sm:row-start-3 max-sm:p-0">
                     <button

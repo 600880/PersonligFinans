@@ -2687,7 +2687,6 @@ describe('Transactions page', () => {
       added.answer(Response.json({ folderId: null }))
       await waitFor(() => expect(filled).toBeEnabled())
       expect(filled).toHaveAttribute('aria-pressed', 'true')
-      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     })
 
     // September with Rema 1000 bookmarked.
@@ -2756,6 +2755,168 @@ describe('Transactions page', () => {
       expect(await screen.findByRole('alert')).toHaveTextContent('Could not remove the bookmark.')
       expect(screen.getByRole('button', { name: 'Bookmark Lønn Fra: Testfirma AS' })).toBeEnabled()
       expect(screen.getByRole('button', { name: 'Remove bookmark for Rema 1000' })).toBeEnabled()
+    })
+
+    describe('"Bookmark added" popup', () => {
+      function popup() {
+        return screen.getByRole('dialog', { name: 'Bookmark added' })
+      }
+
+      it('opens in the row once its empty star has added the Bookmark, with focus in it', async () => {
+        const added = waitingAnswer()
+        handleAddBookmark = () => added.response
+        const user = await openSeptember()
+
+        await user.click(screen.getByRole('button', { name: 'Bookmark Rema 1000' }))
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+        added.answer(Response.json({ folderId: null }))
+
+        const dialog = await screen.findByRole('dialog', { name: 'Bookmark added' })
+        expect(transactionRow('Rema 1000')).toContainElement(dialog)
+        expect(within(dialog).getByRole('button', { name: 'Done' })).toHaveFocus()
+        expect(within(dialog).getByRole('button', { name: 'Remove' })).toBeInTheDocument()
+      })
+
+      it('opens nothing when adding the Bookmark fails', async () => {
+        handleAddBookmark = () => new Response(null, { status: 500 })
+        const user = await openSeptember()
+
+        await user.click(screen.getByRole('button', { name: 'Bookmark Rema 1000' }))
+
+        expect(await screen.findByRole('alert')).toHaveTextContent('Could not add the bookmark.')
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+      })
+
+      it('closes on Done, leaving the Bookmark, with focus back on the star', async () => {
+        const user = await openSeptember()
+        await user.click(screen.getByRole('button', { name: 'Bookmark Rema 1000' }))
+
+        await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Done' }))
+
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+        const star = screen.getByRole('button', { name: 'Remove bookmark for Rema 1000' })
+        expect(star).toHaveAttribute('aria-pressed', 'true')
+        expect(star).toHaveFocus()
+      })
+
+      it('closes on Escape or a click outside it, leaving the Bookmark', async () => {
+        const user = await openSeptember()
+        await user.click(screen.getByRole('button', { name: 'Bookmark Rema 1000' }))
+        await screen.findByRole('dialog')
+
+        await user.keyboard('{Escape}')
+
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+        expect(screen.getByRole('button', { name: 'Remove bookmark for Rema 1000' })).toHaveFocus()
+
+        await user.click(screen.getByRole('button', { name: 'Bookmark Lønn Fra: Testfirma AS' }))
+        await screen.findByRole('dialog')
+        await user.click(screen.getByRole('heading', { name: 'Transactions' }))
+
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+        for (const description of ['Rema 1000', 'Lønn Fra: Testfirma AS']) {
+          expect(screen.getByRole('button', { name: `Remove bookmark for ${description}` })).toHaveAttribute('aria-pressed', 'true')
+        }
+      })
+
+      it('removes the Bookmark with Remove, emptying the star and closing', async () => {
+        const removedIds: number[] = []
+        handleRemoveBookmark = (id) => {
+          removedIds.push(id)
+          return new Response(null, { status: 204 })
+        }
+        const user = await openSeptember()
+        await user.click(screen.getByRole('button', { name: 'Bookmark Rema 1000' }))
+
+        await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Remove' }))
+
+        await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+        expect(removedIds).toEqual([5])
+        const star = screen.getByRole('button', { name: 'Bookmark Rema 1000' })
+        expect(star).toHaveAttribute('aria-pressed', 'false')
+        expect(star).toHaveFocus()
+        expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+      })
+
+      it('stays open, saying so, with the star filled, when Remove fails', async () => {
+        handleRemoveBookmark = () => new Response(null, { status: 500 })
+        const user = await openSeptember()
+        await user.click(screen.getByRole('button', { name: 'Bookmark Rema 1000' }))
+
+        await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Remove' }))
+
+        expect(await within(popup()).findByRole('alert')).toHaveTextContent('Could not remove the bookmark.')
+        expect(screen.getByRole('button', { name: 'Remove bookmark for Rema 1000' })).toHaveAttribute('aria-pressed', 'true')
+      })
+
+      it("closes when another row's star opens its own, so only one is open at a time", async () => {
+        const user = await openSeptember()
+        await user.click(screen.getByRole('button', { name: 'Bookmark Rema 1000' }))
+        await screen.findByRole('dialog')
+
+        // From the keyboard, so nothing is clicked outside the first popup.
+        act(() => screen.getByRole('button', { name: 'Bookmark Lønn Fra: Testfirma AS' }).focus())
+        await user.keyboard('{Enter}')
+
+        await waitFor(() => expect(transactionRow('Lønn Fra: Testfirma AS')).toContainElement(popup()))
+        expect(screen.getAllByRole('dialog')).toHaveLength(1)
+      })
+
+      it('closes when its own star, filled now, removes the Bookmark from the keyboard', async () => {
+        const user = await openSeptember()
+        await user.click(screen.getByRole('button', { name: 'Bookmark Rema 1000' }))
+        await screen.findByRole('dialog')
+
+        await user.tab({ shift: true })
+        await user.tab({ shift: true })
+        expect(screen.getByRole('button', { name: 'Remove bookmark for Rema 1000' })).toHaveFocus()
+        await user.keyboard('{Enter}')
+
+        await waitFor(() => expect(screen.getByRole('button', { name: 'Bookmark Rema 1000' })).toBeEnabled())
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+      })
+
+      // From the keyboard, so nothing is clicked outside the popup.
+      it('closes when switching between All and Bookmarks, or searching', async () => {
+        const user = await openSeptember()
+        await user.click(screen.getByRole('button', { name: 'Bookmark Rema 1000' }))
+        await screen.findByRole('dialog')
+
+        act(() => screen.getByRole('button', { name: 'Bookmarks' }).focus())
+        await user.keyboard('{Enter}')
+        await screen.findByText('No bookmarks')
+        act(() => screen.getByRole('button', { name: 'All' }).focus())
+        await user.keyboard('{Enter}')
+
+        expect(screen.getByRole('cell', { name: 'Rema 1000' })).toBeInTheDocument()
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+
+        await user.click(screen.getByRole('button', { name: 'Bookmark Lønn Fra: Testfirma AS' }))
+        await screen.findByRole('dialog')
+        act(() => screen.getByLabelText('Search').focus())
+        await user.keyboard('Lønn')
+
+        expect(screen.getByRole('cell', { name: 'Lønn Fra: Testfirma AS' })).toBeInTheDocument()
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+      })
+
+      it('opens when adding a Bookmark back in Bookmarks, whose Remove keeps the row with an empty star', async () => {
+        handleListBookmarks = () => Response.json([{ ...septemberTransactions[0], bookmarked: true }])
+        const user = await openSeptember()
+        await user.click(screen.getByRole('button', { name: 'Bookmarks' }))
+        await user.click(await screen.findByRole('button', { name: 'Remove bookmark for Rema 1000' }))
+        await waitFor(() => expect(screen.getByRole('button', { name: 'Bookmark Rema 1000' })).toBeEnabled())
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+
+        await user.click(screen.getByRole('button', { name: 'Bookmark Rema 1000' }))
+
+        expect(transactionRow('Rema 1000')).toContainElement(await screen.findByRole('dialog', { name: 'Bookmark added' }))
+
+        await user.click(within(popup()).getByRole('button', { name: 'Remove' }))
+
+        await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+        expect(screen.getByRole('button', { name: 'Bookmark Rema 1000' })).toHaveAttribute('aria-pressed', 'false')
+      })
     })
   })
 
