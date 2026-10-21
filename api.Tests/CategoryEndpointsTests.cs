@@ -72,7 +72,7 @@ public class CategoryEndpointsTests : IAsyncLifetime
                 ["Groceries"] = ("All groceries.", true),
                 ["Clothing"] = ("All clothing, including sportswear.", true),
                 ["Income"] = ("All income.", true),
-                ["Transfers"] = ("All private transfers.", true),
+                ["Transfers"] = ("All bank transfers.", true),
                 ["Transport"] = ("All expenses related to car and public transport.", true),
                 ["Other"] = ("Costs that don't belong in any other category.", true),
             },

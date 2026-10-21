@@ -13,7 +13,7 @@ public static class Seeds
         new("Transport", "All expenses related to car and public transport.", "#1baf7a", BuiltIn: true),
         new("Housing", "Mortgage, common costs and insurance.", "#eda100", BuiltIn: true),
         new("Income", "All income.", "#8a5a1c", BuiltIn: true),
-        new("Transfers", "All private transfers.", "#0f766e", BuiltIn: true),
+        new("Transfers", "All bank transfers.", "#0f766e", BuiltIn: true),
         new("Other", "Costs that don't belong in any other category.", "#9085e9", BuiltIn: true),
         new("Clothing", "All clothing, including sportswear.", "#b8336a", BuiltIn: true),
     ];
