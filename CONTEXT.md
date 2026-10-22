@@ -24,20 +24,28 @@ _Avoid_: Log in, log out
 Choosing a new password for a User through a link sent to its email, for someone who can't sign in. Whoever can read that email can take over the User, since nobody proves they own an email when signing up. A Password reset signs you in, signs the User out everywhere else, and ends any lockout from failed sign-ins. The Guest has no password, so it has no Password reset.
 _Avoid_: Forgot password, account recovery, password recovery
 
+**Change password**:
+Choosing a new password while signed in, by giving the current one. It keeps you signed in and signs the User out everywhere else. The Guest has no password, so it has no Change password.
+_Avoid_: Update password, new password
+
+**Delete your User**:
+Removing a signed-in User and everything it owns, for good, after giving its password. Its email can then be used to Sign up again as a new User. The Guest cannot be deleted.
+_Avoid_: Delete account, close account, unregister
+
 **AI request**:
 One ask of the LLM on a User's behalf, counted whether or not it succeeds: reading one Receipt, or proposing AI-generated rules for one Bank Statement that has rows no Categorization Rule matches. A Bank Statement whose rows all match makes none.
 _Avoid_: LLM call, AI usage, token
 
 **Daily AI limit**:
-How many AI requests a User may make in a day, counted from midnight Norwegian time, alongside a cap on all Users' AI requests together. Past either, nothing is refused: an Upload still imports with its unmatched Transactions left Uncategorized, and a Receipt is entered by hand, each saying the limit is reached.
+How many AI requests a User may make in a day, counted from midnight Norwegian time, alongside a cap on all Users' AI requests together, which still counts those of Users since deleted. Past either, nothing is refused: an Upload still imports with its unmatched Transactions left Uncategorized, and a Receipt is entered by hand, each saying the limit is reached.
 _Avoid_: Quota, rate limit, usage cap
 
 **Transaction**:
-A single financial record — either imported from a Bank Statement or entered manually — with a posted date, an Amount, a required description, and a Category (or Uncategorized). An imported Transaction's posted date is the date the bank booked it, and its description is the cleaned merchant or payee name, without any Payment Channel in front of it. A manually-entered Transaction can be deleted, permanently; an imported one cannot, so every imported Bank Statement stays whole and reconciled.
+A single financial record — either imported from a Bank Statement or entered manually — with a posted date, an Amount, a required description, and a Category (or Uncategorized). An imported Transaction's posted date is the date the bank booked it, and its description is the cleaned merchant or payee name, without any Payment Channel in front of it. A manually-entered Transaction can be deleted on its own, permanently; an imported one only along with its whole Bank Statement, so every Bank Statement stays whole and reconciled.
 _Avoid_: Entry, record, purchase
 
 **Bank Statement**:
-A bank's periodic account statement (Norwegian: kontoutskrift) for one account and one period, uploaded to import its Transactions. Identified by its account number and period; each imported Transaction remembers which Bank Statement it came from. Every row on it is imported, including transfers between the user's own accounts, and each row's Amount is the booked NOK value even for foreign-currency purchases. A User imports a Bank Statement at most once, and only if its rows reconcile with its opening and closing balances; otherwise nothing from it is imported.
+A bank's periodic account statement (Norwegian: kontoutskrift) for one account and one period, uploaded to import its Transactions. Identified by its account number and period; each imported Transaction remembers which Bank Statement it came from. Every row on it is imported, including transfers between the user's own accounts, and each row's Amount is the booked NOK value even for foreign-currency purchases. A User holds a Bank Statement at most once, and imports it only if its rows reconcile with its opening and closing balances; otherwise nothing from it is imported. Deleting a Bank Statement deletes all its Transactions but keeps the Categorization Rules its import added, and it can then be imported again.
 _Avoid_: Kontoutskrift, file, CSV, export
 
 **Upload**:
