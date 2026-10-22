@@ -18,6 +18,20 @@ public record BankStatementResponse(
     bool AiCategorizationUnavailable,
     bool DailyAiLimitReached);
 
+// A Bank Statement as the User's list shows it. ImportedOn is the date in Norway it was imported.
+public record ListedBankStatementResponse(
+    int Id,
+    string AccountNumber,
+    DateOnly PeriodStart,
+    DateOnly PeriodEnd,
+    DateOnly ImportedOn,
+    int TransactionCount);
+
+// The Bank Statements to delete, by id.
+public record DeleteBankStatementsRequest(int[]? Ids);
+
+public record DeletedBankStatementsResponse(int BankStatementsDeleted, int TransactionsDeleted);
+
 public static class BankStatementEndpoints
 {
     private const long MaxFileBytes = 10 * 1024 * 1024;
@@ -26,8 +40,63 @@ public static class BankStatementEndpoints
     {
         var api = app.MapGroup("/api");
 
+        api.MapGet("/bank-statements", ListBankStatements);
         api.MapPost("/bank-statements", ImportBankStatement).RequireAntiforgeryToken();
+        api.MapPost("/bank-statements/delete", DeleteBankStatements);
     }
+
+    // The User's Bank Statements, newest period first in one list, whatever their account. Those of
+    // the same period are by account number.
+    private static async Task<List<ListedBankStatementResponse>> ListBankStatements(AppDbContext db) =>
+        (await db.BankStatements
+            .OrderByDescending(s => s.PeriodEnd)
+            .ThenByDescending(s => s.PeriodStart)
+            .ThenBy(s => s.AccountNumber)
+            .ThenBy(s => s.Id)
+            .Select(s => new
+            {
+                s.Id,
+                s.AccountNumber,
+                s.PeriodStart,
+                s.PeriodEnd,
+                s.ImportedAt,
+                TransactionCount = s.Transactions.Count,
+            })
+            .ToListAsync())
+        .Select(s => new ListedBankStatementResponse(
+            s.Id, s.AccountNumber, s.PeriodStart, s.PeriodEnd, NorwegianDay.DateOf(s.ImportedAt), s.TransactionCount))
+        .ToList();
+
+    // Deletes the User's Bank Statements with the given ids, all or none, with their Transactions and
+    // so their Notes and Bookmarks. Refused, deleting nothing, when there are none or any isn't one of
+    // the User's. The Categorization Rules their imports added stay, AI-generated and New marks
+    // included, and each deleted Bank Statement can be imported again.
+    private static async Task<IResult> DeleteBankStatements(DeleteBankStatementsRequest request, AppDbContext db)
+    {
+        var ids = request.Ids?.Distinct().ToList() ?? [];
+        if (ids.Count == 0)
+            return IdsProblem("Choose at least one Bank Statement to delete.");
+
+        // Under the rule-change lock, so it can't interleave with an import: a rule change re-matching
+        // these Transactions, or an import from another browser, runs before or after it.
+        await using var transaction = await Categorizer.BeginRuleChangeAsync(db);
+
+        var statements = db.BankStatements.Where(s => ids.Contains(s.Id));
+        // Another User's id, through the query filter, is no Bank Statement at all.
+        if (await statements.CountAsync() != ids.Count)
+            return IdsProblem("A Bank Statement to delete no longer exists. Nothing was deleted.");
+
+        var transactionsDeleted = await db.Transactions.CountAsync(t =>
+            t.BankStatementId != null && ids.Contains(t.BankStatementId.Value));
+        // The database deletes their Transactions, and those Transactions' Bookmarks, by cascade.
+        var bankStatementsDeleted = await statements.ExecuteDeleteAsync();
+        await transaction.CommitAsync();
+
+        return Results.Ok(new DeletedBankStatementsResponse(bankStatementsDeleted, transactionsDeleted));
+    }
+
+    private static IResult IdsProblem(string message) =>
+        Results.ValidationProblem(new Dictionary<string, string[]> { ["ids"] = [message] });
 
     // The form is read by hand rather than bound to an IFormFile, so that a missing or oversized
     // file gets the same validation problem as every other rejected upload.
@@ -41,6 +110,7 @@ public static class BankStatementEndpoints
         AppDbContext db,
         AiRequestLedger ledger,
         [FromServices] IRuleGenerator? ruleGenerator,
+        TimeProvider clock,
         ILoggerFactory loggerFactory)
     {
         IFormFile? file;
@@ -109,7 +179,7 @@ public static class BankStatementEndpoints
             PeriodEnd = parsed.PeriodEnd,
             OpeningBalance = parsed.OpeningBalance,
             ClosingBalance = parsed.ClosingBalance,
-            ImportedAt = DateTimeOffset.UtcNow,
+            ImportedAt = clock.GetUtcNow(),
             UploadId = uploadId,
         };
         // The import may add rules, so it takes the rule-change lock: imports and rule changes run one
@@ -131,6 +201,12 @@ public static class BankStatementEndpoints
         }));
         // New AI-generated rules may also match Uncategorized Transactions from earlier imports.
         await Categorizer.RematchAsync(db);
+        // This Upload's rules are now the New ones, even when it adds none.
+        var latestUpload = await db.LatestUploads.SingleOrDefaultAsync();
+        if (latestUpload is null)
+            db.LatestUploads.Add(new LatestUpload { UserId = db.OwnerOfNewRows, UploadId = uploadId });
+        else
+            latestUpload.UploadId = uploadId;
 
         // One database transaction: the statement, all its rows and the rules they brought, or nothing.
         db.BankStatements.Add(statement);

@@ -195,6 +195,13 @@ function SignedInApp({ user, onSignedOut }: SignedInAppProps) {
     setDashboardVersion((version) => version + 1)
   }
 
+  // After any delete on the User page, the Dashboard kept while away reloads, so it never shows
+  // deleted Transactions, even if it is reached some other way than coming back to home. The
+  // Transactions page needs nothing: it isn't kept while away, so it loads afresh whenever it opens.
+  function handleDataDeleted() {
+    setDashboardVersion((version) => version + 1)
+  }
+
   // Imports the picked Bank Statements one after another, in pick order, so AI-generated rules
   // created for one already categorize matching rows in the next. Each Bank Statement is imported
   // or rejected on its own, so a rejection doesn't stop the rest. Together they are one Upload, whose
@@ -356,7 +363,12 @@ function SignedInApp({ user, onSignedOut }: SignedInAppProps) {
         </main>
       ) : view === 'user' ? (
         <main className="flex flex-col items-center px-6 py-10 max-sm:px-4">
-          <UserPage user={user} onSignedOut={onSignedOut} />
+          <UserPage
+            user={user}
+            onSignedOut={onSignedOut}
+            isUploading={isUploading}
+            onDataDeleted={handleDataDeleted}
+          />
         </main>
       ) : null}
 

@@ -1,15 +1,20 @@
 import { useState } from 'react'
 import { signOut, type User } from '../lib/api'
+import { DeleteDataSection } from './DeleteDataSection'
 import { ErrorMessage } from './Messages'
 
 interface UserPageProps {
   user: User
   // Called once the server has signed the User out.
   onSignedOut: () => void
+  // Whether an Upload is in progress, during which nothing can be deleted.
+  isUploading: boolean
+  // Called after each delete of the User's data.
+  onDataDeleted: () => void
 }
 
-// Who is signed in, the email or the Guest, with Sign out next to it.
-export function UserPage({ user, onSignedOut }: UserPageProps) {
+// Who is signed in, the email or the Guest, with Sign out next to it, and below it the deletes.
+export function UserPage({ user, onSignedOut, isUploading, onDataDeleted }: UserPageProps) {
   const [signOutFailed, setSignOutFailed] = useState(false)
 
   // Stays signed in, saying so, when the server couldn't be told.
@@ -37,6 +42,8 @@ export function UserPage({ user, onSignedOut }: UserPageProps) {
         </button>
       </div>
       {signOutFailed && <ErrorMessage className="mt-3">Signing out failed. Try again.</ErrorMessage>}
+
+      <DeleteDataSection isUploading={isUploading} onDeleted={onDataDeleted} />
     </section>
   )
 }

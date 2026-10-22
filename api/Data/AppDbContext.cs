@@ -27,16 +27,17 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, CurrentUser cu
     public DbSet<Bookmark> Bookmarks => Set<Bookmark>();
     public DbSet<Folder> Folders => Set<Folder>();
     public DbSet<LastUsedFolder> LastUsedFolders => Set<LastUsedFolder>();
+    public DbSet<LatestUpload> LatestUploads => Set<LatestUpload>();
     public DbSet<AiRequest> AiRequests => Set<AiRequest>();
     public DbSet<SentPasswordResetEmail> SentPasswordResetEmails => Set<SentPasswordResetEmail>();
 
     // The User this context works for, or null for nobody. Its queries see only that User's
-    // Transactions, Bank Statements, Categories, Categorization Rules, Bookmarks, Folders and last used
-    // folder, through the query filters. Read at each query.
+    // Transactions, Bank Statements, Categories, Categorization Rules, Bookmarks, Folders, last used
+    // folder and latest Upload, through the query filters. Read at each query.
     public string? CurrentUserId => currentUser.Id;
 
     // The owner every write gives a new Transaction, Bank Statement, Category, Categorization Rule,
-    // Bookmark, Folder or last used folder explicitly: the current User. Acting for nobody, there is no
+    // Bookmark, Folder, last used folder or latest Upload explicitly: the current User. Acting for nobody, there is no
     // one to own it, so the write fails here rather than in the database.
     public string OwnerOfNewRows => CurrentUserId
         ?? throw new InvalidOperationException("Only a signed-in User can own new rows.");
@@ -141,6 +142,13 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, CurrentUser cu
                 .WithMany()
                 .HasForeignKey(l => l.FolderId)
                 .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        // One row per User at most, through the unique index on the User.
+        modelBuilder.Entity<LatestUpload>(latest =>
+        {
+            OwnedByAUser(latest);
+            latest.HasIndex(l => l.UserId).IsUnique();
         });
 
         // Not owned like the rows above: the AI request ledger counts every User's AI requests

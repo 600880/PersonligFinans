@@ -94,13 +94,10 @@ public static class CategorizationRuleEndpoints
         new(rule.Id, rule.Keyword, rule.CategoryId, rule.AiGenerated,
             rule.UploadId is not null && rule.UploadId == latestUploadId, transactionsChanged);
 
-    // The most recent Upload that imported a Bank Statement, or null before any import.
+    // The most recent Upload that imported a Bank Statement, or null before any import. Kept even
+    // when its Bank Statements are deleted.
     private static Task<Guid?> LatestUploadId(AppDbContext db) =>
-        db.BankStatements
-            .OrderByDescending(s => s.ImportedAt)
-            .ThenByDescending(s => s.Id)
-            .Select(s => (Guid?)s.UploadId)
-            .FirstOrDefaultAsync();
+        db.LatestUploads.Select(l => (Guid?)l.UploadId).SingleOrDefaultAsync();
 
     // The trimmed keyword, and the validation errors keyed on the request's fields. When editing,
     // the edited rule's own keyword doesn't count as a duplicate.
