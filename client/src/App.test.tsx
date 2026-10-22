@@ -2032,6 +2032,9 @@ describe('Header', () => {
 
     await user.click(screen.getByRole('button', { name: 'Rules' }))
     expect(currentPage()).toEqual(['Rules'])
+
+    await user.click(screen.getByRole('button', { name: 'User' }))
+    expect(currentPage()).toEqual(['User'])
     expect(screen.queryByRole('button', { name: 'Back' })).not.toBeInTheDocument()
   })
 
@@ -2074,6 +2077,18 @@ describe('Header', () => {
 
       expect(menuButton()).toHaveAttribute('aria-expanded', 'false')
       expect(currentPage()).toEqual(['Rules'])
+    })
+
+    it('opens the User page from the panel, and closes', async () => {
+      const user = userEvent.setup()
+      await renderApp()
+
+      await user.click(menuButton())
+      await user.click(screen.getByRole('button', { name: 'User' }))
+
+      expect(menuButton()).toHaveAttribute('aria-expanded', 'false')
+      expect(currentPage()).toEqual(['User'])
+      expect(screen.getByRole('heading', { name: 'User' })).toBeInTheDocument()
     })
 
     it('closes when the app name is clicked', async () => {
@@ -4334,6 +4349,29 @@ describe('Dashboard', () => {
       expect(requestedSpending().slice(requestsBefore)).toEqual([
         '/api/spending?year=2026&quarter=1&includeTransfers=true',
       ])
+    })
+
+    it('keeps the Granularity, Period and Include transfers after a visit to the User page', async () => {
+      months = [
+        { year: 2026, month: 9 },
+        { year: 2026, month: 3 },
+      ]
+      const user = userEvent.setup()
+      await renderApp()
+      await waitFor(() => expect(centreTotal()).toBe('Total 0,00 kr'))
+      await user.selectOptions(within(dashboard()).getByLabelText('Granularity'), 'Quarter')
+      await user.selectOptions(screen.getByLabelText('Period'), 'Q1 2026')
+      await user.click(within(dashboard()).getByRole('checkbox', { name: 'Include transfers' }))
+      await user.click(screen.getByRole('button', { name: 'User' }))
+
+      await user.click(screen.getByRole('button', { name: 'PersonligFinans' }))
+
+      expect(within(dashboard()).getByLabelText('Granularity')).toHaveDisplayValue('Quarter')
+      expect(screen.getByLabelText('Period')).toHaveValue('2026-Q1')
+      expect(within(dashboard()).getByRole('checkbox', { name: 'Include transfers' })).toBeChecked()
+      await waitFor(() =>
+        expect(requestedSpending().at(-1)).toBe('/api/spending?year=2026&quarter=1&includeTransfers=true'),
+      )
     })
 
     it('drops a load error once the Spending loads on return', async () => {
@@ -6884,27 +6922,33 @@ describe('Signing in', () => {
   })
 })
 
-describe('User menu', () => {
+describe('User page', () => {
   function userButton() {
     return screen.getByRole('button', { name: 'User' })
   }
 
-  it('shows who is signed in, and closes on Escape or a press outside it', async () => {
+  it('opens from the User entry, marked current, and says who is signed in', async () => {
     const user = userEvent.setup()
     await renderApp()
     expect(screen.queryByText(/signed in as/i)).not.toBeInTheDocument()
 
     await user.click(userButton())
-    expect(userButton()).toHaveAttribute('aria-expanded', 'true')
+
+    expect(userButton()).toHaveAttribute('aria-current', 'page')
+    expect(screen.getByRole('heading', { name: 'User' })).toBeInTheDocument()
     expect(screen.getByText(/signed in as/i)).toHaveTextContent('Signed in as me@example.com')
     expect(screen.getByRole('button', { name: 'Sign out' })).toBeInTheDocument()
+  })
 
-    await user.keyboard('{Escape}')
-    expect(screen.queryByText(/signed in as/i)).not.toBeInTheDocument()
+  it('says Signed in as Guest for the Guest', async () => {
+    currentUser = guest
+    const user = userEvent.setup()
+    await renderApp()
 
     await user.click(userButton())
-    await user.click(screen.getByRole('main'))
-    expect(screen.queryByText(/signed in as/i)).not.toBeInTheDocument()
+
+    expect(screen.getByText(/signed in as/i)).toHaveTextContent('Signed in as Guest')
+    expect(screen.queryByText(guest.email)).not.toBeInTheDocument()
   })
 
   it('signs out to the landing page, and signing in again starts afresh', async () => {

@@ -8,9 +8,9 @@ import { ErrorMessage, StatusMessage } from './components/Messages'
 import { ReceiptScanModal, type Receipt } from './components/ReceiptScanModal'
 import { RulesPage } from './components/RulesPage'
 import { TransactionsPage, type TransactionsTarget } from './components/TransactionsPage'
+import { UserPage } from './components/UserPage'
 import {
   fetchCurrentUser,
-  signOut,
   readReceipt,
   setSignedOutHandler,
   uploadBankStatement,
@@ -22,7 +22,7 @@ import { resetLinkAt } from './lib/passwordReset'
 import { checkReceiptPick, RECEIPT_IMAGE_TYPES } from './lib/receiptPick'
 import { useDismiss } from './lib/useDismiss'
 
-type View = 'home' | 'transactions' | 'categories' | 'rules'
+type View = 'home' | 'transactions' | 'categories' | 'rules' | 'user'
 
 // A picked PDF the server rejected, named by its filename since it may not be a readable Bank
 // Statement, with the reason the server gave; or a picked file left out of a Receipt scan, with why.
@@ -32,6 +32,7 @@ const NAV_ITEMS: { view: View; label: string }[] = [
   { view: 'transactions', label: 'Transactions' },
   { view: 'categories', label: 'Categories' },
   { view: 'rules', label: 'Rules' },
+  { view: 'user', label: 'User' },
 ]
 
 // The look of each way to add Transactions: a button of its own on a wide screen, an item in the
@@ -147,12 +148,8 @@ function SignedInApp({ user, onSignedOut }: SignedInAppProps) {
   // On a narrow screen the pages, and the ways to add Transactions, each sit behind a menu.
   const [isNavOpen, setIsNavOpen] = useState(false)
   const [isAddMenuOpen, setIsAddMenuOpen] = useState(false)
-  // Who is signed in, and Sign out, behind the User entry in the header.
-  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false)
-  const [signOutFailed, setSignOutFailed] = useState(false)
   const headerRef = useRef<HTMLElement>(null)
   const addMenuRef = useRef<HTMLDivElement>(null)
-  const userMenuRef = useRef<HTMLDivElement>(null)
   // Set once the User has signed out and the app is gone, so an Upload under way sends none of its
   // remaining Bank Statements, which would otherwise go to whoever signs in next.
   const hasSignedOutRef = useRef(false)
@@ -164,10 +161,8 @@ function SignedInApp({ user, onSignedOut }: SignedInAppProps) {
   }, [])
   const closeNav = useCallback(() => setIsNavOpen(false), [])
   const closeAddMenu = useCallback(() => setIsAddMenuOpen(false), [])
-  const closeUserMenu = useCallback(() => setIsUserMenuOpen(false), [])
   useDismiss(headerRef, isNavOpen, closeNav)
   useDismiss(addMenuRef, isAddMenuOpen, closeAddMenu)
-  useDismiss(userMenuRef, isUserMenuOpen, closeUserMenu)
 
   function clearHomeMessages() {
     setShowSavedMessage(false)
@@ -185,15 +180,7 @@ function SignedInApp({ user, onSignedOut }: SignedInAppProps) {
     if (view !== 'home' && next === 'home') setDashboardVersion((version) => version + 1)
     setTransactionsTarget(undefined)
     setIsNavOpen(false)
-    setIsUserMenuOpen(false)
     setView(next)
-  }
-
-  // Stays signed in, saying so, when the server couldn't be told.
-  async function handleSignOut() {
-    setSignOutFailed(false)
-    if (await signOut()) onSignedOut()
-    else setSignOutFailed(true)
   }
 
   function openTransactions(target: TransactionsTarget) {
@@ -341,41 +328,6 @@ function SignedInApp({ user, onSignedOut }: SignedInAppProps) {
               {item.label}
             </button>
           ))}
-          {/* A dropdown under the entry on a wide screen; within the panel on a narrow one. */}
-          <div ref={userMenuRef} className="relative">
-            <button
-              type="button"
-              aria-expanded={isUserMenuOpen}
-              aria-controls="user-menu"
-              onClick={() => setIsUserMenuOpen((open) => !open)}
-              className="rounded-lg px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-100 max-sm:w-full max-sm:py-3 max-sm:text-left max-sm:text-base"
-            >
-              User
-            </button>
-            {isUserMenuOpen && (
-              <div
-                id="user-menu"
-                className="absolute top-full right-0 z-10 mt-1 flex w-max max-w-xs flex-col gap-3 rounded-lg border border-slate-200 bg-white p-3 shadow-md max-sm:static max-sm:mt-0 max-sm:w-auto max-sm:max-w-none max-sm:border-0 max-sm:px-3 max-sm:pt-0 max-sm:shadow-none"
-              >
-                <p className="text-sm break-all text-slate-600">
-                  Signed in as{' '}
-                  <span className="font-medium text-slate-900">{user.isGuest ? 'Guest' : user.email}</span>
-                </p>
-                <button
-                  type="button"
-                  onClick={() => void handleSignOut()}
-                  className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-900 shadow-sm hover:bg-slate-100"
-                >
-                  Sign out
-                </button>
-                {signOutFailed && (
-                  <p role="alert" className="text-xs text-red-600">
-                    Signing out failed. Try again.
-                  </p>
-                )}
-              </div>
-            )}
-          </div>
         </nav>
       </header>
 
@@ -401,6 +353,10 @@ function SignedInApp({ user, onSignedOut }: SignedInAppProps) {
       ) : view === 'rules' ? (
         <main className="flex flex-col items-center px-6 py-10 max-sm:px-4">
           <RulesPage />
+        </main>
+      ) : view === 'user' ? (
+        <main className="flex flex-col items-center px-6 py-10 max-sm:px-4">
+          <UserPage user={user} onSignedOut={onSignedOut} />
         </main>
       ) : null}
 
