@@ -462,6 +462,34 @@ namespace PersonligFinans.Api.Data.Migrations
                     b.ToTable("last_used_folders", (string)null);
                 });
 
+            modelBuilder.Entity("PersonligFinans.Api.Data.LatestUpload", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<Guid>("UploadId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("upload_id");
+
+                    b.Property<string>("UserId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_latest_uploads");
+
+                    b.HasIndex("UserId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_latest_uploads_user_id");
+
+                    b.ToTable("latest_uploads", (string)null);
+                });
+
             modelBuilder.Entity("PersonligFinans.Api.Data.SentPasswordResetEmail", b =>
                 {
                     b.Property<long>("Id")
@@ -685,6 +713,16 @@ namespace PersonligFinans.Api.Data.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_last_used_folders_asp_net_users_user_id");
+                });
+
+            modelBuilder.Entity("PersonligFinans.Api.Data.LatestUpload", b =>
+                {
+                    b.HasOne("Microsoft.AspNetCore.Identity.IdentityUser", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_latest_uploads_asp_net_users_user_id");
                 });
 
             modelBuilder.Entity("PersonligFinans.Api.Data.SentPasswordResetEmail", b =>

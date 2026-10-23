@@ -798,4 +798,147 @@ public class BankStatementEndpointsTests : IAsyncLifetime
         Assert.False(created.AiCategorizationUnavailable);
         Assert.Empty(await AddedRules());
     }
+
+    // A statement of the account for the given month of 2026, with a purchase of 10,00 for each
+    // merchant, from an opening balance of 1.000,00.
+    private static byte[] StatementOfMonth(string accountNumber, int month, params string[] merchants)
+    {
+        var lastDay = DateTime.DaysInMonth(2026, month);
+        return StatementPdf.Create(
+            accountNumber,
+            period: $"01.{month:D2}.2026 - {lastDay}.{month:D2}.2026",
+            openingBalance: "1.000,00",
+            rows: merchants.Select(m => new StatementPdfRow($"Varer 03.{month:D2} {m}", $"04{month:D2}", "10,00", null, $"04{month:D2}", "21", "12345678")),
+            closingBalance: $"{1000 - 10 * merchants.Length},00");
+    }
+
+    private async Task<List<ListedBankStatementResponse>> ListedBankStatements() =>
+        (await _client.GetFromJsonAsync<List<ListedBankStatementResponse>>("/api/bank-statements"))!;
+
+    [Fact]
+    public async Task Get_ListsTheUsersBankStatements_NewestPeriodFirst_WithTheirTransactionCounts()
+    {
+        var july = await Created(await Upload(StatementOfMonth("1111.11.11111", 7, "Kafé", "Frisør", "Rema 1000")));
+        var augustOfAnother = await Created(await Upload(StatementOfMonth("2222.22.22222", 8, "Kafé")));
+        var august = await Created(await Upload(StatementOfMonth("1111.11.11111", 8, "Kafé", "Frisør")));
+
+        var listed = await ListedBankStatements();
+
+        Assert.Equal(
+            [
+                (august.Id, "1111.11.11111", new DateOnly(2026, 8, 1), new DateOnly(2026, 8, 31), 2),
+                (augustOfAnother.Id, "2222.22.22222", new DateOnly(2026, 8, 1), new DateOnly(2026, 8, 31), 1),
+                (july.Id, "1111.11.11111", new DateOnly(2026, 7, 1), new DateOnly(2026, 7, 31), 3),
+            ],
+            listed.Select(s => (s.Id, s.AccountNumber, s.PeriodStart, s.PeriodEnd, s.TransactionCount)));
+    }
+
+    [Fact]
+    public async Task Get_ListsEachBankStatementsImportDate_InNorwegianTime()
+    {
+        // Half past one at night in Norway, on the 1st of April, is still the 31st of March in UTC.
+        var clock = new FakeClock(new DateTimeOffset(2099, 4, 1, 1, 30, 0, TimeSpan.FromHours(2)));
+        await using (var api = _factory.WithWebHostBuilder(builder =>
+            builder.ConfigureTestServices(services => services.AddSingleton<TimeProvider>(clock))))
+        {
+            using var client = await api.CreateClientSignedInAsAsync(_email);
+            await Created(await Upload(StatementPdf.WithPurchasesFrom("Kafé"), client));
+        }
+
+        Assert.Equal(new DateOnly(2099, 4, 1), Assert.Single(await ListedBankStatements()).ImportedOn);
+    }
+
+    [Fact]
+    public async Task Get_WithNoBankStatements_ListsNone() =>
+        Assert.Empty(await ListedBankStatements());
+
+    private Task<HttpResponseMessage> DeleteBankStatements(params int[] ids) =>
+        _client.PostAsJsonAsync("/api/bank-statements/delete", new { ids });
+
+    private async Task<List<TransactionResponse>> TransactionsOfMonth(int month) =>
+        (await _client.GetFromJsonAsync<List<TransactionResponse>>($"/api/transactions?year=2026&month={month}"))!;
+
+    [Fact]
+    public async Task PostDelete_RemovesTheBankStatementsWithTheirTransactionsAndBookmarks()
+    {
+        var july = await Created(await Upload(StatementOfMonth("1111.11.11111", 7, "Kafé", "Frisør")));
+        var august = await Created(await Upload(StatementOfMonth("1111.11.11111", 8, "Kafé", "Frisør", "Rema 1000")));
+        var kept = await Created(await Upload(StatementOfMonth("2222.22.22222", 8, "Bakeri")));
+        var manual = await _client.PostAsJsonAsync("/api/transactions", new
+        {
+            date = "2026-08-03", description = "Kiosk", amount = -100m, categoryId = _categories.Other,
+        });
+        Assert.Equal(HttpStatusCode.Created, manual.StatusCode);
+        var bookmarked = (await TransactionsOfMonth(8)).First(t => t.Description == "Rema 1000");
+        Assert.Equal(HttpStatusCode.OK, (await _client.PostAsync($"/api/transactions/{bookmarked.Id}/bookmark", null)).StatusCode);
+
+        var response = await DeleteBankStatements(july.Id, august.Id);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(
+            new DeletedBankStatementsResponse(BankStatementsDeleted: 2, TransactionsDeleted: 5),
+            await response.Content.ReadFromJsonAsync<DeletedBankStatementsResponse>());
+        Assert.Equal([kept.Id], (await ListedBankStatements()).Select(s => s.Id));
+        Assert.Empty(await TransactionsOfMonth(7));
+        Assert.Equal(["Bakeri", "Kiosk"], (await TransactionsOfMonth(8)).Select(t => t.Description).Order());
+        Assert.Empty((await _client.GetFromJsonAsync<List<TransactionResponse>>("/api/bookmarks"))!);
+    }
+
+    [Fact]
+    public async Task PostDelete_KeepsTheRulesTheImportsAdded_WithTheirAiGeneratedAndNewMarks()
+    {
+        await Created(await UploadAddingRuleFor("kafé", NewUploadId()));
+        var latest = await Created(await UploadAddingRuleFor("frisør", NewUploadId()));
+        var before = await AddedRules();
+
+        Assert.Equal(HttpStatusCode.OK, (await DeleteBankStatements(latest.Id)).StatusCode);
+
+        Assert.Equal(
+            [("frisør", true, true), ("kafé", true, false)],
+            (await AddedRules()).Select(r => (r.Keyword, r.AiGenerated, r.IsNew)));
+        Assert.Equal(before, await AddedRules());
+    }
+
+    [Fact]
+    public async Task PostDelete_LetsTheSameBankStatementBeImportedAgain()
+    {
+        var pdf = StatementPdf.WithPurchasesFrom("Kafé", "Frisør");
+        var first = await Created(await Upload(pdf));
+        Assert.Equal(HttpStatusCode.OK, (await DeleteBankStatements(first.Id)).StatusCode);
+
+        var again = await Created(await Upload(pdf));
+
+        Assert.Equal(2, again.TransactionCount);
+        Assert.Equal([again.Id], (await ListedBankStatements()).Select(s => s.Id));
+    }
+
+    [Fact]
+    public async Task PostDelete_OfNoBankStatements_IsRefused()
+    {
+        await Created(await Upload(StatementPdf.WithPurchasesFrom("Kafé")));
+
+        var empty = await DeleteBankStatements();
+        var missing = await _client.PostAsJsonAsync("/api/bank-statements/delete", new { });
+
+        foreach (var response in new[] { empty, missing })
+        {
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+            var problem = await response.Content.ReadFromJsonAsync<ValidationProblemDetails>();
+            Assert.Equal(["Choose at least one Bank Statement to delete."], problem!.Errors["ids"]);
+        }
+        Assert.Single(await ListedBankStatements());
+    }
+
+    [Fact]
+    public async Task PostDelete_WithAnIdOfNoBankStatement_DeletesNothing()
+    {
+        var statement = await Created(await Upload(StatementPdf.WithPurchasesFrom("Kafé")));
+
+        var response = await DeleteBankStatements(statement.Id, int.MaxValue);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var problem = await response.Content.ReadFromJsonAsync<ValidationProblemDetails>();
+        Assert.Equal(["A Bank Statement to delete no longer exists. Nothing was deleted."], problem!.Errors["ids"]);
+        Assert.Equal([statement.Id], (await ListedBankStatements()).Select(s => s.Id));
+    }
 }

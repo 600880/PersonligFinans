@@ -744,6 +744,52 @@ export async function uploadBankStatement(file: File, uploadId: string): Promise
   return { ok: false, message: `Upload failed (${response.status}).` }
 }
 
+// A Bank Statement as the User's list shows it. importedOn is the date in Norway it was imported.
+export interface ListedBankStatement {
+  id: number
+  accountNumber: string
+  periodStart: string
+  periodEnd: string
+  importedOn: string
+  transactionCount: number
+}
+
+// The User's Bank Statements, newest period first.
+export async function fetchBankStatements(): Promise<ListedBankStatement[]> {
+  const response = await apiFetch('/api/bank-statements')
+  if (!response.ok) throw new Error(`Loading Bank Statements failed (${response.status})`)
+  return (await response.json()) as ListedBankStatement[]
+}
+
+export type DeleteBankStatementsResult = { ok: true; bankStatementsDeleted: number } | { ok: false; message: string }
+
+// Deletes the Bank Statements with their Transactions, all or none. The server refuses an empty set,
+// or one with a Bank Statement that no longer exists, and the message says why.
+export async function deleteBankStatements(ids: number[]): Promise<DeleteBankStatementsResult> {
+  let response: Response
+  try {
+    response = await apiFetch('/api/bank-statements/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids }),
+    })
+  } catch {
+    return { ok: false, message: 'Could not reach the server.' }
+  }
+
+  if (response.ok) {
+    const { bankStatementsDeleted } = (await response.json()) as { bankStatementsDeleted: number }
+    return { ok: true, bankStatementsDeleted }
+  }
+
+  if (response.status === 400) {
+    const { fieldErrors } = await readProblem<{ ids: number[] }>(response)
+    if (fieldErrors.ids) return { ok: false, message: fieldErrors.ids }
+  }
+
+  return { ok: false, message: `Deleting failed (${response.status}).` }
+}
+
 // read: the receipt reader read the Receipt. unreadable: it couldn't. unavailable: no receipt reader
 // is configured. limitReached: the reader wasn't asked, because the Daily AI limit was reached.
 export type ReceiptOutcome = 'read' | 'unreadable' | 'unavailable' | 'limitReached'

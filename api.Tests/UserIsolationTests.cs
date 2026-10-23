@@ -102,6 +102,14 @@ public class UserIsolationTests : IAsyncLifetime
         return await client.PostAsync("/api/bank-statements", form);
     }
 
+    // Uploads the Bank Statement, which must import, and returns its id.
+    private static async Task<int> Import(HttpClient client, byte[] pdf)
+    {
+        var response = await Upload(client, pdf);
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        return (await response.Content.ReadFromJsonAsync<BankStatementResponse>())!.Id;
+    }
+
     private static async Task<Dictionary<string, string[]>> ValidationErrors(HttpResponseMessage response)
     {
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
@@ -378,6 +386,26 @@ public class UserIsolationTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.Conflict, (await Upload(_a, pdf)).StatusCode);
         Assert.Equal(HttpStatusCode.Conflict, (await Upload(_b, pdf)).StatusCode);
 
+        Assert.Single(await August(_a));
+        Assert.Single(await August(_b));
+    }
+
+    [Fact]
+    public async Task AnotherUsersBankStatements_CantBeListedOrDeleted()
+    {
+        var theirId = await Import(_a, Statement(AccountNumber()));
+        var ownId = await Import(_b, Statement(AccountNumber()));
+
+        var response = await _b.PostAsJsonAsync("/api/bank-statements/delete", new { ids = new[] { ownId, theirId } });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(
+            [ownId],
+            (await _b.GetFromJsonAsync<List<ListedBankStatementResponse>>("/api/bank-statements"))!.Select(s => s.Id));
+        // Nothing of either User's was deleted.
+        Assert.Equal(
+            [theirId],
+            (await _a.GetFromJsonAsync<List<ListedBankStatementResponse>>("/api/bank-statements"))!.Select(s => s.Id));
         Assert.Single(await August(_a));
         Assert.Single(await August(_b));
     }

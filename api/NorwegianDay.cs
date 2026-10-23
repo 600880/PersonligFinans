@@ -11,9 +11,13 @@ public static class NorwegianDay
     // is stored.
     public static (DateTimeOffset Start, DateTimeOffset End) Around(DateTimeOffset instant)
     {
-        var date = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(instant, Norway).DateTime);
+        var date = DateOf(instant);
         return (Midnight(date), Midnight(date.AddDays(1)));
     }
+
+    // The date in Norway that the instant falls on.
+    public static DateOnly DateOf(DateTimeOffset instant) =>
+        DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(instant, Norway).DateTime);
 
     // The instant the date starts in Norway, in UTC as Postgres stores it. Its UTC offset, an hour in
     // winter and two in summer, is the one in force at that midnight. Norway changes its clocks at
