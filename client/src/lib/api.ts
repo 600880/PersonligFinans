@@ -761,9 +761,7 @@ export async function fetchBankStatements(): Promise<ListedBankStatement[]> {
   return (await response.json()) as ListedBankStatement[]
 }
 
-export type DeleteBankStatementsResult =
-  | { ok: true; bankStatementsDeleted: number; transactionsDeleted: number }
-  | { ok: false; message: string }
+export type DeleteBankStatementsResult = { ok: true; bankStatementsDeleted: number } | { ok: false; message: string }
 
 // Deletes the Bank Statements with their Transactions, all or none. The server refuses an empty set,
 // or one with a Bank Statement that no longer exists, and the message says why.
@@ -780,11 +778,8 @@ export async function deleteBankStatements(ids: number[]): Promise<DeleteBankSta
   }
 
   if (response.ok) {
-    const { bankStatementsDeleted, transactionsDeleted } = (await response.json()) as {
-      bankStatementsDeleted: number
-      transactionsDeleted: number
-    }
-    return { ok: true, bankStatementsDeleted, transactionsDeleted }
+    const { bankStatementsDeleted } = (await response.json()) as { bankStatementsDeleted: number }
+    return { ok: true, bankStatementsDeleted }
   }
 
   if (response.status === 400) {

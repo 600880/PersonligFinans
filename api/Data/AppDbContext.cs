@@ -37,8 +37,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, CurrentUser cu
     public string? CurrentUserId => currentUser.Id;
 
     // The owner every write gives a new Transaction, Bank Statement, Category, Categorization Rule,
-    // Bookmark, Folder, last used folder or latest Upload explicitly: the current User. Acting for nobody, there is no
-    // one to own it, so the write fails here rather than in the database.
+    // Bookmark, Folder, last used folder or latest Upload explicitly: the current User. Acting for
+    // nobody, there is no one to own it, so the write fails here rather than in the database.
     public string OwnerOfNewRows => CurrentUserId
         ?? throw new InvalidOperationException("Only a signed-in User can own new rows.");
 

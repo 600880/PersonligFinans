@@ -17,6 +17,7 @@ import {
   type ImportedBankStatement,
   type User,
 } from './lib/api'
+import { counted } from './lib/count'
 import { formatNorwegianDate } from './lib/date'
 import { resetLinkAt } from './lib/passwordReset'
 import { checkReceiptPick, RECEIPT_IMAGE_TYPES } from './lib/receiptPick'
@@ -527,8 +528,8 @@ function importSummary(statements: ImportedBankStatement[]) {
     return (
       `Imported ${statements.length} Bank Statements, ${transactions} transactions: ` +
       `${transactions - uncategorized} categorized, ${uncategorized} Uncategorized` +
-      (aiUnavailable > 0 ? `. AI categorization unavailable for ${countedBankStatements(aiUnavailable)}` : '') +
-      (limitReached > 0 ? `. ${DAILY_AI_LIMIT_REACHED} for ${countedBankStatements(limitReached)}` : '')
+      (aiUnavailable > 0 ? `. AI categorization unavailable for ${counted(aiUnavailable, 'Bank Statement')}` : '') +
+      (limitReached > 0 ? `. ${DAILY_AI_LIMIT_REACHED} for ${counted(limitReached, 'Bank Statement')}` : '')
     )
   }
 
@@ -545,11 +546,6 @@ function importSummary(statements: ImportedBankStatement[]) {
     `${transactionCount - uncategorizedCount} categorized, ${uncategorizedCount} Uncategorized` +
     (noAiRulesReason ? `. ${noAiRulesReason} — ${uncategorizedCount} rows left Uncategorized` : '')
   )
-}
-
-// "1 Bank Statement", "2 Bank Statements" and so on.
-function countedBankStatements(count: number) {
-  return `${count} Bank Statement${count === 1 ? '' : 's'}`
 }
 
 export default App

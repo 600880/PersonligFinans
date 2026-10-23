@@ -7522,6 +7522,31 @@ describe('Delete data', () => {
     expect(deleteSelected()).toBeEnabled()
   })
 
+  it('lists again after a refused delete, so a Bank Statement deleted elsewhere is no longer offered', async () => {
+    bankStatements = [august, july]
+    handleDeleteBankStatements = () => {
+      // Deleted meanwhile in another browser, as by another visitor using the Guest.
+      bankStatements = [august]
+      return Response.json(
+        { errors: { ids: ['A Bank Statement to delete no longer exists. Nothing was deleted.'] } },
+        { status: 400 },
+      )
+    }
+    const user = await openUserPage()
+    await listedBankStatements()
+
+    await user.click(bankStatementsSection().getByRole('checkbox', { name: /^1111\.22\.3333301\.08/ }))
+    await user.click(bankStatementsSection().getByRole('checkbox', { name: /01\.07\.2026/ }))
+    await user.click(deleteSelected())
+    await user.click(bankStatementsSection().getByRole('button', { name: 'Confirm delete' }))
+
+    expect(await deleteData().findByRole('alert')).toHaveTextContent(
+      'A Bank Statement to delete no longer exists. Nothing was deleted.',
+    )
+    await waitFor(() => expect(bankStatementsSection().getAllByRole('checkbox')).toHaveLength(1))
+    expect(bankStatementsSection().getByRole('checkbox', { name: /^1111\.22\.3333301\.08/ })).toBeChecked()
+  })
+
   it('disables deleting while an Upload is in progress, saying why, and enables it once it finishes', async () => {
     bankStatements = [july]
     let respond: (response: Response) => void = () => {}

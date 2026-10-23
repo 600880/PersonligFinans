@@ -71,15 +71,17 @@ export function DeleteDataSection({ isUploading, onDeleted }: DeleteDataSectionP
   const selected = (bankStatements ?? []).filter((s) => selectedIds.has(s.id))
   const selectedTransactions = selected.reduce((sum, s) => sum + s.transactionCount, 0)
 
-  // Changes nothing when it fails, keeping the list and the ticks for another try.
+  // Changes nothing when it fails, keeping the ticks for another try. The list is loaded again either
+  // way: a delete is refused when a ticked Bank Statement was already deleted elsewhere, as by another
+  // visitor using the Guest, and it is then no longer offered.
   async function confirmDelete() {
     setIsDeleting(true)
     const result = await deleteBankStatements(selected.map((s) => s.id)).finally(() => setIsDeleting(false))
     setIsConfirming(false)
+    setListVersion((version) => version + 1)
     if (result.ok) {
       setStatusMessage(`${counted(result.bankStatementsDeleted, 'Bank Statement')} deleted.`)
       setSelectedIds(new Set())
-      setListVersion((version) => version + 1)
       onDeleted()
     } else {
       setErrorMessage(result.message)
