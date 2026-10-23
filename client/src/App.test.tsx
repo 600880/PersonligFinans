@@ -67,9 +67,10 @@ let handleUpload: UploadHandler
 // The User's Bank Statements as the list endpoint returns them, and the delete of a set of them.
 let bankStatements: ListedBankStatement[] | Response
 let handleDeleteBankStatements: (body: { ids: number[] }) => Response | Promise<Response>
-// The counts the User page's confirm dialogs ask with.
-let deleteCounts: { transactionCount: number } | Response
+// The counts the User page's confirm dialogs ask with. Those a test leaves out are served as 0.
+let deleteCounts: Partial<{ transactionCount: number; ruleCount: number; ruleCategorizedTransactionCount: number }> | Response
 let handleDeleteAllTransactions: () => Response | Promise<Response>
+let handleDeleteAllRules: () => Response | Promise<Response>
 let rules: { id: number; keyword: string; categoryId: number; aiGenerated: boolean; isNew: boolean }[] | Response
 let handleAddRule: PostHandler
 let handleAddCategory: PostHandler
@@ -181,7 +182,9 @@ const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
   if (transactionUrl && init?.method === 'DELETE') return handleDeleteTransaction(Number(transactionUrl[1]))
   if (url === '/api/transactions' && init?.method === 'DELETE') return handleDeleteAllTransactions()
   if (url === '/api/user/delete-counts') {
-    return deleteCounts instanceof Response ? deleteCounts : Response.json(deleteCounts)
+    return deleteCounts instanceof Response
+      ? deleteCounts
+      : Response.json({ transactionCount: 0, ruleCount: 0, ruleCategorizedTransactionCount: 0, ...deleteCounts })
   }
   if (url === '/api/transactions/months') {
     return months instanceof Response ? months : Response.json(months)
@@ -219,6 +222,7 @@ const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
   if (url === '/api/categorization-rules' && init?.method === 'POST') {
     return handleAddRule(JSON.parse(init.body as string))
   }
+  if (url === '/api/categorization-rules' && init?.method === 'DELETE') return handleDeleteAllRules()
   if (url === '/api/categorization-rules') {
     return rules instanceof Response ? rules : Response.json(rules)
   }
@@ -232,6 +236,7 @@ beforeEach(() => {
   handleDeleteBankStatements = ({ ids }) => Response.json({ bankStatementsDeleted: ids.length, transactionsDeleted: 0 })
   deleteCounts = { transactionCount: 0 }
   handleDeleteAllTransactions = () => Response.json({ transactionsDeleted: 0 })
+  handleDeleteAllRules = () => Response.json({ rulesDeleted: 0 })
   rules = [
     { id: 1, keyword: 'kiwi', categoryId: 1, aiGenerated: false, isNew: false },
     { id: 2, keyword: 'overføring mellom egne kontoer', categoryId: 13, aiGenerated: false, isNew: false },
@@ -7546,6 +7551,10 @@ describe('Delete data', () => {
     return deleteData().getByRole('button', { name: 'Delete all Transactions' })
   }
 
+  function deleteAllRules() {
+    return deleteData().getByRole('button', { name: 'Delete all rules' })
+  }
+
   // Each listed Bank Statement as its checkbox names it.
   async function listedBankStatements() {
     await bankStatementsSection().findAllByRole('checkbox')
@@ -7802,8 +7811,77 @@ describe('Delete data', () => {
     expect(deleteAllTransactions()).toBeEnabled()
   })
 
+  it('asks with the counts of rules and of the Transactions they categorized, then deletes them all and says how many', async () => {
+    deleteCounts = { ruleCount: 1148, ruleCategorizedTransactionCount: 1310 }
+    let deleted = false
+    handleDeleteAllRules = () => {
+      deleted = true
+      deleteCounts = { ruleCount: 0, ruleCategorizedTransactionCount: 0 }
+      return Response.json({ rulesDeleted: 1148 })
+    }
+    const user = await openUserPage()
+    await waitFor(() => expect(deleteAllRules()).toBeEnabled())
+
+    await user.click(deleteAllRules())
+
+    expect(deleted).toBe(false)
+    expect(
+      deleteData().getByText('Delete all 1 148 Categorization Rules? 1 310 Transactions will become Uncategorized.'),
+    ).toBeInTheDocument()
+
+    await user.click(deleteData().getByRole('button', { name: 'Confirm delete' }))
+
+    expect(deleted).toBe(true)
+    expect(await deleteData().findByRole('status')).toHaveTextContent('1 148 Categorization Rules deleted.')
+    await waitFor(() => expect(deleteAllRules()).toBeDisabled())
+    expect(deleteData().queryByRole('button', { name: 'Confirm delete' })).not.toBeInTheDocument()
+  })
+
+  it('words the question and the status line for one rule and one Transaction', async () => {
+    deleteCounts = { ruleCount: 1, ruleCategorizedTransactionCount: 1 }
+    handleDeleteAllRules = () => Response.json({ rulesDeleted: 1 })
+    const user = await openUserPage()
+    await waitFor(() => expect(deleteAllRules()).toBeEnabled())
+
+    await user.click(deleteAllRules())
+    expect(
+      deleteData().getByText('Delete all 1 Categorization Rule? 1 Transaction will become Uncategorized.'),
+    ).toBeInTheDocument()
+    await user.click(deleteData().getByRole('button', { name: 'Confirm delete' }))
+
+    expect(await deleteData().findByRole('status')).toHaveTextContent('1 Categorization Rule deleted.')
+  })
+
+  it('asks only about the rules when deleting them makes no Transaction Uncategorized', async () => {
+    deleteCounts = { ruleCount: 2, ruleCategorizedTransactionCount: 0 }
+    const user = await openUserPage()
+    await waitFor(() => expect(deleteAllRules()).toBeEnabled())
+
+    await user.click(deleteAllRules())
+
+    // The whole question, with no sentence saying 0 will become Uncategorized.
+    expect(deleteData().getByText('Delete all 2 Categorization Rules?')).toBeInTheDocument()
+  })
+
+  it('disables Delete all rules when there are none', async () => {
+    deleteCounts = { transactionCount: 1 }
+    await openUserPage()
+
+    await waitFor(() => expect(deleteAllTransactions()).toBeEnabled())
+    expect(deleteAllRules()).toBeDisabled()
+  })
+
+  it('keeps Delete all rules disabled, saying so, when counting them fails', async () => {
+    deleteCounts = new Response(null, { status: 500 })
+    await openUserPage()
+
+    expect(await deleteData().findByText('Could not count the Categorization Rules.')).toBeInTheDocument()
+    expect(deleteAllRules()).toBeDisabled()
+  })
+
   it('disables deleting while an Upload is in progress, saying why, and enables it once it finishes', async () => {
     bankStatements = [july]
+    deleteCounts = { ruleCount: 148 }
     let respond: (response: Response) => void = () => {}
     handleUpload = () => new Promise((resolve) => (respond = resolve))
     const user = userEvent.setup()
@@ -7815,15 +7893,17 @@ describe('Delete data', () => {
     await user.click(bankStatementsSection().getByRole('checkbox', { name: /01\.07\.2026/ }))
     expect(deleteSelected()).toBeDisabled()
     expect(deleteAllTransactions()).toBeDisabled()
+    expect(deleteAllRules()).toBeDisabled()
     expect(deleteData().getByText('Deleting waits for the Upload in progress to finish.')).toBeInTheDocument()
 
     // The Upload imported a Bank Statement, which the list and the counts then show.
     bankStatements = [august, july]
-    deleteCounts = { transactionCount: 1001 }
+    deleteCounts = { transactionCount: 1001, ruleCount: 148 }
     respond(Response.json(importedStatement, { status: 201 }))
 
     await waitFor(() => expect(deleteSelected()).toBeEnabled())
     await waitFor(() => expect(deleteAllTransactions()).toBeEnabled())
+    await waitFor(() => expect(deleteAllRules()).toBeEnabled())
     expect(deleteData().queryByText('Deleting waits for the Upload in progress to finish.')).not.toBeInTheDocument()
     await waitFor(async () => expect(await listedBankStatements()).toHaveLength(2))
     expect(bankStatementsSection().getByRole('checkbox', { name: /01\.07\.2026/ })).toBeChecked()

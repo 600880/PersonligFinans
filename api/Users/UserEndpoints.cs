@@ -2,6 +2,7 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
+using PersonligFinans.Api.CategorizationRules;
 using PersonligFinans.Api.Data;
 
 namespace PersonligFinans.Api.Users;
@@ -11,8 +12,9 @@ public record CredentialsRequest(string? Email, string? Password);
 public record ChangePasswordRequest(string? CurrentPassword, string? NewPassword);
 
 // What the User page's confirm dialogs count, so each asks with the exact number it deletes. The Bank
-// Statements' counts come from their list instead.
-public record DeleteCountsResponse(int TransactionCount);
+// Statements' counts come from their list instead. RuleCategorizedTransactionCount: the Transactions
+// that deleting every rule makes Uncategorized.
+public record DeleteCountsResponse(int TransactionCount, int RuleCount, int RuleCategorizedTransactionCount);
 
 // The signed-in User, by their email, and whether they are the Guest.
 public record UserResponse(string Email, bool IsGuest)
@@ -218,9 +220,15 @@ public static class UserEndpoints
         return Results.NoContent();
     }
 
-    // Every Transaction of the User, manually-entered and imported, which Delete all Transactions deletes.
+    // Every Transaction of the User, manually-entered and imported, which Delete all Transactions
+    // deletes; every rule, which Delete all rules deletes; and the imported Transactions with a
+    // Category from a rule, which that then makes Uncategorized. Locked ones keep their Category, and
+    // those already Uncategorized stay so.
     private static async Task<DeleteCountsResponse> DeleteCounts(AppDbContext db) =>
-        new(await db.Transactions.CountAsync());
+        new(
+            await db.Transactions.CountAsync(),
+            await db.CategorizationRules.CountAsync(),
+            await db.Transactions.CountAsync(Categorizer.IsCategorizedByARule));
 
     // The trimmed email and the password, and an error for each that is missing.
     private static (string Email, string Password, Dictionary<string, string[]> Errors) ValidateRequired(CredentialsRequest request)

@@ -1,5 +1,6 @@
 import { useEffect, useId, useState, type ReactNode } from 'react'
 import {
+  deleteAllRules,
   deleteAllTransactions,
   deleteBankStatements,
   fetchBankStatements,
@@ -20,7 +21,7 @@ interface DeleteDataSectionProps {
 }
 
 // The delete whose question is open. One question is asked at a time.
-type Confirming = 'bankStatements' | 'allTransactions'
+type Confirming = 'bankStatements' | 'allTransactions' | 'allRules'
 
 // How a confirmed delete went: the status line saying what it deleted, or why it failed.
 type DeleteOutcome = { ok: true; status: string } | { ok: false; message: string }
@@ -32,8 +33,8 @@ const smallButtonClass =
 const cardClass = 'rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-sm'
 
 // The User's deletes, least destructive first: the ticked Bank Statements with their Transactions,
-// then every Transaction. Each asks for confirmation with exact counts. One status line, for
-// whichever delete ran last, stays until the next action.
+// then every Transaction, then every Categorization Rule. Each asks for confirmation with exact
+// counts. One status line, for whichever delete ran last, stays until the next action.
 export function DeleteDataSection({ isUploading, onDeleted }: DeleteDataSectionProps) {
   const headingId = useId()
   const bankStatementsHeadingId = useId()
@@ -113,6 +114,8 @@ export function DeleteDataSection({ isUploading, onDeleted }: DeleteDataSectionP
   const selected = (bankStatements ?? []).filter((s) => selectedIds.has(s.id))
   const selectedTransactions = selected.reduce((sum, s) => sum + s.transactionCount, 0)
   const transactionCount = counts?.transactionCount ?? 0
+  const ruleCount = counts?.ruleCount ?? 0
+  const ruleCategorizedTransactionCount = counts?.ruleCategorizedTransactionCount ?? 0
 
   // Runs the confirmed delete, then lists and counts again either way: a delete may be refused
   // because of a change made elsewhere, as by another visitor using the Guest, and the next question
@@ -141,6 +144,12 @@ export function DeleteDataSection({ isUploading, onDeleted }: DeleteDataSectionP
     confirmDelete(async () => {
       const result = await deleteAllTransactions()
       return result.ok ? { ok: true, status: `${counted(result.transactionsDeleted, 'Transaction')} deleted.` } : result
+    })
+
+  const confirmDeleteAllRules = () =>
+    confirmDelete(async () => {
+      const result = await deleteAllRules()
+      return result.ok ? { ok: true, status: `${counted(result.rulesDeleted, 'Categorization Rule')} deleted.` } : result
     })
 
   // Each delete's button stays disabled while any question is open, during an Upload and while
@@ -240,6 +249,36 @@ export function DeleteDataSection({ isUploading, onDeleted }: DeleteDataSectionP
             onCancel={() => setConfirming(null)}
           >
             Delete all {counted(transactionCount, 'Transaction')}?
+          </ConfirmDelete>
+        )}
+      </div>
+
+      {/* Locked Transactions keep their Category, and the Categories stay. */}
+      <div className={`mt-3 ${cardClass}`}>
+        <p className="text-sm text-slate-600">
+          Every Categorization Rule, seeded ones included. Imported Transactions that aren't Locked become
+          Uncategorized.
+        </p>
+        {countsFailed && <ErrorMessage className="mt-3">Could not count the Categorization Rules.</ErrorMessage>}
+        <button
+          type="button"
+          disabled={ruleCount === 0 || isBusy}
+          onClick={() => ask('allRules')}
+          className={`mt-3 ${buttonClass}`}
+        >
+          Delete all rules
+        </button>
+        {confirming === 'allRules' && (
+          <ConfirmDelete
+            isUploading={isUploading}
+            isDeleting={isDeleting}
+            onConfirm={() => void confirmDeleteAllRules()}
+            onCancel={() => setConfirming(null)}
+          >
+            Delete all {counted(ruleCount, 'Categorization Rule')}?
+            {/* Left out when no Transaction would change, rather than saying 0 will. */}
+            {ruleCategorizedTransactionCount > 0 &&
+              ` ${counted(ruleCategorizedTransactionCount, 'Transaction')} will become Uncategorized.`}
           </ConfirmDelete>
         )}
       </div>
