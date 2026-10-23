@@ -858,9 +858,12 @@ export async function deleteBankStatements(ids: number[]): Promise<DeleteBankSta
 }
 
 // What the User page's confirm dialogs ask with. transactionCount: every Transaction of the User,
-// manually-entered and imported.
+// manually-entered and imported. ruleCount: every Categorization Rule. ruleCategorizedTransactionCount:
+// the imported Transactions with a Category from a rule, which deleting every rule makes Uncategorized.
 export interface DeleteCounts {
   transactionCount: number
+  ruleCount: number
+  ruleCategorizedTransactionCount: number
 }
 
 export async function fetchDeleteCounts(): Promise<DeleteCounts> {
@@ -883,6 +886,23 @@ export async function deleteAllTransactions(): Promise<DeleteAllTransactionsResu
   if (!response.ok) return { ok: false, message: `Deleting failed (${response.status}).` }
   const { transactionsDeleted } = (await response.json()) as { transactionsDeleted: number }
   return { ok: true, transactionsDeleted }
+}
+
+export type DeleteAllRulesResult = { ok: true; rulesDeleted: number } | { ok: false; message: string }
+
+// Deletes every Categorization Rule of the User, seeded ones included. The imported Transactions
+// they categorized become Uncategorized; Locked ones keep their Category.
+export async function deleteAllRules(): Promise<DeleteAllRulesResult> {
+  let response: Response
+  try {
+    response = await apiFetch('/api/categorization-rules', { method: 'DELETE' })
+  } catch {
+    return { ok: false, message: 'Could not reach the server.' }
+  }
+
+  if (!response.ok) return { ok: false, message: `Deleting failed (${response.status}).` }
+  const { rulesDeleted } = (await response.json()) as { rulesDeleted: number }
+  return { ok: true, rulesDeleted }
 }
 
 // read: the receipt reader read the Receipt. unreadable: it couldn't. unavailable: no receipt reader

@@ -3,6 +3,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using PersonligFinans.Api.BankStatements;
 using PersonligFinans.Api.Categories;
+using PersonligFinans.Api.CategorizationRules;
 using PersonligFinans.Api.Data;
 using PersonligFinans.Api.Transactions;
 using PersonligFinans.Api.Users;
@@ -126,5 +127,16 @@ public class GuestTests
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Empty((await guest.GetFromJsonAsync<List<TransactionMonthResponse>>("/api/transactions/months"))!);
         Assert.Empty((await guest.GetFromJsonAsync<List<ListedBankStatementResponse>>("/api/bank-statements"))!);
+    }
+
+    [Fact]
+    public async Task TheGuest_CanDeleteAllRules()
+    {
+        var guest = await _factory.CreateGuestClientAsync();
+
+        var response = await guest.DeleteAsync("/api/categorization-rules");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Empty((await guest.GetFromJsonAsync<List<CategorizationRuleResponse>>("/api/categorization-rules"))!);
     }
 }

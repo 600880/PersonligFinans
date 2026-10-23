@@ -431,6 +431,27 @@ public class UserIsolationTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task DeletingAllRules_DeletesAndCountsOnlyThatUsersOwn()
+    {
+        await AddRule(_a, "kafé", _categoriesA.Restaurants);
+        await AddRule(_b, "kafé", _categoriesB.Restaurants);
+        await Import(_a, Statement(AccountNumber()));
+        await Import(_b, Statement(AccountNumber()));
+        var theirRules = await Rules(_a);
+        var theirCounts = await _a.GetFromJsonAsync<DeleteCountsResponse>("/api/user/delete-counts");
+
+        Assert.Equal(1, (await _b.GetFromJsonAsync<DeleteCountsResponse>("/api/user/delete-counts"))!.RuleCategorizedTransactionCount);
+        var response = await _b.DeleteAsync("/api/categorization-rules");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Empty(await Rules(_b));
+        Assert.Null((await August(_b)).Single().CategoryId);
+        Assert.Equal(theirRules, await Rules(_a));
+        Assert.Equal(_categoriesA.Restaurants, (await August(_a)).Single().CategoryId);
+        Assert.Equal(theirCounts, await _a.GetFromJsonAsync<DeleteCountsResponse>("/api/user/delete-counts"));
+    }
+
+    [Fact]
     public async Task CategoryNamesAndKeywords_MayRepeatAcrossUsers_ButNotWithinOne()
     {
         await AddCategory(_a, "Hobbies");

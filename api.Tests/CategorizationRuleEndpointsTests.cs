@@ -1,11 +1,14 @@
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using PersonligFinans.Api.Categories;
 using PersonligFinans.Api.CategorizationRules;
 using PersonligFinans.Api.Data;
 using PersonligFinans.Api.Transactions;
+using PersonligFinans.Api.Users;
 
 namespace PersonligFinans.Api.Tests;
 
@@ -484,5 +487,124 @@ public class CategorizationRuleEndpointsTests : IAsyncLifetime
         Assert.Equal(0, edited.TransactionsChanged);
         Assert.Equal(0, deleted);
         Assert.Equal([_categories.Other], await CategoriesOf(manual!.Id));
+    }
+
+    private Task<HttpResponseMessage> DeleteAllRules() => _client.DeleteAsync("/api/categorization-rules");
+
+    private async Task<List<CategorizationRuleResponse>> ListedRules() =>
+        (await _client.GetFromJsonAsync<List<CategorizationRuleResponse>>("/api/categorization-rules"))!;
+
+    // Uploads an August 2026 Bank Statement with a purchase from each merchant, which must import.
+    private async Task UploadPurchasesFrom(params string[] merchants)
+    {
+        var file = new ByteArrayContent(StatementPdf.WithPurchasesFrom(merchants));
+        file.Headers.ContentType = new MediaTypeHeaderValue("application/pdf");
+        using var form = new MultipartFormDataContent { { file, "file", "kontoutskrift.pdf" } };
+        Assert.Equal(HttpStatusCode.Created, (await _client.PostAsync("/api/bank-statements", form)).StatusCode);
+    }
+
+    // Each of the User's August 2026 Transactions, by description, with its Category.
+    private async Task<Dictionary<string, int?>> AugustCategories() =>
+        (await _client.GetFromJsonAsync<List<TransactionResponse>>("/api/transactions?year=2026&month=8"))!
+            .ToDictionary(t => t.Description, t => t.CategoryId);
+
+    // Categorizes the August 2026 Transaction with the description by hand, which Locks it.
+    private async Task CategorizeByHand(string description, int categoryId)
+    {
+        var august = await _client.GetFromJsonAsync<List<TransactionResponse>>("/api/transactions?year=2026&month=8");
+        var transaction = august!.Single(t => t.Description == description);
+        var response = await _client.PutAsJsonAsync($"/api/transactions/{transaction.Id}/category", new { categoryId });
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    private async Task AddManualAugustTransaction(string description, int categoryId)
+    {
+        var response = await _client.PostAsJsonAsync("/api/transactions", new
+        {
+            date = "2026-08-05", description, amount = -100m, categoryId,
+        });
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task DeleteAll_DeletesEveryRuleSeededOnesIncluded_AndUncategorizesWhatTheyCategorized()
+    {
+        await AddedRuleId("kafé", _categories.Restaurants);
+        await UploadPurchasesFrom("Kafé", "Rema 1000", "Kiosk");
+        Assert.Equal(
+            new Dictionary<string, int?> { ["Kafé"] = _categories.Restaurants, ["Rema 1000"] = _categories.Groceries, ["Kiosk"] = null },
+            await AugustCategories());
+        var ruleCount = (await ListedRules()).Count;
+
+        var response = await DeleteAllRules();
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(
+            new DeletedCategorizationRulesResponse(RulesDeleted: ruleCount),
+            await response.Content.ReadFromJsonAsync<DeletedCategorizationRulesResponse>());
+        Assert.Empty(await ListedRules());
+        Assert.Equal(
+            new Dictionary<string, int?> { ["Kafé"] = null, ["Rema 1000"] = null, ["Kiosk"] = null },
+            await AugustCategories());
+    }
+
+    [Fact]
+    public async Task DeleteAll_LeavesLockedTransactionsAndTheCategoriesAsTheyWere()
+    {
+        await UploadPurchasesFrom("Rema 1000", "Kiwi Sentrum");
+        // Locked, though a seeded rule matches it.
+        await CategorizeByHand("Kiwi Sentrum", _categories.Other);
+        await AddManualAugustTransaction("Rema 1000 Torget", _categories.Restaurants);
+        var categories = await _client.GetFromJsonAsync<List<CategoryResponse>>("/api/categories");
+
+        Assert.Equal(HttpStatusCode.OK, (await DeleteAllRules()).StatusCode);
+
+        Assert.Equal(
+            new Dictionary<string, int?>
+            {
+                ["Rema 1000"] = null,
+                ["Kiwi Sentrum"] = _categories.Other,
+                ["Rema 1000 Torget"] = _categories.Restaurants,
+            },
+            await AugustCategories());
+        // Each Category's counts of Transactions and rules change with the delete, not the Category.
+        Assert.Equal(
+            categories!.Select(c => (c.Id, c.Name, c.Description, c.Colour, c.BuiltIn)),
+            (await _client.GetFromJsonAsync<List<CategoryResponse>>("/api/categories"))!.Select(c => (c.Id, c.Name, c.Description, c.Colour, c.BuiltIn)));
+    }
+
+    private async Task<DeleteCountsResponse> DeleteCounts() =>
+        (await _client.GetFromJsonAsync<DeleteCountsResponse>("/api/user/delete-counts"))!;
+
+    [Fact]
+    public async Task GetDeleteCounts_CountsTheRules_AndTheTransactionsThatDeletingAllRulesThenUncategorizes()
+    {
+        // Two categorized by a seeded rule, one no rule matches, and one Locked though a rule matches it.
+        await UploadPurchasesFrom("Rema 1000", "Cubus", "Kiosk", "Kiwi Sentrum");
+        await CategorizeByHand("Kiwi Sentrum", _categories.Other);
+        await AddManualAugustTransaction("Rema 1000 Torget", _categories.Groceries);
+        var before = await AugustCategories();
+
+        var counted = await DeleteCounts();
+        var response = await DeleteAllRules();
+
+        Assert.Equal((await response.Content.ReadFromJsonAsync<DeletedCategorizationRulesResponse>())!.RulesDeleted, counted.RuleCount);
+        Assert.Equal(2, counted.RuleCategorizedTransactionCount);
+        var after = await AugustCategories();
+        Assert.Equal(
+            ["Cubus", "Rema 1000"],
+            before.Keys.Where(d => before[d] != after[d]).Order());
+        Assert.Equal(new DeleteCountsResponse(TransactionCount: 5, RuleCount: 0, RuleCategorizedTransactionCount: 0), await DeleteCounts());
+    }
+
+    [Fact]
+    public async Task DeleteAll_WithNoRules_DeletesNone()
+    {
+        Assert.Equal(HttpStatusCode.OK, (await DeleteAllRules()).StatusCode);
+
+        var response = await DeleteAllRules();
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(new DeletedCategorizationRulesResponse(RulesDeleted: 0), await response.Content.ReadFromJsonAsync<DeletedCategorizationRulesResponse>());
     }
 }

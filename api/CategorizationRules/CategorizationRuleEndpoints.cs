@@ -14,6 +14,8 @@ public record SavedCategorizationRuleResponse(
 
 public record DeletedCategorizationRuleResponse(int TransactionsChanged);
 
+public record DeletedCategorizationRulesResponse(int RulesDeleted);
+
 public static class CategorizationRuleEndpoints
 {
     public static void MapCategorizationRuleEndpoints(this IEndpointRouteBuilder app)
@@ -33,6 +35,9 @@ public static class CategorizationRuleEndpoints
         api.MapPost("/", AddRule);
         api.MapPut("/{id:int}", EditRule);
         api.MapDelete("/{id:int}", DeleteRule);
+        // A DELETE rather than a POST: it takes no JSON, and another site's page can't send a DELETE
+        // without a preflight, which the API never grants.
+        api.MapDelete("/", DeleteAllRules);
     }
 
     private static async Task<IResult> AddRule(CategorizationRuleRequest request, AppDbContext db)
@@ -87,6 +92,22 @@ public static class CategorizationRuleEndpoints
         var transactionsChanged = await Categorizer.SaveRuleChangeAsync(db);
 
         return Results.Ok(new DeletedCategorizationRuleResponse(transactionsChanged));
+    }
+
+    // Deletes every rule of the User, seeded ones included, and re-matches against none, so every
+    // imported Transaction that isn't Locked becomes Uncategorized. Categories stay.
+    private static async Task<IResult> DeleteAllRules(AppDbContext db)
+    {
+        // The rules are loaded under the rule-change lock, so none added meanwhile by another
+        // browser, as by an import, outlives the delete.
+        await using var transaction = await Categorizer.BeginRuleChangeAsync(db);
+        var rules = await db.CategorizationRules.ToListAsync();
+        db.CategorizationRules.RemoveRange(rules);
+        await Categorizer.RematchAsync(db);
+        await db.SaveChangesAsync();
+        await transaction.CommitAsync();
+
+        return Results.Ok(new DeletedCategorizationRulesResponse(rules.Count));
     }
 
     private static SavedCategorizationRuleResponse Saved(

@@ -28,6 +28,10 @@ public static class Categorizer
     // Locked: the rules will never change its Category. Manually entered, or categorized manually.
     public static bool IsLocked(Transaction transaction) => !IsRuleEligibleInMemory(transaction);
 
+    // Imported, and with a Category from a rule: what deleting every rule makes Uncategorized.
+    public static readonly Expression<Func<Transaction, bool>> IsCategorizedByARule =
+        t => t.BankStatementId != null && t.CategorizationRuleId != null;
+
     // The rule whose keyword the description contains, ignoring case. The longest keyword wins, so
     // a specific rule overrides a general one; between equally long keywords the oldest rule wins.
     public static CategorizationRule? ChooseRule(string description, IEnumerable<CategorizationRule> rules) =>
