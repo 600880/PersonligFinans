@@ -29,9 +29,9 @@ interface CategoryEdit {
   fieldErrors: CategoryFieldErrors
 }
 
-const inputClass = 'rounded-lg border border-slate-300 px-3 py-2 font-normal'
+const inputClass = 'rounded-lg border border-slate-300 dark:border-slate-700 px-3 py-2 font-normal'
 const smallButtonClass =
-  'rounded-lg px-2 py-1 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-300'
+  'rounded-lg px-2 py-1 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:cursor-not-allowed disabled:text-slate-300 dark:disabled:text-slate-600'
 
 function BuiltInBadge() {
   return (
@@ -39,7 +39,7 @@ function BuiltInBadge() {
       {' '}
       <span
         title="Built-in Category: can't be renamed or deleted"
-        className="ml-1 rounded bg-slate-100 px-1.5 py-0.5 text-xs font-medium text-slate-600"
+        className="ml-1 rounded bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 text-xs font-medium text-slate-600 dark:text-slate-400"
       >
         Built-in
       </span>
@@ -219,11 +219,11 @@ export function CategoriesPage() {
 
   return (
     <section className="w-full max-w-2xl">
-      <h2 className="text-lg font-semibold text-slate-900">Categories</h2>
+      <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Categories</h2>
 
       <form className="mt-4 flex items-start gap-3 max-sm:flex-col max-sm:items-stretch" onSubmit={handleAdd}>
         <div className="flex w-40 flex-col gap-1 max-sm:w-auto">
-          <label className="flex flex-col gap-1 text-sm font-medium text-slate-700">
+          <label className="flex flex-col gap-1 text-sm font-medium text-slate-700 dark:text-slate-300">
             Name
             <input
               value={name}
@@ -232,12 +232,12 @@ export function CategoriesPage() {
               className={inputClass}
             />
           </label>
-          <span id="category-name-error" className="text-xs text-red-600">
+          <span id="category-name-error" className="text-xs text-red-600 dark:text-red-300">
             {fieldErrors.name}
           </span>
         </div>
         <div className="flex flex-1 flex-col gap-1">
-          <label className="flex flex-col gap-1 text-sm font-medium text-slate-700">
+          <label className="flex flex-col gap-1 text-sm font-medium text-slate-700 dark:text-slate-300">
             Description
             <input
               value={description}
@@ -246,14 +246,14 @@ export function CategoriesPage() {
               className={inputClass}
             />
           </label>
-          <span id="category-description-error" className="text-xs text-red-600">
+          <span id="category-description-error" className="text-xs text-red-600 dark:text-red-300">
             {fieldErrors.description}
           </span>
         </div>
         <button
           type="submit"
           disabled={isSaving}
-          className="mt-6 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-300 max-sm:mt-0 max-sm:self-start"
+          className="mt-6 rounded-lg bg-slate-900 dark:bg-slate-100 px-4 py-2 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-700 dark:hover:bg-slate-300 disabled:cursor-not-allowed disabled:bg-slate-300 dark:disabled:bg-slate-800 dark:disabled:text-slate-500 max-sm:mt-0 max-sm:self-start"
         >
           Add category
         </button>
@@ -269,7 +269,7 @@ export function CategoriesPage() {
           Relative, so the hidden column label scrolls with it rather than widening the page. */}
       <div className="mt-2 max-sm:relative max-sm:overflow-x-auto">
         <table className="w-full text-left text-sm max-sm:min-w-xl">
-          <thead className="text-slate-500">
+          <thead className="text-slate-500 dark:text-slate-400">
             <tr>
               <th className="py-2 font-medium">Name</th>
               <th className="py-2 font-medium">Description</th>
@@ -280,7 +280,7 @@ export function CategoriesPage() {
               </th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-200 text-slate-900">
+          <tbody className="divide-y divide-slate-200 dark:divide-slate-800 text-slate-900 dark:text-slate-100">
             {categories.map((category) =>
               edit?.id === category.id ? (
                 <tr key={category.id} className="align-top">
@@ -299,7 +299,7 @@ export function CategoriesPage() {
                           aria-describedby={`category-${category.id}-name-error`}
                           className={inputClass}
                         />
-                        <span id={`category-${category.id}-name-error`} className="text-xs text-red-600">
+                        <span id={`category-${category.id}-name-error`} className="text-xs text-red-600 dark:text-red-300">
                           {edit.fieldErrors.name}
                         </span>
                       </div>
@@ -314,7 +314,7 @@ export function CategoriesPage() {
                         aria-describedby={`category-${category.id}-description-error`}
                         className={inputClass}
                       />
-                      <span id={`category-${category.id}-description-error`} className="text-xs text-red-600">
+                      <span id={`category-${category.id}-description-error`} className="text-xs text-red-600 dark:text-red-300">
                         {edit.fieldErrors.description}
                       </span>
                     </div>
@@ -341,14 +341,14 @@ export function CategoriesPage() {
                     {category.name}
                     {category.builtIn && <BuiltInBadge />}
                   </td>
-                  <td className="py-2 pr-3 text-slate-600">{category.description}</td>
+                  <td className="py-2 pr-3 text-slate-600 dark:text-slate-400">{category.description}</td>
                   <td className="py-2 pl-1.25 text-right tabular-nums">{category.transactionCount}</td>
                   <td className="py-2 pl-1.25 text-right tabular-nums">{category.ruleCount}</td>
                   <td className="py-2 pl-4 text-right whitespace-nowrap">
                     {confirmingDeleteId === category.id ? (
                       <>
                         {isInUse(category) ? (
-                          <fieldset className="mr-1 inline-flex flex-col items-start gap-1 text-left whitespace-normal text-slate-700">
+                          <fieldset className="mr-1 inline-flex flex-col items-start gap-1 text-left whitespace-normal text-slate-700 dark:text-slate-300">
                             <legend className="mb-1">Delete {category.name}?</legend>
                             <div className="flex flex-wrap items-center gap-1">
                               <label className="flex items-center gap-1">
@@ -368,7 +368,7 @@ export function CategoriesPage() {
                                   setReplacementId(event.target.value)
                                   setDeleteMode('moveToReplacement')
                                 }}
-                                className="rounded-lg border border-slate-300 px-2 py-1"
+                                className="rounded-lg border border-slate-300 dark:border-slate-700 px-2 py-1"
                               >
                                 <option value="">Choose a category</option>
                                 {categories
@@ -391,7 +391,7 @@ export function CategoriesPage() {
                             </label>
                           </fieldset>
                         ) : (
-                          <span className="mr-1 text-slate-700">Delete {category.name}?</span>
+                          <span className="mr-1 text-slate-700 dark:text-slate-300">Delete {category.name}?</span>
                         )}
                         <button
                           type="button"

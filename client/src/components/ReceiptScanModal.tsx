@@ -4,7 +4,7 @@ import { emptyTransactionForm, suggestedTransactionForm } from '../lib/transacti
 import { TransactionForm } from './TransactionForm'
 
 const smallButtonClass =
-  'rounded-lg px-2 py-1 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-300'
+  'rounded-lg px-2 py-1 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:cursor-not-allowed disabled:text-slate-300 dark:disabled:text-slate-600'
 
 // One Receipt of a Receipt scan: its image, a browser-local URL showing it, and the server's
 // reading of it. The URL and the reading are made as soon as the Receipt is picked, so that every
@@ -62,12 +62,12 @@ export function ReceiptScanModal({ receipts, onSaved, onClosed }: ReceiptScanMod
   }
 
   return (
-    <div className="fixed inset-0 flex items-center justify-center bg-slate-900/40 p-4">
+    <div className="fixed inset-0 flex items-center justify-center bg-slate-900/40 dark:bg-slate-950/70 p-4">
       <div
         role="dialog"
         aria-modal="true"
         aria-labelledby={headingId}
-        className="flex max-h-[calc(100vh-2rem)] w-full max-w-4xl flex-col rounded-xl bg-white shadow-xl"
+        className="flex max-h-[calc(100vh-2rem)] w-full max-w-4xl flex-col rounded-xl bg-white dark:bg-slate-900 shadow-xl"
       >
         <div className="flex justify-end px-3 pt-3">
           <button
@@ -75,7 +75,7 @@ export function ReceiptScanModal({ receipts, onSaved, onClosed }: ReceiptScanMod
             type="button"
             aria-label="Close"
             onClick={() => setIsConfirmingClose(true)}
-            className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+            className="rounded p-1 text-slate-400 dark:text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-700 dark:hover:text-slate-300"
           >
             <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" className="h-5 w-5">
               <path d="M3.72 3.72a.75.75 0 0 1 1.06 0L8 6.94l3.22-3.22a.75.75 0 1 1 1.06 1.06L9.06 8l3.22 3.22a.75.75 0 1 1-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 0 1-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 0 1 0-1.06Z" />
@@ -87,9 +87,9 @@ export function ReceiptScanModal({ receipts, onSaved, onClosed }: ReceiptScanMod
           <div
             role="alertdialog"
             aria-labelledby={confirmationId}
-            className="mx-6 flex flex-wrap items-center justify-end gap-2 rounded-lg bg-red-50 px-3 py-2 text-sm"
+            className="mx-6 flex flex-wrap items-center justify-end gap-2 rounded-lg bg-red-50 dark:bg-red-950/40 px-3 py-2 text-sm"
           >
-            <span id={confirmationId} className="mr-auto text-red-800">
+            <span id={confirmationId} className="mr-auto text-red-800 dark:text-red-300">
               Discard the remaining {remaining} receipt{remaining === 1 ? '' : 's'}?
             </span>
             <button type="button" onClick={discard} className={smallButtonClass}>
@@ -160,18 +160,18 @@ function ReceiptStep({ receipt, heading, headingId, onSaved, onDone }: ReceiptSt
   return (
     <>
       <div className="w-full max-w-md shrink-0 overflow-y-auto">
-        <h2 id={headingId} className="text-lg font-semibold text-slate-900">
+        <h2 id={headingId} className="text-lg font-semibold text-slate-900 dark:text-slate-100">
           {heading}
         </h2>
 
-        {suggestion === null && <p className="mt-3 text-sm text-slate-500">Reading…</p>}
+        {suggestion === null && <p className="mt-3 text-sm text-slate-500 dark:text-slate-400">Reading…</p>}
         {suggestion?.outcome === 'unreadable' && (
-          <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          <p className="mt-3 rounded-lg bg-amber-50 dark:bg-amber-950/40 px-3 py-2 text-sm text-amber-900 dark:text-amber-200">
             Couldn't read this receipt
           </p>
         )}
         {suggestion?.outcome === 'limitReached' && (
-          <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          <p className="mt-3 rounded-lg bg-amber-50 dark:bg-amber-950/40 px-3 py-2 text-sm text-amber-900 dark:text-amber-200">
             Daily AI limit reached until midnight Norwegian time — enter this receipt by hand
           </p>
         )}
@@ -219,7 +219,7 @@ function ReceiptPreview({ previewUrl }: { previewUrl: string }) {
     <>
       {/* Placed first rather than reversing the row, which would start a narrow window scrolled to
           the bottom of the form. */}
-      <div className="order-first max-h-72 shrink-0 overflow-auto rounded-lg border border-slate-200 bg-slate-50 md:order-none md:max-h-none md:min-w-0 md:flex-1">
+      <div className="order-first max-h-72 shrink-0 overflow-auto rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 md:order-none md:max-h-none md:min-w-0 md:flex-1">
         <button
           ref={showButtonRef}
           type="button"

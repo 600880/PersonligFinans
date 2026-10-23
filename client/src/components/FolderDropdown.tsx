@@ -6,9 +6,9 @@ import type { Folder, FolderFieldErrors, SaveFolderResult } from '../lib/api'
 const NO_FOLDER = ''
 const CREATE_FOLDER = 'create'
 
-const inputClass = 'rounded-lg border border-slate-300 px-3 py-2 font-normal'
+const inputClass = 'rounded-lg border border-slate-300 dark:border-slate-700 px-3 py-2 font-normal'
 const smallButtonClass =
-  'rounded-lg px-2 py-1 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-300'
+  'rounded-lg px-2 py-1 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:cursor-not-allowed disabled:text-slate-300 dark:disabled:text-slate-600'
 
 // The Folder dropdown: "Bookmarks" for the bookmarks in no Folder, then the Folders in the order
 // given, then "New folder…" last. chosenId is null for "Bookmarks". Disabled while the Folders are
@@ -66,7 +66,7 @@ export function FolderDropdown({
 
   return (
     <>
-      <label className="flex flex-col gap-1 text-sm font-medium text-slate-700">
+      <label className="flex flex-col gap-1 text-sm font-medium text-slate-700 dark:text-slate-300">
         Folder
         <select
           ref={selectRef}
@@ -74,7 +74,7 @@ export function FolderDropdown({
           value={chosenId ?? NO_FOLDER}
           disabled={disabled || folders === null}
           onChange={(event) => choose(event.target.value)}
-          className={`${inputClass} disabled:cursor-not-allowed disabled:bg-slate-100`}
+          className={`${inputClass} disabled:cursor-not-allowed disabled:bg-slate-100 dark:disabled:bg-slate-800`}
         >
           {folders === null ? (
             // A chosen Folder's name isn't known until the Folders are loaded.
@@ -129,7 +129,7 @@ export function FolderNameForm({
   return (
     <form className="flex flex-wrap items-start gap-2" onSubmit={handleSubmit}>
       <div className="flex flex-col gap-1">
-        <label className="flex flex-col gap-1 text-sm font-medium text-slate-700">
+        <label className="flex flex-col gap-1 text-sm font-medium text-slate-700 dark:text-slate-300">
           Folder name
           <input
             autoFocus
@@ -139,7 +139,7 @@ export function FolderNameForm({
             className={inputClass}
           />
         </label>
-        <span id={nameErrorId} className="text-xs text-red-600">
+        <span id={nameErrorId} className="text-xs text-red-600 dark:text-red-300">
           {fieldErrors.name}
         </span>
       </div>

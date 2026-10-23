@@ -33,16 +33,17 @@ import { firstMonthWithTransactions, monthsOfQuarter } from '../lib/quarter'
 import { BookmarkAddedPopup } from './BookmarkAddedPopup'
 import { FolderDropdown, FolderNameForm } from './FolderDropdown'
 import { ErrorMessage, StatusMessage } from './Messages'
+import { inputClassName } from './TransactionForm'
 
 const LOAD_ERROR = 'Could not load the transactions.'
 const BOOKMARKS_LOAD_ERROR = 'Could not load the bookmarks.'
 const FOLDERS_LOAD_ERROR = 'Could not load the folders.'
 
-const inputClass = 'rounded-lg border border-slate-300 px-3 py-2 font-normal'
+const inputClass = 'rounded-lg border border-slate-300 dark:border-slate-700 px-3 py-2 font-normal'
 const smallButtonClass =
-  'rounded-lg px-2 py-1 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-300'
+  'rounded-lg px-2 py-1 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:cursor-not-allowed disabled:text-slate-300 dark:disabled:text-slate-600'
 const categorySelectClass =
-  'rounded-lg border border-slate-300 px-2 py-1 disabled:cursor-not-allowed disabled:bg-slate-100'
+  'rounded-lg border border-slate-300 dark:border-slate-700 px-2 py-1 disabled:cursor-not-allowed disabled:bg-slate-100 dark:disabled:bg-slate-800'
 
 // The set with the id added, or removed.
 function withId(ids: ReadonlySet<number>, id: number, present: boolean): ReadonlySet<number> {
@@ -517,8 +518,8 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
     <section className="w-full max-w-3xl">
       {/* The switch wraps under the heading when the line has no room for both. */}
       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-        <h2 className="text-lg font-semibold text-slate-900">Transactions</h2>
-        <div role="group" aria-label="Show" className="flex rounded-lg bg-slate-100 p-0.5 text-sm font-medium">
+        <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Transactions</h2>
+        <div role="group" aria-label="Show" className="flex rounded-lg bg-slate-100 dark:bg-slate-800 p-0.5 text-sm font-medium">
           {LISTS.map((option) => (
             <button
               key={option.list}
@@ -526,7 +527,7 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
               aria-pressed={list === option.list}
               onClick={() => chooseList(option.list)}
               className={`rounded-md px-2.5 py-0.5 ${
-                list === option.list ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-900'
+                list === option.list ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
               }`}
             >
               {option.label}
@@ -577,8 +578,8 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
       )}
 
       {list === 'bookmarks' && chosenFolder && folderAction === 'delete' && (
-        <div className="mt-3 flex flex-wrap items-center justify-end gap-2 rounded-lg bg-red-50 px-3 py-2 text-sm">
-          <span className="mr-auto text-red-800">Delete '{chosenFolder.name}' and its bookmarks?</span>
+        <div className="mt-3 flex flex-wrap items-center justify-end gap-2 rounded-lg bg-red-50 dark:bg-red-950/40 px-3 py-2 text-sm">
+          <span className="mr-auto text-red-800 dark:text-red-300">Delete '{chosenFolder.name}' and its bookmarks?</span>
           <button
             type="button"
             disabled={isDeletingFolder}
@@ -600,7 +601,7 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
 
       {list === 'all' && selected && (
         <div className="mt-4 flex flex-wrap gap-3">
-          <label className="flex flex-col gap-1 text-sm font-medium text-slate-700">
+          <label className="flex flex-col gap-1 text-sm font-medium text-slate-700 dark:text-slate-300">
             Year
             <select
               value={selected.year}
@@ -614,7 +615,7 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
               ))}
             </select>
           </label>
-          <label className="flex flex-col gap-1 text-sm font-medium text-slate-700">
+          <label className="flex flex-col gap-1 text-sm font-medium text-slate-700 dark:text-slate-300">
             Month
             <select
               value={selected.granularity === 'month' ? selected.month : ''}
@@ -635,7 +636,7 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
               ))}
             </select>
           </label>
-          <label className="flex flex-col gap-1 text-sm font-medium text-slate-700">
+          <label className="flex flex-col gap-1 text-sm font-medium text-slate-700 dark:text-slate-300">
             Category
             <select
               value={categoryFilter}
@@ -651,7 +652,7 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
               <option value={UNCATEGORIZED}>Uncategorized</option>
             </select>
           </label>
-          <label className="flex flex-1 flex-col gap-1 text-sm font-medium text-slate-700">
+          <label className="flex flex-1 flex-col gap-1 text-sm font-medium text-slate-700 dark:text-slate-300">
             Search
             <input
               type="search"
@@ -670,13 +671,13 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
       )}
 
       {list === 'all' && selected && shownTransactions?.length === 0 && (
-        <p className="mt-6 text-sm text-slate-500">
+        <p className="mt-6 text-sm text-slate-500 dark:text-slate-400">
           {isFiltering ? 'No transactions match' : `No transactions in ${periodLabel(selected)}`}
         </p>
       )}
 
       {list === 'bookmarks' && shownTransactions?.length === 0 && (
-        <p className="mt-6 text-sm text-slate-500">
+        <p className="mt-6 text-sm text-slate-500 dark:text-slate-400">
           {chosenFolder ? `No bookmarks in ${chosenFolder.name}` : 'No bookmarks'}
         </p>
       )}
@@ -685,7 +686,7 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
         // On a phone each row is laid out as a card instead, its column headers hidden, so the table
         // never runs wider than the screen.
         <table className="mt-4 w-full text-left text-sm max-sm:block">
-          <thead className="text-slate-500 max-sm:hidden">
+          <thead className="text-slate-500 dark:text-slate-400 max-sm:hidden">
             <tr>
               <th className="py-2 font-medium">Date</th>
               <th className="py-2 font-medium">Description</th>
@@ -702,7 +703,7 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
               </th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-200 text-slate-900 max-sm:block">
+          <tbody className="divide-y divide-slate-200 dark:divide-slate-800 text-slate-900 dark:text-slate-100 max-sm:block">
             {shownTransactions.map((transaction) => (
               <Fragment key={transaction.id}>
                 <tr className="max-sm:grid max-sm:grid-cols-[1fr_auto_auto_auto] max-sm:items-center max-sm:gap-1 max-sm:py-3">
@@ -719,7 +720,7 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
                       disabled={savingIds.has(transaction.id) || (isDeleting && confirmingDeleteId === transaction.id)}
                       onChange={(event) => changeCategory(transaction, Number(event.target.value))}
                       className={`${categorySelectClass} ${
-                        transaction.categoryId === null ? 'text-slate-400' : 'text-slate-900'
+                        transaction.categoryId === null ? 'text-slate-400 dark:text-slate-500' : 'text-slate-900 dark:text-slate-100'
                       }`}
                     >
                       {transaction.categoryId === null && (
@@ -728,7 +729,7 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
                         </option>
                       )}
                       {categories.map((category) => (
-                        <option key={category.id} value={category.id} className="text-slate-900">
+                        <option key={category.id} value={category.id} className="text-slate-900 dark:text-slate-100">
                           {category.name}
                         </option>
                       ))}
@@ -738,7 +739,7 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
                         role="img"
                         aria-label="Locked"
                         title="Locked: rules won't change this Category"
-                        className="ml-1.5 inline-block align-middle text-slate-400"
+                        className="ml-1.5 inline-block align-middle text-slate-400 dark:text-slate-500"
                       >
                         <svg viewBox="0 0 16 16" fill="currentColor" fillRule="evenodd" aria-hidden="true" className="h-3.5 w-3.5">
                           <path d="M8 1a3.5 3.5 0 0 0-3.5 3.5V7H4a1.5 1.5 0 0 0-1.5 1.5v5A1.5 1.5 0 0 0 4 15h8a1.5 1.5 0 0 0 1.5-1.5v-5A1.5 1.5 0 0 0 12 7h-.5V4.5A3.5 3.5 0 0 0 8 1Zm2 6V4.5a2 2 0 1 0-4 0V7h4Z" />
@@ -761,7 +762,7 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
                       }
                       disabled={bookmarkSavingIds.has(transaction.id)}
                       onClick={() => toggleBookmark(transaction)}
-                      className="rounded p-1 hover:bg-slate-100 disabled:cursor-not-allowed"
+                      className="rounded p-1 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:cursor-not-allowed"
                     >
                       <svg
                         viewBox="0 0 16 16"
@@ -770,7 +771,7 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
                         strokeWidth="1.25"
                         strokeLinejoin="round"
                         aria-hidden="true"
-                        className={`h-4 w-4 ${transaction.bookmarked ? 'text-amber-500' : 'text-slate-300'}`}
+                        className={`h-4 w-4 ${transaction.bookmarked ? 'text-amber-500' : 'text-slate-300 dark:text-slate-600'}`}
                       >
                         <path d="M8 1.75 9.93 5.66l4.32.63-3.13 3.04.74 4.3L8 11.6l-3.86 2.03.74-4.3L1.75 6.29l4.32-.63L8 1.75Z" />
                       </svg>
@@ -792,9 +793,9 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
                       aria-label={`${transaction.note ? 'Edit' : 'Add'} note for ${transaction.description}`}
                       title={transaction.note ?? undefined}
                       onClick={() => openNoteEditor(transaction)}
-                      className="rounded p-1 hover:bg-slate-100"
+                      className="rounded p-1 hover:bg-slate-100 dark:hover:bg-slate-800"
                     >
-                      <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" className={`h-4 w-4 ${transaction.note ? 'text-slate-600' : 'text-slate-300'}`}>
+                      <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" className={`h-4 w-4 ${transaction.note ? 'text-slate-600 dark:text-slate-400' : 'text-slate-300 dark:text-slate-600'}`}>
                         <path d="M11.013 1.427a1.75 1.75 0 0 1 2.474 0l1.086 1.086a1.75 1.75 0 0 1 0 2.474l-8.61 8.61c-.21.21-.47.364-.756.445l-3.251.93a.75.75 0 0 1-.927-.928l.929-3.25c.081-.286.235-.547.445-.758l8.61-8.61Zm1.414 1.06a.25.25 0 0 0-.354 0L10.811 3.75l1.439 1.44 1.263-1.263a.25.25 0 0 0 0-.354l-1.086-1.086ZM11.189 6.25 9.75 4.81 3.23 11.33c-.03.03-.05.064-.06.1l-.635 2.223 2.222-.635a.2.2 0 0 0 .1-.06L11.19 6.25Z" />
                       </svg>
                     </button>
@@ -806,7 +807,7 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
                       title={transaction.imported ? "Imported Transactions can't be deleted" : undefined}
                       disabled={transaction.imported || isDeleting}
                       onClick={() => startDelete(transaction)}
-                      className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-700 disabled:cursor-not-allowed disabled:text-slate-300 disabled:hover:bg-transparent"
+                      className="rounded p-1 text-slate-400 dark:text-slate-500 hover:bg-red-50 dark:hover:bg-red-950/40 hover:text-red-700 dark:hover:text-red-300 disabled:cursor-not-allowed disabled:text-slate-300 dark:disabled:text-slate-600 disabled:hover:bg-transparent"
                     >
                       <svg viewBox="0 0 16 16" fill="currentColor" fillRule="evenodd" aria-hidden="true" className="h-4 w-4">
                         <path d="M6.5 1A1.5 1.5 0 0 0 5 2.5V3H2.75a.75.75 0 0 0 0 1.5h.3l.63 9.06A1.5 1.5 0 0 0 5.18 15h5.64a1.5 1.5 0 0 0 1.5-1.44l.63-9.06h.3a.75.75 0 0 0 0-1.5H11v-.5A1.5 1.5 0 0 0 9.5 1h-3Zm3 2v-.5h-3V3h3ZM6.75 6.5a.75.75 0 0 1 .75.75v4.5a.75.75 0 0 1-1.5 0v-4.5a.75.75 0 0 1 .75-.75Zm3.25.75a.75.75 0 0 0-1.5 0v4.5a.75.75 0 0 0 1.5 0v-4.5Z" />
@@ -817,8 +818,8 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
                 {editingNoteId === transaction.id && (
                   <tr className="max-sm:block">
                     <td colSpan={7} className="pb-3 max-sm:block max-sm:pt-1">
-                      <div className="flex flex-wrap items-end gap-2 rounded-lg bg-slate-50 px-3 py-2">
-                        <label className="flex flex-1 flex-col gap-1 text-sm font-medium text-slate-700">
+                      <div className="flex flex-wrap items-end gap-2 rounded-lg bg-slate-50 dark:bg-slate-950 px-3 py-2">
+                        <label className="flex flex-1 flex-col gap-1 text-sm font-medium text-slate-700 dark:text-slate-300">
                           Note
                           <textarea
                             rows={2}
@@ -826,7 +827,7 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
                             value={noteDraft}
                             onChange={(e) => setNoteDraft(e.target.value)}
                             placeholder="Add a note…"
-                            className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-normal text-slate-900 focus:border-slate-500 focus:outline-none"
+                            className={`${inputClassName} font-normal`}
                           />
                         </label>
                         <div className="flex gap-2">
@@ -854,8 +855,8 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
                 {confirmingDeleteId === transaction.id && (
                   <tr className="max-sm:block">
                     <td colSpan={7} className="pb-3 max-sm:block max-sm:pt-1">
-                      <div className="flex flex-wrap items-center justify-end gap-2 rounded-lg bg-red-50 px-3 py-2">
-                        <span className="mr-auto text-red-800">
+                      <div className="flex flex-wrap items-center justify-end gap-2 rounded-lg bg-red-50 dark:bg-red-950/40 px-3 py-2">
+                        <span className="mr-auto text-red-800 dark:text-red-300">
                           Delete "{transaction.description}" ({formatAmount(transaction.amount)} on{' '}
                           {formatNorwegianDate(transaction.date)})? This can't be undone.
                         </span>

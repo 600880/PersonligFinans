@@ -28,9 +28,9 @@ interface RuleEdit {
   fieldErrors: RuleFieldErrors
 }
 
-const inputClass = 'rounded-lg border border-slate-300 px-3 py-2 font-normal'
+const inputClass = 'rounded-lg border border-slate-300 dark:border-slate-700 px-3 py-2 font-normal'
 const smallButtonClass =
-  'rounded-lg px-2 py-1 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-300'
+  'rounded-lg px-2 py-1 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:cursor-not-allowed disabled:text-slate-300 dark:disabled:text-slate-600'
 
 export function RulesPage() {
   const [categories, setCategories] = useState<Category[]>([])
@@ -144,11 +144,11 @@ export function RulesPage() {
 
   return (
     <section className="w-full max-w-2xl">
-      <h2 className="text-lg font-semibold text-slate-900">Categorization Rules</h2>
+      <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Categorization Rules</h2>
 
       <form className="mt-4 flex items-start gap-3 max-sm:flex-col max-sm:items-stretch" onSubmit={handleAdd}>
         <div className="flex flex-1 flex-col gap-1">
-          <label className="flex flex-col gap-1 text-sm font-medium text-slate-700">
+          <label className="flex flex-col gap-1 text-sm font-medium text-slate-700 dark:text-slate-300">
             Keyword
             <input
               value={keyword}
@@ -157,12 +157,12 @@ export function RulesPage() {
               className={inputClass}
             />
           </label>
-          <span id="rule-keyword-error" className="text-xs text-red-600">
+          <span id="rule-keyword-error" className="text-xs text-red-600 dark:text-red-300">
             {fieldErrors.keyword}
           </span>
         </div>
         <div className="flex flex-col gap-1">
-          <label className="flex flex-col gap-1 text-sm font-medium text-slate-700">
+          <label className="flex flex-col gap-1 text-sm font-medium text-slate-700 dark:text-slate-300">
             Category
             <select
               value={categoryId}
@@ -178,14 +178,14 @@ export function RulesPage() {
               ))}
             </select>
           </label>
-          <span id="rule-category-error" className="text-xs text-red-600">
+          <span id="rule-category-error" className="text-xs text-red-600 dark:text-red-300">
             {fieldErrors.categoryId}
           </span>
         </div>
         <button
           type="submit"
           disabled={isSaving}
-          className="mt-6 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-300 max-sm:mt-0 max-sm:self-start"
+          className="mt-6 rounded-lg bg-slate-900 dark:bg-slate-100 px-4 py-2 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-700 dark:hover:bg-slate-300 disabled:cursor-not-allowed disabled:bg-slate-300 dark:disabled:bg-slate-800 dark:disabled:text-slate-500 max-sm:mt-0 max-sm:self-start"
         >
           Add rule
         </button>
@@ -199,7 +199,7 @@ export function RulesPage() {
 
       <label
         title={hasNewRules ? undefined : 'The last upload added no rules'}
-        className={`mt-2 inline-flex items-center gap-2 text-sm ${hasNewRules ? 'text-slate-700' : 'text-slate-400'}`}
+        className={`mt-2 inline-flex items-center gap-2 text-sm ${hasNewRules ? 'text-slate-700 dark:text-slate-300' : 'text-slate-400 dark:text-slate-600'}`}
       >
         <input
           type="checkbox"
@@ -214,7 +214,7 @@ export function RulesPage() {
           Relative, so the hidden column label scrolls with it rather than widening the page. */}
       <div className="mt-2 max-sm:relative max-sm:overflow-x-auto">
         <table className="w-full text-left text-sm">
-          <thead className="text-slate-500">
+          <thead className="text-slate-500 dark:text-slate-400">
             <tr>
               <th className="py-2 font-medium">Keyword</th>
               <th className="py-2 font-medium">Category</th>
@@ -223,7 +223,7 @@ export function RulesPage() {
               </th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-200 text-slate-900">
+          <tbody className="divide-y divide-slate-200 dark:divide-slate-800 text-slate-900 dark:text-slate-100">
             {shownRules.map((rule) =>
               edit?.id === rule.id ? (
                 <tr key={rule.id} className="align-top">
@@ -236,7 +236,7 @@ export function RulesPage() {
                         aria-describedby={`rule-${rule.id}-keyword-error`}
                         className={inputClass}
                       />
-                      <span id={`rule-${rule.id}-keyword-error`} className="text-xs text-red-600">
+                      <span id={`rule-${rule.id}-keyword-error`} className="text-xs text-red-600 dark:text-red-300">
                         {edit.fieldErrors.keyword}
                       </span>
                     </div>
@@ -256,7 +256,7 @@ export function RulesPage() {
                           </option>
                         ))}
                       </select>
-                      <span id={`rule-${rule.id}-category-error`} className="text-xs text-red-600">
+                      <span id={`rule-${rule.id}-category-error`} className="text-xs text-red-600 dark:text-red-300">
                         {edit.fieldErrors.categoryId}
                       </span>
                     </div>
@@ -284,7 +284,7 @@ export function RulesPage() {
                         {' '}
                         <span
                           title="AI-generated rule"
-                          className="ml-1 rounded bg-violet-100 px-1.5 py-0.5 text-xs font-medium text-violet-700"
+                          className="ml-1 rounded bg-violet-100 dark:bg-violet-950/40 px-1.5 py-0.5 text-xs font-medium text-violet-700 dark:text-violet-300"
                         >
                           AI
                         </span>
@@ -295,7 +295,7 @@ export function RulesPage() {
                         {' '}
                         <span
                           title="Added by the last upload"
-                          className="ml-1 rounded bg-emerald-100 px-1.5 py-0.5 text-xs font-medium text-emerald-700"
+                          className="ml-1 rounded bg-emerald-100 dark:bg-emerald-950/40 px-1.5 py-0.5 text-xs font-medium text-emerald-700 dark:text-emerald-300"
                         >
                           New
                         </span>

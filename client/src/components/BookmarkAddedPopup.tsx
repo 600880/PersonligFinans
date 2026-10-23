@@ -119,9 +119,9 @@ export function BookmarkAddedPopup({
       role="dialog"
       aria-labelledby={headingId}
       tabIndex={-1}
-      className="absolute top-full right-0 z-10 mt-1 flex w-max flex-col gap-3 rounded-lg border border-slate-200 bg-white p-3 text-left shadow-md outline-none max-sm:fixed max-sm:inset-x-4 max-sm:top-1/2 max-sm:mx-auto max-sm:mt-0 max-sm:w-auto max-sm:max-w-xs max-sm:-translate-y-1/2"
+      className="absolute top-full right-0 z-10 mt-1 flex w-max flex-col gap-3 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-3 text-left shadow-md outline-none max-sm:fixed max-sm:inset-x-4 max-sm:top-1/2 max-sm:mx-auto max-sm:mt-0 max-sm:w-auto max-sm:max-w-xs max-sm:-translate-y-1/2"
     >
-      <h3 id={headingId} className="text-sm font-medium text-slate-900">
+      <h3 id={headingId} className="text-sm font-medium text-slate-900 dark:text-slate-100">
         Bookmark added
       </h3>
       {/* Also takes the focus back when the name field for a new Folder closes. */}
@@ -136,7 +136,7 @@ export function BookmarkAddedPopup({
         selectRef={folderSelectRef}
       />
       {error && (
-        <p role="alert" className="text-xs text-red-600">
+        <p role="alert" className="text-xs text-red-600 dark:text-red-300">
           {error}
         </p>
       )}
@@ -146,7 +146,7 @@ export function BookmarkAddedPopup({
             type="button"
             disabled={saving !== null}
             onClick={() => void remove()}
-            className="rounded-lg px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-300"
+            className="rounded-lg px-3 py-1.5 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:cursor-not-allowed disabled:text-slate-300 dark:disabled:text-slate-600"
           >
             {saving === 'remove' ? 'Removing…' : 'Remove'}
           </button>
@@ -154,7 +154,7 @@ export function BookmarkAddedPopup({
             type="button"
             disabled={saving !== null}
             onClick={onDone}
-            className="rounded-lg bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+            className="rounded-lg bg-slate-900 dark:bg-slate-100 px-3 py-1.5 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-700 dark:hover:bg-slate-300 disabled:cursor-not-allowed disabled:bg-slate-300 dark:disabled:bg-slate-800 dark:disabled:text-slate-500"
           >
             Done
           </button>

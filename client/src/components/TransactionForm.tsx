@@ -161,7 +161,7 @@ export function TransactionForm({
   return (
     <>
       {errorMessage && (
-        <p role="alert" className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+        <p role="alert" className="mt-3 rounded-lg bg-red-50 dark:bg-red-950/40 px-3 py-2 text-sm text-red-700 dark:text-red-300">
           {errorMessage}
         </p>
       )}
@@ -215,7 +215,7 @@ export function TransactionForm({
             </Field>
           </div>
           {fieldErrors.amount && (
-            <span className="text-xs text-red-600">{fieldErrors.amount}</span>
+            <span className="text-xs text-red-600 dark:text-red-300">{fieldErrors.amount}</span>
           )}
         </div>
 
@@ -270,7 +270,7 @@ export function TransactionForm({
         {possibleDuplicates.length > 0 && (
           <section
             aria-labelledby={possibleDuplicatesHeadingId}
-            className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900"
+            className="rounded-lg border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/40 px-3 py-2 text-sm text-amber-900 dark:text-amber-200"
           >
             <h3 id={possibleDuplicatesHeadingId} className="font-medium">
               {possibleDuplicates.length === 1 ? 'Possible duplicate' : 'Possible duplicates'}
@@ -291,14 +291,14 @@ export function TransactionForm({
           <button
             type="button"
             onClick={secondaryAction.onClick}
-            className="rounded-lg px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100"
+            className="rounded-lg px-4 py-2 text-sm font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
           >
             {secondaryAction.label}
           </button>
           <button
             type="submit"
             disabled={!canSave}
-            className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+            className="rounded-lg bg-slate-900 dark:bg-slate-100 px-4 py-2 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-700 dark:hover:bg-slate-300 disabled:cursor-not-allowed disabled:bg-slate-300 dark:disabled:bg-slate-800 dark:disabled:text-slate-500"
           >
             {isSaving ? 'Saving…' : 'Save'}
           </button>
