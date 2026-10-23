@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
@@ -295,6 +295,9 @@ beforeEach(() => {
 afterEach(() => {
   fetchMock.mockClear()
   vi.unstubAllGlobals()
+  // The Appearance picked is remembered in the browser, so each test starts as a fresh browser.
+  localStorage.clear()
+  document.documentElement.classList.remove('dark')
 })
 
 const importedStatement = {
@@ -7208,6 +7211,94 @@ describe('Guest notice', () => {
     await screen.findByRole('navigation')
 
     expect(guestNotice()).not.toBeInTheDocument()
+  })
+})
+
+describe('Appearance', () => {
+  async function openUserPage() {
+    const user = userEvent.setup()
+    await renderApp()
+    await user.click(screen.getByRole('button', { name: 'User' }))
+    return user
+  }
+
+  function appearance() {
+    return within(screen.getByRole('radiogroup', { name: 'Appearance' }))
+  }
+
+  function isDark() {
+    return document.documentElement.classList.contains('dark')
+  }
+
+  // The device's light or dark setting, which System follows and can be changed while the app is open.
+  function deviceSetting(dark: boolean) {
+    const listeners = new Set<() => void>()
+    const query = {
+      get matches() {
+        return dark
+      },
+      addEventListener: (_type: string, listener: () => void) => listeners.add(listener),
+      removeEventListener: (_type: string, listener: () => void) => listeners.delete(listener),
+    }
+    vi.stubGlobal('matchMedia', () => query)
+    return {
+      change(toDark: boolean) {
+        dark = toDark
+        act(() => listeners.forEach((listener) => listener()))
+      },
+    }
+  }
+
+  it('is Light until something is picked, even on a dark device', async () => {
+    deviceSetting(true)
+    await openUserPage()
+
+    expect(appearance().getByRole('radio', { name: 'Light' })).toBeChecked()
+    expect(isDark()).toBe(false)
+  })
+
+  it('applies Dark at once, and remembers it in this browser, through Sign out to the landing page', async () => {
+    const user = await openUserPage()
+
+    await user.click(appearance().getByRole('radio', { name: 'Dark' }))
+    expect(isDark()).toBe(true)
+
+    await user.click(screen.getByRole('button', { name: 'Sign out' }))
+    expect(await screen.findByRole('heading', { name: 'Sign in' })).toBeInTheDocument()
+    expect(isDark()).toBe(true)
+  })
+
+  it('opens again in the remembered choice', async () => {
+    const user = await openUserPage()
+    await user.click(appearance().getByRole('radio', { name: 'Dark' }))
+    // As a reload: the app gone, and the page not yet dark.
+    cleanup()
+    document.documentElement.classList.remove('dark')
+
+    await openUserPage()
+
+    expect(isDark()).toBe(true)
+    expect(appearance().getByRole('radio', { name: 'Dark' })).toBeChecked()
+  })
+
+  it('follows the device for System, and switches when it does, which Light and Dark ignore', async () => {
+    const device = deviceSetting(true)
+    const user = await openUserPage()
+
+    await user.click(appearance().getByRole('radio', { name: 'System' }))
+    expect(isDark()).toBe(true)
+    device.change(false)
+    expect(isDark()).toBe(false)
+
+    await user.click(appearance().getByRole('radio', { name: 'Dark' }))
+    expect(isDark()).toBe(true)
+    device.change(true)
+    device.change(false)
+    expect(isDark()).toBe(true)
+
+    await user.click(appearance().getByRole('radio', { name: 'Light' }))
+    device.change(true)
+    expect(isDark()).toBe(false)
   })
 })
 

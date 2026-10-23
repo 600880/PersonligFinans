@@ -8,8 +8,8 @@ export function StatusMessage({ message, className = '' }: { message: string | n
   return (
     <div role="status" className={`${MESSAGE_HEIGHT} ${className}`}>
       {message && (
-        <p className="flex w-fit items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm">
-          <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" className="h-4 w-4 shrink-0 text-slate-500">
+        <p className="flex w-fit items-center gap-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3 py-2 text-sm text-slate-700 dark:text-slate-300 shadow-sm">
+          <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" className="h-4 w-4 shrink-0 text-slate-500 dark:text-slate-400">
             <path
               fillRule="evenodd"
               d="M13.53 4.22a.75.75 0 0 1 0 1.06l-6.5 6.5a.75.75 0 0 1-1.06 0l-3-3a.75.75 0 1 1 1.06-1.06L6.5 10.19l5.97-5.97a.75.75 0 0 1 1.06 0Z"
@@ -26,7 +26,7 @@ export function StatusMessage({ message, className = '' }: { message: string | n
 // moves the page.
 export function ErrorMessage({ children, className = '' }: { children: ReactNode; className?: string }) {
   return (
-    <div role="alert" className={`w-fit rounded-lg border max-sm:break-words border-red-100 bg-red-50 px-3 py-2 text-sm text-red-700 ${className}`}>
+    <div role="alert" className={`w-fit rounded-lg border max-sm:break-words border-red-100 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-3 py-2 text-sm text-red-700 dark:text-red-300 ${className}`}>
       {children}
     </div>
   )

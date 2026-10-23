@@ -1,5 +1,14 @@
 @import 'tailwindcss';
 
+/* Dark follows the class on <html> that the Appearance picked on the User page sets, not the
+   device's setting directly, so Light can be chosen on a dark device. */
+@custom-variant dark (&:where(.dark, .dark *));
+
 body {
   font-family: system-ui, 'Segoe UI', Roboto, sans-serif;
+}
+
+/* Scrollbars, checkboxes and date pickers drawn dark too. */
+html.dark {
+  color-scheme: dark;
 }

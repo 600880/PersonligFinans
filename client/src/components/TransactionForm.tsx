@@ -22,7 +22,7 @@ import {
 } from '../lib/transactionForm'
 
 export const inputClassName =
-  'rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-slate-500 focus:outline-none'
+  'rounded-lg border border-slate-300 dark:border-slate-700 px-3 py-2 text-sm text-slate-900 dark:text-slate-100 focus:border-slate-500 dark:focus:border-slate-400 focus:outline-none'
 
 interface FieldProps {
   label: string
@@ -33,10 +33,10 @@ interface FieldProps {
 // A labelled input with its validation error under it.
 export function Field({ label, error, children }: FieldProps) {
   return (
-    <label className="flex flex-col gap-1 text-sm font-medium text-slate-700">
+    <label className="flex flex-col gap-1 text-sm font-medium text-slate-700 dark:text-slate-300">
       {label}
       {children}
-      {error && <span className="text-xs font-normal text-red-600">{error}</span>}
+      {error && <span className="text-xs font-normal text-red-600 dark:text-red-300">{error}</span>}
     </label>
   )
 }

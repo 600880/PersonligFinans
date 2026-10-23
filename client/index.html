@@ -5,6 +5,15 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>PersonligFinans</title>
+    <!-- Dark before the first paint when this browser picked it, as src/lib/appearance.ts decides
+         once the app loads, so there is no white flash. -->
+    <script>
+      try {
+        var appearance = localStorage.getItem('appearance')
+        if (appearance === 'dark' || (appearance === 'system' && matchMedia('(prefers-color-scheme: dark)').matches))
+          document.documentElement.classList.add('dark')
+      } catch {}
+    </script>
   </head>
   <body>
     <div id="root"></div>

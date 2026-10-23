@@ -17,6 +17,7 @@ import {
   type ImportedBankStatement,
   type User,
 } from './lib/api'
+import { followAppearance } from './lib/appearance'
 import { counted } from './lib/count'
 import { formatNorwegianDate } from './lib/date'
 import { resetLinkAt } from './lib/passwordReset'
@@ -39,7 +40,7 @@ const NAV_ITEMS: { view: View; label: string }[] = [
 // The look of each way to add Transactions: a button of its own on a wide screen, an item in the
 // Add transactions menu on a narrow one.
 const ADD_ACTION_CLASS =
-  'rounded-lg border border-slate-300 bg-white px-5 py-2.5 text-sm font-medium text-slate-900 shadow-sm hover:bg-slate-100 max-sm:w-full max-sm:border-0 max-sm:text-left max-sm:shadow-none'
+  'rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-5 py-2.5 text-sm font-medium text-slate-900 dark:text-slate-100 shadow-sm hover:bg-slate-100 dark:hover:bg-slate-800 max-sm:w-full max-sm:border-0 max-sm:text-left max-sm:shadow-none'
 
 // Opened at the link in a reset email, shows the page to choose a new password, whoever is signed in,
 // so it never asks who is. Otherwise, or once the page is done, the landing page or the app. The
@@ -49,6 +50,9 @@ function App() {
   const [resetLink, setResetLink] = useState(() => resetLinkAt(window.location))
   // The User the new password signed in as, so the app shows without asking who is signed in.
   const [signedInByReset, setSignedInByReset] = useState<User | undefined>()
+
+  // On every page, signed in or not, and System switching with the device while open.
+  useEffect(() => followAppearance(), [])
 
   function leaveResetPage() {
     window.history.replaceState(null, '', '/')
@@ -106,13 +110,13 @@ function LandingPageOrApp({ signedIn }: LandingPageOrAppProps) {
 
   if (loadFailed) {
     return (
-      <div className="flex min-h-screen justify-center bg-slate-50 px-6 py-10 max-sm:px-4">
+      <div className="flex min-h-screen justify-center bg-slate-50 dark:bg-slate-950 px-6 py-10 max-sm:px-4">
         <ErrorMessage className="h-fit">Could not reach the server. Reload the page to try again.</ErrorMessage>
       </div>
     )
   }
   // A blank page while asking, so a signed-in User never sees the landing page flash by.
-  if (user === undefined) return <div className="min-h-screen bg-slate-50" />
+  if (user === undefined) return <div className="min-h-screen bg-slate-50 dark:bg-slate-950" />
   if (user === null) return <LandingPage onSignedIn={setUser} />
   return <SignedInApp user={user} onSignedOut={() => setUser(null)} />
 }
@@ -288,12 +292,12 @@ function SignedInApp({ user, onSignedOut }: SignedInAppProps) {
   const hasErrors = receiptPickError !== null || rejections.length > 0
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950">
       <header
         ref={headerRef}
-        className="relative flex items-center justify-between border-b border-slate-200 bg-white px-6 py-4 max-sm:px-4"
+        className="relative flex items-center justify-between border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-6 py-4 max-sm:px-4"
       >
-        <h1 className="text-xl font-semibold tracking-tight text-slate-900">
+        <h1 className="text-xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">
           <button type="button" onClick={() => chooseView('home')}>
             PersonligFinans
           </button>
@@ -304,7 +308,7 @@ function SignedInApp({ user, onSignedOut }: SignedInAppProps) {
           aria-expanded={isNavOpen}
           aria-controls="pages"
           onClick={() => setIsNavOpen((open) => !open)}
-          className="rounded-lg p-1.5 text-slate-600 hover:bg-slate-100 sm:hidden"
+          className="rounded-lg p-1.5 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 sm:hidden"
         >
           {isNavOpen ? (
             <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" className="h-6 w-6">
@@ -319,7 +323,7 @@ function SignedInApp({ user, onSignedOut }: SignedInAppProps) {
         {/* On a narrow screen, a panel dropped over the page from under the header while open. */}
         <nav
           id="pages"
-          className={`flex gap-1 max-sm:absolute max-sm:inset-x-0 max-sm:top-full max-sm:z-10 max-sm:flex-col max-sm:border-b max-sm:border-slate-200 max-sm:bg-white max-sm:p-2 max-sm:shadow-md ${
+          className={`flex gap-1 max-sm:absolute max-sm:inset-x-0 max-sm:top-full max-sm:z-10 max-sm:flex-col max-sm:border-b max-sm:border-slate-200 dark:max-sm:border-slate-800 max-sm:bg-white dark:max-sm:bg-slate-900 max-sm:p-2 max-sm:shadow-md ${
             isNavOpen ? '' : 'max-sm:hidden'
           }`}
         >
@@ -330,7 +334,7 @@ function SignedInApp({ user, onSignedOut }: SignedInAppProps) {
               onClick={() => chooseView(item.view)}
               aria-current={view === item.view ? 'page' : undefined}
               className={`rounded-lg px-3 py-1.5 text-sm font-medium max-sm:py-3 max-sm:text-left max-sm:text-base ${
-                view === item.view ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'
+                view === item.view ? 'bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
               }`}
             >
               {item.label}
@@ -344,7 +348,7 @@ function SignedInApp({ user, onSignedOut }: SignedInAppProps) {
         <p
           role="note"
           aria-label="Guest"
-          className="border-b border-amber-200 bg-amber-50 px-6 py-2 text-center text-sm text-amber-900 max-sm:px-4"
+          className="border-b border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/40 px-6 py-2 text-center text-sm text-amber-900 dark:text-amber-200 max-sm:px-4"
         >
           Demo mode: only use test data.
         </p>
@@ -384,11 +388,11 @@ function SignedInApp({ user, onSignedOut }: SignedInAppProps) {
             aria-controls="add-actions"
             aria-busy={isUploading}
             onClick={() => setIsAddMenuOpen((open) => !open)}
-            className="flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-5 py-2.5 text-sm font-medium text-slate-900 shadow-sm hover:bg-slate-100 sm:hidden"
+            className="flex items-center gap-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-5 py-2.5 text-sm font-medium text-slate-900 dark:text-slate-100 shadow-sm hover:bg-slate-100 dark:hover:bg-slate-800 sm:hidden"
           >
             {isUploading && <Spinner />}
             {uploadProgress ? uploadProgressLabel(uploadProgress) : 'Add transactions'}
-            <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" className="h-4 w-4 text-slate-500">
+            <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" className="h-4 w-4 text-slate-500 dark:text-slate-400">
               <path d="M4.22 6.22a.75.75 0 0 1 1.06 0L8 8.94l2.72-2.72a.75.75 0 1 1 1.06 1.06l-3.25 3.25a.75.75 0 0 1-1.06 0L4.22 7.28a.75.75 0 0 1 0-1.06Z" />
             </svg>
           </button>
@@ -397,7 +401,7 @@ function SignedInApp({ user, onSignedOut }: SignedInAppProps) {
             id="add-actions"
             role="group"
             aria-label="Ways to add transactions"
-            className={`flex gap-3 max-sm:absolute max-sm:top-full max-sm:left-1/2 max-sm:z-10 max-sm:mt-1 max-sm:w-max max-sm:min-w-full max-sm:-translate-x-1/2 max-sm:flex-col max-sm:gap-0 max-sm:rounded-lg max-sm:border max-sm:border-slate-200 max-sm:bg-white max-sm:p-1 max-sm:shadow-md ${
+            className={`flex gap-3 max-sm:absolute max-sm:top-full max-sm:left-1/2 max-sm:z-10 max-sm:mt-1 max-sm:w-max max-sm:min-w-full max-sm:-translate-x-1/2 max-sm:flex-col max-sm:gap-0 max-sm:rounded-lg max-sm:border max-sm:border-slate-200 dark:max-sm:border-slate-800 max-sm:bg-white dark:max-sm:bg-slate-900 max-sm:p-1 max-sm:shadow-md ${
               isAddMenuOpen ? '' : 'max-sm:hidden'
             }`}
           >
@@ -501,7 +505,7 @@ function Spinner() {
   return (
     <span
       aria-hidden="true"
-      className="size-4 animate-spin rounded-full border-2 border-slate-300 border-t-slate-900"
+      className="size-4 animate-spin rounded-full border-2 border-slate-300 dark:border-slate-700 border-t-slate-900 dark:border-t-slate-100"
     />
   )
 }
