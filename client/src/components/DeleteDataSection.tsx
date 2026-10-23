@@ -9,7 +9,7 @@ import {
   type DeleteCounts,
   type ListedBankStatement,
 } from '../lib/api'
-import { counted } from '../lib/count'
+import { counted, formatCount } from '../lib/count'
 import { formatNorwegianDate } from '../lib/date'
 import { ErrorMessage, StatusMessage } from './Messages'
 import { Field, inputClassName } from './TransactionForm'
@@ -38,13 +38,15 @@ const smallButtonClass =
   'rounded-lg px-2 py-1 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-300'
 const cardClass = 'rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-sm'
 
-// The User's deletes, least destructive first: the ticked Bank Statements with their Transactions,
-// then every Transaction, then every Categorization Rule. Each asks for confirmation with exact
-// counts. One status line, for whichever delete ran last, stays until the next action.
+// The User's deletes, least destructive first: in one Transactions card the ticked Bank Statements
+// with their Transactions, or every Transaction, then every Categorization Rule. Each asks for
+// confirmation with exact counts. One status line, for whichever delete ran last, stays until the
+// next action.
 // Last, in red, Delete your User, which asks for the password instead and ends on the landing page.
 export function DeleteDataSection({ isUploading, onDeleted, isGuest, onUserDeleted }: DeleteDataSectionProps) {
   const headingId = useId()
-  const bankStatementsHeadingId = useId()
+  const transactionsHeadingId = useId()
+  const bankStatementListId = useId()
   // Null until loaded, so "There are no Bank Statements." never shows before they are.
   const [bankStatements, setBankStatements] = useState<ListedBankStatement[] | null>(null)
   const [loadFailed, setLoadFailed] = useState(false)
@@ -55,6 +57,8 @@ export function DeleteDataSection({ isUploading, onDeleted, isGuest, onUserDelet
   // Bumped after a delete, to list and count what is left.
   const [dataVersion, setDataVersion] = useState(0)
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<number>>(new Set())
+  // Collapsed each time the User page opens, and left as it is after a delete.
+  const [isListOpen, setIsListOpen] = useState(false)
   const [confirming, setConfirming] = useState<Confirming | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
@@ -123,6 +127,10 @@ export function DeleteDataSection({ isUploading, onDeleted, isGuest, onUserDelet
   const transactionCount = counts?.transactionCount ?? 0
   const ruleCount = counts?.ruleCount ?? 0
   const ruleCategorizedTransactionCount = counts?.ruleCategorizedTransactionCount ?? 0
+  // "(4)", or "(4, 2 selected)" once something is ticked.
+  const bankStatementsCounted =
+    bankStatements &&
+    ` (${formatCount(bankStatements.length)}${selected.length > 0 ? `, ${formatCount(selected.length)} selected` : ''})`
 
   // Runs the confirmed delete, then lists and counts again either way: a delete may be refused
   // because of a change made elsewhere, as by another visitor using the Guest, and the next question
@@ -180,49 +188,82 @@ export function DeleteDataSection({ isUploading, onDeleted, isGuest, onUserDelet
         <StatusMessage message={statusMessage} className="mt-3" />
       )}
 
-      <section aria-labelledby={bankStatementsHeadingId} className={`mt-2 ${cardClass}`}>
-        <h4 id={bankStatementsHeadingId} className="text-sm font-semibold text-slate-900">
-          Bank Statements
+      {/* Imported Transactions go only with their whole Bank Statement, so Delete selected deletes
+          ticked Bank Statements and Delete all deletes every Bank Statement too. Delete all's question
+          deliberately counts only the Transactions. */}
+      <section aria-labelledby={transactionsHeadingId} className={`mt-2 ${cardClass}`}>
+        <h4 id={transactionsHeadingId} className="text-sm font-semibold text-slate-900">
+          Transactions
         </h4>
         {loadFailed ? (
           <ErrorMessage className="mt-3">Could not load the Bank Statements.</ErrorMessage>
         ) : bankStatements?.length === 0 ? (
           <p className="mt-2 text-sm text-slate-600">There are no Bank Statements.</p>
         ) : (
-          <ul className="mt-2 divide-y divide-slate-200">
-            {bankStatements?.map((statement) => (
-              <li key={statement.id}>
-                {/* On a phone the details wrap under one another beside the checkbox. */}
-                <label className="flex items-center gap-3 py-2 text-sm text-slate-700">
-                  <input
-                    type="checkbox"
-                    checked={selectedIds.has(statement.id)}
-                    disabled={confirming === 'bankStatements' || isDeleting}
-                    onChange={() => toggle(statement.id)}
-                    className="size-4 shrink-0"
-                  />
-                  <span className="flex min-w-0 flex-1 flex-wrap gap-x-4 gap-y-0.5">
-                    <span className="font-medium text-slate-900 tabular-nums">{statement.accountNumber}</span>
-                    <span className="tabular-nums">
-                      {formatNorwegianDate(statement.periodStart)}–{formatNorwegianDate(statement.periodEnd)}
-                    </span>
-                    <span className="text-slate-500">Imported {formatNorwegianDate(statement.importedOn)}</span>
-                    <span className="tabular-nums sm:ml-auto">{counted(statement.transactionCount, 'Transaction')}</span>
-                  </span>
-                </label>
-              </li>
-            ))}
-          </ul>
+          // Collapsed until asked for, and the ticks stay while it is. Counted once loaded.
+          <>
+            <button
+              type="button"
+              aria-expanded={isListOpen}
+              aria-controls={bankStatementListId}
+              disabled={bankStatements === null}
+              onClick={() => setIsListOpen((open) => !open)}
+              className="mt-2 -ml-2 flex items-center gap-1.5 rounded-lg px-2 py-1 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-default disabled:hover:bg-transparent"
+            >
+              <span aria-hidden="true" className={`text-xs transition-transform ${isListOpen ? 'rotate-90' : ''}`}>
+                ▶
+              </span>
+              Bank Statements{bankStatementsCounted}
+            </button>
+            {isListOpen && bankStatements && (
+              <ul id={bankStatementListId} className="mt-2 divide-y divide-slate-200">
+                {bankStatements.map((statement) => (
+                  <li key={statement.id}>
+                    {/* On a phone the details wrap under one another beside the checkbox. */}
+                    <label className="flex items-center gap-3 py-2 text-sm text-slate-700">
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.has(statement.id)}
+                        disabled={confirming === 'bankStatements' || isDeleting}
+                        onChange={() => toggle(statement.id)}
+                        className="size-4 shrink-0"
+                      />
+                      <span className="flex min-w-0 flex-1 flex-wrap gap-x-4 gap-y-0.5">
+                        <span className="font-medium text-slate-900 tabular-nums">{statement.accountNumber}</span>
+                        <span className="tabular-nums">
+                          {formatNorwegianDate(statement.periodStart)}–{formatNorwegianDate(statement.periodEnd)}
+                        </span>
+                        <span className="text-slate-500">Imported {formatNorwegianDate(statement.importedOn)}</span>
+                        <span className="tabular-nums sm:ml-auto">{counted(statement.transactionCount, 'Transaction')}</span>
+                      </span>
+                    </label>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </>
         )}
 
-        <button
-          type="button"
-          disabled={selected.length === 0 || isBusy}
-          onClick={() => ask('bankStatements')}
-          className={`mt-3 ${buttonClass}`}
-        >
-          Delete selected
-        </button>
+        <p className="mt-3 text-sm text-slate-600">Deletes every Transaction, including manually-entered ones.</p>
+        {countsFailed && <ErrorMessage className="mt-3">Could not count the Transactions.</ErrorMessage>}
+        <div className="mt-3 flex flex-wrap gap-3">
+          <button
+            type="button"
+            disabled={selected.length === 0 || isBusy}
+            onClick={() => ask('bankStatements')}
+            className={buttonClass}
+          >
+            Delete selected
+          </button>
+          <button
+            type="button"
+            disabled={transactionCount === 0 || isBusy}
+            onClick={() => ask('allTransactions')}
+            className={buttonClass}
+          >
+            Delete all
+          </button>
+        </div>
         {confirming === 'bankStatements' && (
           <ConfirmDelete
             isUploading={isUploading}
@@ -234,23 +275,6 @@ export function DeleteDataSection({ isUploading, onDeleted, isGuest, onUserDelet
             {counted(selectedTransactions, 'Transaction')}?
           </ConfirmDelete>
         )}
-      </section>
-
-      {/* An imported Transaction goes only with its whole Bank Statement, so this deletes every Bank
-          Statement too. The question deliberately counts only the Transactions. */}
-      <div className={`mt-3 ${cardClass}`}>
-        <p className="text-sm text-slate-600">
-          Every Transaction, manually-entered and imported, and so every Bank Statement too.
-        </p>
-        {countsFailed && <ErrorMessage className="mt-3">Could not count the Transactions.</ErrorMessage>}
-        <button
-          type="button"
-          disabled={transactionCount === 0 || isBusy}
-          onClick={() => ask('allTransactions')}
-          className={`mt-3 ${buttonClass}`}
-        >
-          Delete all Transactions
-        </button>
         {confirming === 'allTransactions' && (
           <ConfirmDelete
             isUploading={isUploading}
@@ -261,7 +285,7 @@ export function DeleteDataSection({ isUploading, onDeleted, isGuest, onUserDelet
             Delete all {counted(transactionCount, 'Transaction')}?
           </ConfirmDelete>
         )}
-      </div>
+      </section>
 
       {/* Locked Transactions keep their Category, and the Categories stay. */}
       <div className={`mt-3 ${cardClass}`}>

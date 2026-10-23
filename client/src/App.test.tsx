@@ -7047,10 +7047,9 @@ describe('User page', () => {
   })
 
   describe('Change password', () => {
-    async function openForm(user: ReturnType<typeof userEvent.setup>) {
+    async function openUserPage(user: ReturnType<typeof userEvent.setup>) {
       await renderApp()
       await user.click(userButton())
-      await user.click(screen.getByRole('button', { name: 'Change password' }))
     }
 
     async function fillIn(
@@ -7066,7 +7065,7 @@ describe('User page', () => {
     }
 
     function passwordRegion() {
-      return screen.getByRole('region', { name: 'Password' })
+      return screen.getByRole('region', { name: 'Change password' })
     }
 
     // The Change password status line, apart from the Delete data section's below it.
@@ -7078,9 +7077,9 @@ describe('User page', () => {
       return fetchMock.mock.calls.filter(([url]) => url === '/api/user/change-password')
     }
 
-    it('opens a form with the current password, a new one and the confirm field, and changes the password', async () => {
+    it('shows a form with the current password, a new one and the confirm field, and changes the password', async () => {
       const user = userEvent.setup()
-      await openForm(user)
+      await openUserPage(user)
 
       expect(screen.getByLabelText(/^current password/i)).toHaveAttribute('autocomplete', 'current-password')
       expect(screen.getByLabelText(/^new password/i)).toHaveAttribute('autocomplete', 'new-password')
@@ -7088,7 +7087,6 @@ describe('User page', () => {
       await fillIn(user, 'my long passphrase', 'my new passphrase')
 
       expect(await passwordStatus()).toHaveTextContent('Password changed.')
-      expect(screen.queryByLabelText(/^current password/i)).not.toBeInTheDocument()
       const [request] = changePasswordRequests()
       expect(request[1]?.headers).toEqual({ 'Content-Type': 'application/json' })
       expect(JSON.parse(request[1]?.body as string)).toEqual({
@@ -7100,7 +7098,7 @@ describe('User page', () => {
 
     it("says the new passwords don't match and sends nothing", async () => {
       const user = userEvent.setup()
-      await openForm(user)
+      await openUserPage(user)
 
       await fillIn(user, 'my long passphrase', 'my new passphrase', 'my new passphrse')
 
@@ -7120,7 +7118,7 @@ describe('User page', () => {
           { status: 400 },
         )
       const user = userEvent.setup()
-      await openForm(user)
+      await openUserPage(user)
 
       await fillIn(user, 'wrong password', 'short')
 
@@ -7137,7 +7135,7 @@ describe('User page', () => {
       const locked = 'Too many failed sign-ins, so this email is locked for a few minutes. Try again later.'
       handleChangePassword = () => Response.json({ detail: locked }, { status: 429 })
       const user = userEvent.setup()
-      await openForm(user)
+      await openUserPage(user)
 
       await fillIn(user, 'my long passphrase', 'my new passphrase')
 
@@ -7145,39 +7143,32 @@ describe('User page', () => {
       expect(screen.getByLabelText(/^current password/i)).toBeInTheDocument()
     })
 
-    it('shows Password changed. until the next action, and opens an empty form again', async () => {
+    it('empties the fields after a change, and shows Password changed. until the next action', async () => {
       const user = userEvent.setup()
-      await openForm(user)
+      await openUserPage(user)
       await fillIn(user, 'my long passphrase', 'my new passphrase')
       expect(await passwordStatus()).toHaveTextContent('Password changed.')
 
-      await user.click(screen.getByRole('button', { name: 'Change password' }))
-
-      expect(within(passwordRegion()).getByRole('status')).toHaveTextContent('')
       expect(screen.getByLabelText(/^current password/i)).toHaveValue('')
       expect(screen.getByLabelText(/^new password/i)).toHaveValue('')
       expect(screen.getByLabelText(/^confirm password/i)).toHaveValue('')
+      expect(screen.queryByRole('button', { name: 'Cancel' })).not.toBeInTheDocument()
+
+      await user.type(screen.getByLabelText(/^current password/i), 'm')
+
+      expect(within(passwordRegion()).getByRole('status')).toHaveTextContent('')
     })
 
-    it('closes without sending anything on Cancel', async () => {
-      const user = userEvent.setup()
-      await openForm(user)
-      await user.type(screen.getByLabelText(/^current password/i), 'my long passphrase')
-
-      await user.click(screen.getByRole('button', { name: 'Cancel' }))
-
-      expect(screen.queryByLabelText(/^current password/i)).not.toBeInTheDocument()
-      expect(screen.getByRole('button', { name: 'Change password' })).toBeEnabled()
-      expect(changePasswordRequests()).toHaveLength(0)
-    })
-
-    it('is disabled for the Guest', async () => {
+    it('is shown to the Guest with every field and the button disabled', async () => {
       currentUser = guest
       const user = userEvent.setup()
       await renderApp()
 
       await user.click(userButton())
 
+      expect(screen.getByLabelText(/^current password/i)).toBeDisabled()
+      expect(screen.getByLabelText(/^new password/i)).toBeDisabled()
+      expect(screen.getByLabelText(/^confirm password/i)).toBeDisabled()
       expect(screen.getByRole('button', { name: 'Change password' })).toBeDisabled()
     })
   })
@@ -7545,35 +7536,109 @@ describe('Delete data', () => {
     return within(screen.getByRole('region', { name: 'Delete data' }))
   }
 
-  function bankStatementsSection() {
-    return within(screen.getByRole('region', { name: 'Bank Statements' }))
+  function transactionsCard() {
+    return within(screen.getByRole('region', { name: 'Transactions' }))
+  }
+
+  // The toggle the Bank Statement list is collapsed behind, once it has loaded and counted them.
+  function bankStatementsToggle() {
+    return transactionsCard().findByRole('button', { name: /^Bank Statements \(/ })
+  }
+
+  // Opens the User page with the Bank Statement list expanded.
+  async function openBankStatementList() {
+    const user = await openUserPage()
+    await user.click(await bankStatementsToggle())
+    return user
+  }
+
+  // Each listed Bank Statement as its checkbox names it.
+  async function listedBankStatements() {
+    await transactionsCard().findAllByRole('checkbox')
+    return transactionsCard()
+      .getAllByRole('checkbox')
+      .map((checkbox) => checkbox.closest('label')?.textContent)
   }
 
   function deleteSelected() {
-    return bankStatementsSection().getByRole('button', { name: 'Delete selected' })
+    return transactionsCard().getByRole('button', { name: 'Delete selected' })
   }
 
   function deleteAllTransactions() {
-    return deleteData().getByRole('button', { name: 'Delete all Transactions' })
+    return transactionsCard().getByRole('button', { name: 'Delete all' })
   }
 
   function deleteAllRules() {
     return deleteData().getByRole('button', { name: 'Delete all rules' })
   }
 
-  // Each listed Bank Statement as its checkbox names it.
-  async function listedBankStatements() {
-    await bankStatementsSection().findAllByRole('checkbox')
-    return bankStatementsSection()
-      .getAllByRole('checkbox')
-      .map((checkbox) => checkbox.closest('label')?.textContent)
-  }
+  it('keeps the Bank Statements collapsed on opening, counting them, and lists them from the toggle', async () => {
+    bankStatements = [august, july]
+    const user = await openUserPage()
+
+    const toggle = await bankStatementsToggle()
+    expect(toggle).toHaveAccessibleName('Bank Statements (2)')
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    expect(transactionsCard().queryAllByRole('checkbox')).toHaveLength(0)
+
+    await user.click(toggle)
+
+    expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    expect(transactionsCard().getAllByRole('checkbox')).toHaveLength(2)
+  })
+
+  it('says how many are ticked on the toggle, and keeps the ticks while collapsed', async () => {
+    bankStatements = [august, july]
+    const user = await openUserPage()
+    const toggle = await bankStatementsToggle()
+    await user.click(toggle)
+
+    await user.click(transactionsCard().getByRole('checkbox', { name: /01\.07\.2026/ }))
+    expect(toggle).toHaveAccessibleName('Bank Statements (2, 1 selected)')
+    await user.click(toggle)
+
+    expect(transactionsCard().queryAllByRole('checkbox')).toHaveLength(0)
+    await user.click(deleteSelected())
+    expect(transactionsCard().getByText('Delete 1 Bank Statement and its 1 Transaction?')).toBeInTheDocument()
+    await user.click(transactionsCard().getByRole('button', { name: 'Cancel' }))
+    await user.click(toggle)
+    expect(transactionsCard().getByRole('checkbox', { name: /01\.07\.2026/ })).toBeChecked()
+  })
+
+  it('keeps the list collapsed after a delete when it was collapsed', async () => {
+    bankStatements = [august, july]
+    handleDeleteBankStatements = () => {
+      bankStatements = [august]
+      return Response.json({ bankStatementsDeleted: 1, transactionsDeleted: 1 })
+    }
+    const user = await openBankStatementList()
+    await user.click(transactionsCard().getByRole('checkbox', { name: /01\.07\.2026/ }))
+    await user.click(await bankStatementsToggle())
+
+    await user.click(deleteSelected())
+    await user.click(transactionsCard().getByRole('button', { name: 'Confirm delete' }))
+    await deleteData().findByText('1 Bank Statement deleted.')
+
+    await waitFor(async () => expect(await bankStatementsToggle()).toHaveAccessibleName('Bank Statements (1)'))
+    expect(await bankStatementsToggle()).toHaveAttribute('aria-expanded', 'false')
+    expect(transactionsCard().queryAllByRole('checkbox')).toHaveLength(0)
+  })
+
+  it('explains Delete all beside Delete selected, both shown while the list is collapsed', async () => {
+    bankStatements = [july]
+    await openUserPage()
+    await bankStatementsToggle()
+
+    expect(transactionsCard().getByText('Deletes every Transaction, including manually-entered ones.')).toBeInTheDocument()
+    expect(deleteSelected()).toBeDisabled()
+    expect(deleteAllTransactions()).toBeInTheDocument()
+  })
 
   it('lists the Bank Statements as served, with account number, period, import date and Transactions', async () => {
     bankStatements = [august, augustOfSavings, july]
-    await openUserPage()
+    await openBankStatementList()
 
-        expect(await listedBankStatements()).toEqual([
+    expect(await listedBankStatements()).toEqual([
       '1111.22.3333301.08.2026–31.08.2026Imported 02.09.20261\u00a0000 Transactions',
       '4444.55.6666601.08.2026–31.08.2026Imported 02.09.202632 Transactions',
       '1111.22.3333301.07.2026–31.07.2026Imported 04.08.20261 Transaction',
@@ -7581,31 +7646,32 @@ describe('Delete data', () => {
     expect(fetchMock).toHaveBeenCalledWith('/api/bank-statements', undefined)
   })
 
-  it('says there are none when there are no Bank Statements, with Delete selected disabled', async () => {
+  it('says there are none instead of the toggle when there are no Bank Statements, with Delete selected disabled', async () => {
     await openUserPage()
 
-    expect(await bankStatementsSection().findByText('There are no Bank Statements.')).toBeInTheDocument()
+    expect(await transactionsCard().findByText('There are no Bank Statements.')).toBeInTheDocument()
+    expect(transactionsCard().queryByRole('button', { name: /^Bank Statements/ })).not.toBeInTheDocument()
     expect(deleteSelected()).toBeDisabled()
   })
 
-  it('says so when the Bank Statements could not be loaded', async () => {
+  it('says so instead of the toggle when the Bank Statements could not be loaded', async () => {
     bankStatements = new Response(null, { status: 500 })
     await openUserPage()
 
-    expect(await bankStatementsSection().findByRole('alert')).toHaveTextContent('Could not load the Bank Statements.')
-    expect(bankStatementsSection().queryByText('There are no Bank Statements.')).not.toBeInTheDocument()
+    expect(await transactionsCard().findByRole('alert')).toHaveTextContent('Could not load the Bank Statements.')
+    expect(transactionsCard().queryByRole('button', { name: /^Bank Statements/ })).not.toBeInTheDocument()
+    expect(transactionsCard().queryByText('There are no Bank Statements.')).not.toBeInTheDocument()
   })
 
   it('keeps Delete selected disabled until a Bank Statement is ticked', async () => {
     bankStatements = [august, july]
-    const user = await openUserPage()
-    await listedBankStatements()
+    const user = await openBankStatementList()
     expect(deleteSelected()).toBeDisabled()
 
-    await user.click(bankStatementsSection().getByRole('checkbox', { name: /01\.07\.2026/ }))
+    await user.click(transactionsCard().getByRole('checkbox', { name: /01\.07\.2026/ }))
     expect(deleteSelected()).toBeEnabled()
 
-    await user.click(bankStatementsSection().getByRole('checkbox', { name: /01\.07\.2026/ }))
+    await user.click(transactionsCard().getByRole('checkbox', { name: /01\.07\.2026/ }))
     expect(deleteSelected()).toBeDisabled()
   })
 
@@ -7617,43 +7683,41 @@ describe('Delete data', () => {
       bankStatements = [july]
       return Response.json({ bankStatementsDeleted: 2, transactionsDeleted: 1032 })
     }
-    const user = await openUserPage()
-    await listedBankStatements()
+    const user = await openBankStatementList()
 
-    await user.click(bankStatementsSection().getByRole('checkbox', { name: /^1111\.22\.3333301\.08/ }))
-    await user.click(bankStatementsSection().getByRole('checkbox', { name: /^4444\.55\.66666/ }))
+    await user.click(transactionsCard().getByRole('checkbox', { name: /^1111\.22\.3333301\.08/ }))
+    await user.click(transactionsCard().getByRole('checkbox', { name: /^4444\.55\.66666/ }))
     await user.click(deleteSelected())
 
     expect(deleted).toBeUndefined()
     expect(
       // The matcher reads the non-breaking space nb-NO groups thousands with as a space.
-      bankStatementsSection().getByText('Delete 2 Bank Statements and their 1 032 Transactions?'),
+      transactionsCard().getByText('Delete 2 Bank Statements and their 1 032 Transactions?'),
     ).toBeInTheDocument()
 
-    await user.click(bankStatementsSection().getByRole('button', { name: 'Confirm delete' }))
+    await user.click(transactionsCard().getByRole('button', { name: 'Confirm delete' }))
 
     expect(deleted).toEqual([3, 5])
     expect(await deleteData().findByRole('status')).toHaveTextContent('2 Bank Statements deleted.')
     await waitFor(async () =>
       expect(await listedBankStatements()).toEqual(['1111.22.3333301.07.2026–31.07.2026Imported 04.08.20261 Transaction']),
     )
-    expect(bankStatementsSection().queryByRole('button', { name: 'Confirm delete' })).not.toBeInTheDocument()
+    expect(transactionsCard().queryByRole('button', { name: 'Confirm delete' })).not.toBeInTheDocument()
     expect(deleteSelected()).toBeDisabled()
     // Stays until the next action.
     expect(deleteData().getByRole('status')).toHaveTextContent('2 Bank Statements deleted.')
-    await user.click(bankStatementsSection().getByRole('checkbox', { name: /01\.07\.2026/ }))
+    await user.click(transactionsCard().getByRole('checkbox', { name: /01\.07\.2026/ }))
     expect(deleteData().getByRole('status')).toBeEmptyDOMElement()
   })
 
   it('words the question for one Bank Statement of one Transaction', async () => {
     bankStatements = [august, july]
-    const user = await openUserPage()
-    await listedBankStatements()
+    const user = await openBankStatementList()
 
-    await user.click(bankStatementsSection().getByRole('checkbox', { name: /01\.07\.2026/ }))
+    await user.click(transactionsCard().getByRole('checkbox', { name: /01\.07\.2026/ }))
     await user.click(deleteSelected())
 
-    expect(bankStatementsSection().getByText('Delete 1 Bank Statement and its 1 Transaction?')).toBeInTheDocument()
+    expect(transactionsCard().getByText('Delete 1 Bank Statement and its 1 Transaction?')).toBeInTheDocument()
   })
 
   it('deletes nothing when the question is cancelled, keeping the ticks', async () => {
@@ -7663,31 +7727,29 @@ describe('Delete data', () => {
       deleted = true
       return Response.json({ bankStatementsDeleted: 1, transactionsDeleted: 1 })
     }
-    const user = await openUserPage()
-    await listedBankStatements()
+    const user = await openBankStatementList()
 
-    await user.click(bankStatementsSection().getByRole('checkbox', { name: /01\.07\.2026/ }))
+    await user.click(transactionsCard().getByRole('checkbox', { name: /01\.07\.2026/ }))
     await user.click(deleteSelected())
-    await user.click(bankStatementsSection().getByRole('button', { name: 'Cancel' }))
+    await user.click(transactionsCard().getByRole('button', { name: 'Cancel' }))
 
     expect(deleted).toBe(false)
-    expect(bankStatementsSection().queryByRole('button', { name: 'Confirm delete' })).not.toBeInTheDocument()
-    expect(bankStatementsSection().getByRole('checkbox', { name: /01\.07\.2026/ })).toBeChecked()
+    expect(transactionsCard().queryByRole('button', { name: 'Confirm delete' })).not.toBeInTheDocument()
+    expect(transactionsCard().getByRole('checkbox', { name: /01\.07\.2026/ })).toBeChecked()
   })
 
   it('says so when the delete fails, leaving the list and the ticks as they were', async () => {
     bankStatements = [august, july]
     handleDeleteBankStatements = () => new Response(null, { status: 500 })
-    const user = await openUserPage()
-    await listedBankStatements()
+    const user = await openBankStatementList()
 
-    await user.click(bankStatementsSection().getByRole('checkbox', { name: /01\.07\.2026/ }))
+    await user.click(transactionsCard().getByRole('checkbox', { name: /01\.07\.2026/ }))
     await user.click(deleteSelected())
-    await user.click(bankStatementsSection().getByRole('button', { name: 'Confirm delete' }))
+    await user.click(transactionsCard().getByRole('button', { name: 'Confirm delete' }))
 
     expect(await deleteData().findByRole('alert')).toHaveTextContent('Deleting failed (500).')
     expect(await listedBankStatements()).toHaveLength(2)
-    expect(bankStatementsSection().getByRole('checkbox', { name: /01\.07\.2026/ })).toBeChecked()
+    expect(transactionsCard().getByRole('checkbox', { name: /01\.07\.2026/ })).toBeChecked()
     expect(deleteSelected()).toBeEnabled()
   })
 
@@ -7701,19 +7763,18 @@ describe('Delete data', () => {
         { status: 400 },
       )
     }
-    const user = await openUserPage()
-    await listedBankStatements()
+    const user = await openBankStatementList()
 
-    await user.click(bankStatementsSection().getByRole('checkbox', { name: /^1111\.22\.3333301\.08/ }))
-    await user.click(bankStatementsSection().getByRole('checkbox', { name: /01\.07\.2026/ }))
+    await user.click(transactionsCard().getByRole('checkbox', { name: /^1111\.22\.3333301\.08/ }))
+    await user.click(transactionsCard().getByRole('checkbox', { name: /01\.07\.2026/ }))
     await user.click(deleteSelected())
-    await user.click(bankStatementsSection().getByRole('button', { name: 'Confirm delete' }))
+    await user.click(transactionsCard().getByRole('button', { name: 'Confirm delete' }))
 
     expect(await deleteData().findByRole('alert')).toHaveTextContent(
       'A Bank Statement to delete no longer exists. Nothing was deleted.',
     )
-    await waitFor(() => expect(bankStatementsSection().getAllByRole('checkbox')).toHaveLength(1))
-    expect(bankStatementsSection().getByRole('checkbox', { name: /^1111\.22\.3333301\.08/ })).toBeChecked()
+    await waitFor(() => expect(transactionsCard().getAllByRole('checkbox')).toHaveLength(1))
+    expect(transactionsCard().getByRole('checkbox', { name: /^1111\.22\.3333301\.08/ })).toBeChecked()
   })
 
   it('asks with the count of every Transaction, then deletes them all, says how many and lists what is left', async () => {
@@ -7738,7 +7799,7 @@ describe('Delete data', () => {
 
     expect(deleted).toBe(true)
     expect(await deleteData().findByRole('status')).toHaveTextContent('1 032 Transactions deleted.')
-    expect(await bankStatementsSection().findByText('There are no Bank Statements.')).toBeInTheDocument()
+    expect(await transactionsCard().findByText('There are no Bank Statements.')).toBeInTheDocument()
     await waitFor(() => expect(deleteAllTransactions()).toBeDisabled())
     expect(deleteData().queryByRole('button', { name: 'Confirm delete' })).not.toBeInTheDocument()
   })
@@ -7760,7 +7821,7 @@ describe('Delete data', () => {
     await openUserPage()
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/user/delete-counts', undefined))
-    await bankStatementsSection().findByText('There are no Bank Statements.')
+    await transactionsCard().findByText('There are no Bank Statements.')
     expect(deleteAllTransactions()).toBeDisabled()
   })
 
@@ -7771,12 +7832,12 @@ describe('Delete data', () => {
       deleteCounts = new Response(null, { status: 500 })
       return Response.json({ bankStatementsDeleted: 1, transactionsDeleted: 1 })
     }
-    const user = await openUserPage()
+    const user = await openBankStatementList()
     await waitFor(() => expect(deleteAllTransactions()).toBeEnabled())
 
-    await user.click(bankStatementsSection().getByRole('checkbox', { name: /01\.07\.2026/ }))
+    await user.click(transactionsCard().getByRole('checkbox', { name: /01\.07\.2026/ }))
     await user.click(deleteSelected())
-    await user.click(bankStatementsSection().getByRole('button', { name: 'Confirm delete' }))
+    await user.click(transactionsCard().getByRole('button', { name: 'Confirm delete' }))
 
     expect(await deleteData().findByText('Could not count the Transactions.')).toBeInTheDocument()
     expect(deleteAllTransactions()).toBeDisabled()
@@ -7790,12 +7851,11 @@ describe('Delete data', () => {
       deleteCounts = { transactionCount: 1000 }
       return Response.json({ bankStatementsDeleted: 1, transactionsDeleted: 1 })
     }
-    const user = await openUserPage()
-    await listedBankStatements()
+    const user = await openBankStatementList()
 
-    await user.click(bankStatementsSection().getByRole('checkbox', { name: /01\.07\.2026/ }))
+    await user.click(transactionsCard().getByRole('checkbox', { name: /01\.07\.2026/ }))
     await user.click(deleteSelected())
-    await user.click(bankStatementsSection().getByRole('button', { name: 'Confirm delete' }))
+    await user.click(transactionsCard().getByRole('button', { name: 'Confirm delete' }))
     await deleteData().findByText('1 Bank Statement deleted.')
     await user.click(deleteAllTransactions())
 
@@ -7806,7 +7866,7 @@ describe('Delete data', () => {
     bankStatements = [july]
     deleteCounts = { transactionCount: 1 }
     handleDeleteAllTransactions = () => new Response(null, { status: 500 })
-    const user = await openUserPage()
+    const user = await openBankStatementList()
     await waitFor(() => expect(deleteAllTransactions()).toBeEnabled())
 
     await user.click(deleteAllTransactions())
@@ -7916,9 +7976,10 @@ describe('Delete data', () => {
     await renderApp()
     await user.upload(screen.getByLabelText(/bank statement pdf/i), statementPdf)
     await user.click(screen.getByRole('button', { name: 'User' }))
+    await user.click(await bankStatementsToggle())
     await listedBankStatements()
 
-    await user.click(bankStatementsSection().getByRole('checkbox', { name: /01\.07\.2026/ }))
+    await user.click(transactionsCard().getByRole('checkbox', { name: /01\.07\.2026/ }))
     expect(deleteSelected()).toBeDisabled()
     expect(deleteAllTransactions()).toBeDisabled()
     expect(deleteAllRules()).toBeDisabled()
@@ -7934,7 +7995,7 @@ describe('Delete data', () => {
     await waitFor(() => expect(deleteAllRules()).toBeEnabled())
     expect(deleteData().queryByText('Deleting waits for the Upload in progress to finish.')).not.toBeInTheDocument()
     await waitFor(async () => expect(await listedBankStatements()).toHaveLength(2))
-    expect(bankStatementsSection().getByRole('checkbox', { name: /01\.07\.2026/ })).toBeChecked()
+    expect(transactionsCard().getByRole('checkbox', { name: /01\.07\.2026/ })).toBeChecked()
   })
 
   it('shows what is left on the Dashboard and the Transactions page after a delete', async () => {
@@ -7959,10 +8020,11 @@ describe('Delete data', () => {
     expect(await screen.findByText('Rema 1000')).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'User' }))
+    await user.click(await bankStatementsToggle())
     await listedBankStatements()
-    await user.click(bankStatementsSection().getByRole('checkbox', { name: /01\.07\.2026/ }))
+    await user.click(transactionsCard().getByRole('checkbox', { name: /01\.07\.2026/ }))
     await user.click(deleteSelected())
-    await user.click(bankStatementsSection().getByRole('button', { name: 'Confirm delete' }))
+    await user.click(transactionsCard().getByRole('button', { name: 'Confirm delete' }))
     await deleteData().findByText('1 Bank Statement deleted.')
 
     await user.click(screen.getByRole('button', { name: 'PersonligFinans' }))
