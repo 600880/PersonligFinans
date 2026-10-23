@@ -67,8 +67,7 @@ public static class UserEndpoints
         var identityErrors = new List<IdentityError>();
         foreach (var validator in userManager.UserValidators)
             identityErrors.AddRange((await validator.ValidateAsync(userManager, user)).Errors);
-        foreach (var validator in userManager.PasswordValidators)
-            identityErrors.AddRange((await validator.ValidateAsync(userManager, user, password)).Errors);
+        identityErrors.AddRange(await PasswordRuleErrors(userManager, user, password));
         var fieldErrors = FieldErrors(identityErrors);
         // The Guest's email, which is taken, and any other on its domain, which is kept for the
         // Guest.
@@ -110,7 +109,7 @@ public static class UserEndpoints
 
         var result = await signInManager.PasswordSignInAsync(email, password, isPersistent: true, lockoutOnFailure: true);
         if (result.IsLockedOut)
-            return Locked();
+            return EmailLocked();
         if (!result.Succeeded)
             return WrongEmailOrPassword();
 
@@ -165,14 +164,11 @@ public static class UserEndpoints
         // locks it gets the lockout's answer.
         var check = await signInManager.CheckPasswordSignInAsync(user, currentPassword, lockoutOnFailure: true);
         if (check.IsLockedOut)
-            return Locked();
+            return EmailLocked();
         if (!check.Succeeded)
             errors["currentPassword"] = ["Wrong password."];
 
-        var passwordErrors = new List<IdentityError>();
-        foreach (var validator in userManager.PasswordValidators)
-            passwordErrors.AddRange((await validator.ValidateAsync(userManager, user, newPassword)).Errors);
-        if (FieldErrors(passwordErrors).TryGetValue("password", out var newPasswordErrors))
+        if (FieldErrors(await PasswordRuleErrors(userManager, user, newPassword)).TryGetValue("password", out var newPasswordErrors))
             errors["newPassword"] = newPasswordErrors;
         if (errors.Count > 0)
             return Results.ValidationProblem(errors);
@@ -191,7 +187,18 @@ public static class UserEndpoints
         return Results.NoContent();
     }
 
-    private static IResult Locked() =>
+    // Every way the password breaks Sign up's rules, found without setting it, so that the other
+    // fields can be reported along with it.
+    private static async Task<List<IdentityError>> PasswordRuleErrors(
+        UserManager<IdentityUser> userManager, IdentityUser user, string password)
+    {
+        var errors = new List<IdentityError>();
+        foreach (var validator in userManager.PasswordValidators)
+            errors.AddRange((await validator.ValidateAsync(userManager, user, password)).Errors);
+        return errors;
+    }
+
+    private static IResult EmailLocked() =>
         Results.Problem(
             detail: "Too many failed sign-ins, so this email is locked for a few minutes. Try again later.",
             statusCode: StatusCodes.Status429TooManyRequests);

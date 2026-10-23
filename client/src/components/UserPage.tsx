@@ -48,7 +48,7 @@ export function UserPage({ user, onSignedOut }: UserPageProps) {
         <button
           type="button"
           onClick={() => void handleSignOut()}
-          className="shrink-0 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-900 shadow-sm hover:bg-slate-100"
+          className={`shrink-0 ${secondaryButtonClassName}`}
         >
           Sign out
         </button>
