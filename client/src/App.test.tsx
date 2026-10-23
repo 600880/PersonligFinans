@@ -317,6 +317,25 @@ async function renderApp() {
   await screen.findByRole('navigation')
 }
 
+// The device's light or dark setting, which System follows and can be changed while the app is open.
+function deviceSetting(dark: boolean) {
+  const listeners = new Set<() => void>()
+  const query = {
+    get matches() {
+      return dark
+    },
+    addEventListener: (_type: string, listener: () => void) => listeners.add(listener),
+    removeEventListener: (_type: string, listener: () => void) => listeners.delete(listener),
+  }
+  vi.stubGlobal('matchMedia', () => query)
+  return {
+    change(toDark: boolean) {
+      dark = toDark
+      act(() => listeners.forEach((listener) => listener()))
+    },
+  }
+}
+
 // The ways to add Transactions, rather than the Add transactions button that opens them as a menu on
 // a narrow screen.
 function addActions() {
@@ -5642,6 +5661,74 @@ describe('Dashboard', () => {
         expect(rowSwatch(trend(), 'Uncategorized')).toBe('rgb(148, 163, 184)')
       })
 
+      // How bright a CSS colour is, as the sum of its red, green and blue.
+      function brightness(colour: string) {
+        return colour.match(/\d+/g)!.reduce((sum, channel) => sum + Number(channel), 0)
+      }
+
+      // The colours of the donut's slices, as CSS colours like the swatches.
+      function sliceColours() {
+        return [...dashboard().querySelectorAll('.recharts-pie-sector path')].map((sector) => {
+          const swatch = document.createElement('span')
+          swatch.style.backgroundColor = sector.getAttribute('fill')!
+          return swatch.style.backgroundColor
+        })
+      }
+
+      it('draws a dark Category lighter in Dark, in the same colour in the donut, its legend and the trend', async () => {
+        localStorage.setItem('appearance', 'dark')
+        categoriesServed = [{ ...categories[0], colour: '#104281' }, categories[1]]
+        months = [
+          { year: 2026, month: 9 },
+          { year: 2026, month: 8 },
+        ]
+        handleSpending = () => Response.json(septemberSpending)
+        handleMonthlySpending = (from, to) =>
+          Response.json(monthlySpending(from, to, { '2026-9': septemberSpending.slices }))
+
+        await renderApp()
+
+        await waitFor(() => expect(trendTable()).toHaveLength(5))
+        await waitFor(() => expect(legendRows()).toHaveLength(3))
+        const groceries = rowSwatch(dashboard(), 'Groceries')
+        expect(brightness(groceries)).toBeGreaterThan(brightness('rgb(16, 66, 129)'))
+        expect(sliceColours()).toContain(groceries)
+        for (const name of ['Other', 'Uncategorized', 'Groceries']) {
+          expect(rowSwatch(trend(), name)).toBe(rowSwatch(dashboard(), name))
+        }
+        expect(brightness(rowSwatch(trend(), 'Total'))).toBeGreaterThan(brightness('rgb(30, 41, 59)'))
+      })
+
+      it('redraws the colours when the Appearance changes while the Dashboard is open', async () => {
+        localStorage.setItem('appearance', 'system')
+        const device = deviceSetting(false)
+        months = [
+          { year: 2026, month: 9 },
+          { year: 2026, month: 8 },
+        ]
+        handleSpending = () => Response.json(septemberSpending)
+        handleMonthlySpending = (from, to) =>
+          Response.json(monthlySpending(from, to, { '2026-9': septemberSpending.slices }))
+        await renderApp()
+        await waitFor(() => expect(trendTable()).toHaveLength(5))
+        await waitFor(() => expect(legendRows()).toHaveLength(3))
+        expect(rowSwatch(dashboard(), 'Groceries')).toBe('rgb(42, 120, 214)')
+
+        device.change(true)
+
+        const groceries = rowSwatch(dashboard(), 'Groceries')
+        expect(brightness(groceries)).toBeGreaterThan(brightness('rgb(42, 120, 214)'))
+        expect(sliceColours()).toContain(groceries)
+        expect(rowSwatch(trend(), 'Groceries')).toBe(groceries)
+        expect(rowSwatch(trend(), 'Total')).not.toBe('rgb(30, 41, 59)')
+
+        device.change(false)
+
+        expect(rowSwatch(dashboard(), 'Groceries')).toBe('rgb(42, 120, 214)')
+        expect(rowSwatch(trend(), 'Groceries')).toBe('rgb(42, 120, 214)')
+        expect(rowSwatch(trend(), 'Total')).toBe('rgb(30, 41, 59)')
+      })
+
       it('opens with Total switched on and the Categories off, and switches any of them', async () => {
         months = [
           { year: 2026, month: 9 },
@@ -7228,25 +7315,6 @@ describe('Appearance', () => {
 
   function isDark() {
     return document.documentElement.classList.contains('dark')
-  }
-
-  // The device's light or dark setting, which System follows and can be changed while the app is open.
-  function deviceSetting(dark: boolean) {
-    const listeners = new Set<() => void>()
-    const query = {
-      get matches() {
-        return dark
-      },
-      addEventListener: (_type: string, listener: () => void) => listeners.add(listener),
-      removeEventListener: (_type: string, listener: () => void) => listeners.delete(listener),
-    }
-    vi.stubGlobal('matchMedia', () => query)
-    return {
-      change(toDark: boolean) {
-        dark = toDark
-        act(() => listeners.forEach((listener) => listener()))
-      },
-    }
   }
 
   it('is Light until something is picked, even on a dark device', async () => {
