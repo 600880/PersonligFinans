@@ -6,9 +6,13 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using PersonligFinans.Api.BankStatements;
+using PersonligFinans.Api.Bookmarks;
+using PersonligFinans.Api.Categories;
 using PersonligFinans.Api.CategorizationRules;
 using PersonligFinans.Api.Data;
+using PersonligFinans.Api.Folders;
 using PersonligFinans.Api.Transactions;
+using PersonligFinans.Api.Users;
 using UglyToad.PdfPig.Content;
 using UglyToad.PdfPig.Core;
 using UglyToad.PdfPig.Fonts.Standard14Fonts;
@@ -940,5 +944,113 @@ public class BankStatementEndpointsTests : IAsyncLifetime
         var problem = await response.Content.ReadFromJsonAsync<ValidationProblemDetails>();
         Assert.Equal(["A Bank Statement to delete no longer exists. Nothing was deleted."], problem!.Errors["ids"]);
         Assert.Equal([statement.Id], (await ListedBankStatements()).Select(s => s.Id));
+    }
+
+    private Task<HttpResponseMessage> DeleteAllTransactions() => _client.DeleteAsync("/api/transactions");
+
+    private async Task<int> AddManualTransaction(string date, string description)
+    {
+        var response = await _client.PostAsJsonAsync("/api/transactions", new
+        {
+            date, description, amount = -100m, categoryId = _categories.Other,
+        });
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        return (await response.Content.ReadFromJsonAsync<TransactionResponse>())!.Id;
+    }
+
+    private async Task<List<TransactionMonthResponse>> MonthsWithTransactions() =>
+        (await _client.GetFromJsonAsync<List<TransactionMonthResponse>>("/api/transactions/months"))!;
+
+    [Fact]
+    public async Task DeleteAllTransactions_RemovesTheManualAndImportedOnes_WithEveryBankStatementAndBookmark()
+    {
+        await Created(await Upload(StatementOfMonth("1111.11.11111", 7, "Kafé", "Frisør")));
+        await Created(await Upload(StatementOfMonth("2222.22.22222", 8, "Bakeri", "Rema 1000", "Kiosk")));
+        var manual = await AddManualTransaction("2026-09-03", "Kiosk");
+        var imported = (await TransactionsOfMonth(8)).First(t => t.Description == "Rema 1000");
+        foreach (var id in new[] { manual, imported.Id })
+            Assert.Equal(HttpStatusCode.OK, (await _client.PostAsync($"/api/transactions/{id}/bookmark", null)).StatusCode);
+
+        var response = await DeleteAllTransactions();
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(
+            new DeletedTransactionsResponse(TransactionsDeleted: 6),
+            await response.Content.ReadFromJsonAsync<DeletedTransactionsResponse>());
+        Assert.Empty(await MonthsWithTransactions());
+        Assert.Empty(await ListedBankStatements());
+        Assert.Empty((await _client.GetFromJsonAsync<List<TransactionResponse>>("/api/bookmarks"))!);
+    }
+
+    private async Task<DeleteCountsResponse> DeleteCounts() =>
+        (await _client.GetFromJsonAsync<DeleteCountsResponse>("/api/user/delete-counts"))!;
+
+    [Fact]
+    public async Task GetDeleteCounts_CountsTheTransactions_ThatDeletingAllThenDeletes()
+    {
+        await Created(await Upload(StatementOfMonth("1111.11.11111", 7, "Kafé", "Frisør", "Bakeri")));
+        await AddManualTransaction("2026-09-03", "Kiosk");
+
+        var counted = (await DeleteCounts()).TransactionCount;
+        var response = await DeleteAllTransactions();
+
+        Assert.Equal(4, counted);
+        Assert.Equal(counted, (await response.Content.ReadFromJsonAsync<DeletedTransactionsResponse>())!.TransactionsDeleted);
+        Assert.Equal(0, (await DeleteCounts()).TransactionCount);
+    }
+
+    [Fact]
+    public async Task DeleteAllTransactions_KeepsTheFoldersLastUsedFolderCategoriesAndRules_WithTheirMarks()
+    {
+        await Created(await UploadAddingRuleFor("kafé", NewUploadId()));
+        var folder = await _client.PostAsJsonAsync("/api/folders", new { name = "Tax deductible" });
+        Assert.Equal(HttpStatusCode.Created, folder.StatusCode);
+        var folderId = (await folder.Content.ReadFromJsonAsync<FolderResponse>())!.Id;
+        var kafé = Assert.Single(await TransactionsOfMonth(8));
+        Assert.Equal(
+            HttpStatusCode.OK,
+            (await _client.PutAsJsonAsync($"/api/transactions/{kafé.Id}/bookmark", new { folderId })).StatusCode);
+        var rules = await _client.GetFromJsonAsync<List<CategorizationRuleResponse>>("/api/categorization-rules");
+        var categories = await CategoryNamesById();
+
+        Assert.Equal(HttpStatusCode.OK, (await DeleteAllTransactions()).StatusCode);
+
+        Assert.Equal(rules, await _client.GetFromJsonAsync<List<CategorizationRuleResponse>>("/api/categorization-rules"));
+        var added = Assert.Single(await AddedRules());
+        Assert.Equal(("kafé", true, true), (added.Keyword, added.AiGenerated, added.IsNew));
+        Assert.Equal(categories, await CategoryNamesById());
+        Assert.Equal(
+            [new FolderResponse(folderId, "Tax deductible")],
+            (await _client.GetFromJsonAsync<List<FolderResponse>>("/api/folders"))!);
+        // The next Bookmark still goes into the last used folder.
+        var next = await AddManualTransaction("2026-09-03", "Kiosk");
+        var bookmarked = await _client.PostAsync($"/api/transactions/{next}/bookmark", null);
+        Assert.Equal(new BookmarkResponse(folderId), await bookmarked.Content.ReadFromJsonAsync<BookmarkResponse>());
+    }
+
+    private async Task<Dictionary<int, string>> CategoryNamesById() =>
+        (await _client.GetFromJsonAsync<List<CategoryResponse>>("/api/categories"))!.ToDictionary(c => c.Id, c => c.Name);
+
+    [Fact]
+    public async Task DeleteAllTransactions_LetsEachBankStatementBeImportedAgain()
+    {
+        var july = StatementOfMonth("1111.11.11111", 7, "Kafé", "Frisør");
+        var august = StatementOfMonth("2222.22.22222", 8, "Bakeri");
+        await Created(await Upload(july));
+        await Created(await Upload(august));
+        Assert.Equal(HttpStatusCode.OK, (await DeleteAllTransactions()).StatusCode);
+
+        Assert.Equal(2, (await Created(await Upload(july))).TransactionCount);
+        Assert.Equal(1, (await Created(await Upload(august))).TransactionCount);
+        Assert.Equal(2, (await ListedBankStatements()).Count);
+    }
+
+    [Fact]
+    public async Task DeleteAllTransactions_WithNoTransactions_DeletesNone()
+    {
+        var response = await DeleteAllTransactions();
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(new DeletedTransactionsResponse(0), await response.Content.ReadFromJsonAsync<DeletedTransactionsResponse>());
     }
 }

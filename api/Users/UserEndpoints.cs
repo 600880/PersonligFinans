@@ -10,6 +10,10 @@ public record CredentialsRequest(string? Email, string? Password);
 
 public record ChangePasswordRequest(string? CurrentPassword, string? NewPassword);
 
+// What the User page's confirm dialogs count, so each asks with the exact number it deletes. The Bank
+// Statements' counts come from their list instead.
+public record DeleteCountsResponse(int TransactionCount);
+
 // The signed-in User, by their email, and whether they are the Guest.
 public record UserResponse(string Email, bool IsGuest)
 {
@@ -41,6 +45,8 @@ public static class UserEndpoints
 
         // Like Sign in it takes only JSON, which another site's form can't send.
         api.MapPost("/change-password", ChangePassword);
+
+        api.MapGet("/delete-counts", DeleteCounts);
     }
 
     // Creates a User whose user name is their email, with copies of the seeds of their own, and signs
@@ -211,6 +217,10 @@ public static class UserEndpoints
         await signInManager.SignOutAsync();
         return Results.NoContent();
     }
+
+    // Every Transaction of the User, manually-entered and imported, which Delete all Transactions deletes.
+    private static async Task<DeleteCountsResponse> DeleteCounts(AppDbContext db) =>
+        new(await db.Transactions.CountAsync());
 
     // The trimmed email and the password, and an error for each that is missing.
     private static (string Email, string Password, Dictionary<string, string[]> Errors) ValidateRequired(CredentialsRequest request)

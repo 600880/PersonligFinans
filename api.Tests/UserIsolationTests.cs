@@ -15,6 +15,7 @@ using PersonligFinans.Api.Folders;
 using PersonligFinans.Api.Receipts;
 using PersonligFinans.Api.Spending;
 using PersonligFinans.Api.Transactions;
+using PersonligFinans.Api.Users;
 
 namespace PersonligFinans.Api.Tests;
 
@@ -408,6 +409,25 @@ public class UserIsolationTests : IAsyncLifetime
             (await _a.GetFromJsonAsync<List<ListedBankStatementResponse>>("/api/bank-statements"))!.Select(s => s.Id));
         Assert.Single(await August(_a));
         Assert.Single(await August(_b));
+    }
+
+    [Fact]
+    public async Task DeletingAllTransactions_DeletesAndCountsOnlyThatUsersOwn()
+    {
+        var theirId = await Import(_a, Statement(AccountNumber()));
+        await AddTransaction(_a, _categoriesA.Other);
+        await Import(_b, Statement(AccountNumber()));
+
+        Assert.Equal(1, (await _b.GetFromJsonAsync<DeleteCountsResponse>("/api/user/delete-counts"))!.TransactionCount);
+        var response = await _b.DeleteAsync("/api/transactions");
+
+        Assert.Equal(1, (await response.Content.ReadFromJsonAsync<DeletedTransactionsResponse>())!.TransactionsDeleted);
+        Assert.Empty(await August(_b));
+        Assert.Equal(2, (await August(_a)).Count);
+        Assert.Equal(
+            [theirId],
+            (await _a.GetFromJsonAsync<List<ListedBankStatementResponse>>("/api/bank-statements"))!.Select(s => s.Id));
+        Assert.Equal(2, (await _a.GetFromJsonAsync<DeleteCountsResponse>("/api/user/delete-counts"))!.TransactionCount);
     }
 
     [Fact]

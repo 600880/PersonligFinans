@@ -67,6 +67,9 @@ let handleUpload: UploadHandler
 // The User's Bank Statements as the list endpoint returns them, and the delete of a set of them.
 let bankStatements: ListedBankStatement[] | Response
 let handleDeleteBankStatements: (body: { ids: number[] }) => Response | Promise<Response>
+// The counts the User page's confirm dialogs ask with.
+let deleteCounts: { transactionCount: number } | Response
+let handleDeleteAllTransactions: () => Response | Promise<Response>
 let rules: { id: number; keyword: string; categoryId: number; aiGenerated: boolean; isNew: boolean }[] | Response
 let handleAddRule: PostHandler
 let handleAddCategory: PostHandler
@@ -176,6 +179,10 @@ const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
   if (folderUrl && init?.method === 'DELETE') return handleDeleteFolder(Number(folderUrl[1]))
   const transactionUrl = /^\/api\/transactions\/(\d+)$/.exec(url)
   if (transactionUrl && init?.method === 'DELETE') return handleDeleteTransaction(Number(transactionUrl[1]))
+  if (url === '/api/transactions' && init?.method === 'DELETE') return handleDeleteAllTransactions()
+  if (url === '/api/user/delete-counts') {
+    return deleteCounts instanceof Response ? deleteCounts : Response.json(deleteCounts)
+  }
   if (url === '/api/transactions/months') {
     return months instanceof Response ? months : Response.json(months)
   }
@@ -223,6 +230,8 @@ beforeEach(() => {
   handleUpload = () => Response.json(importedStatement, { status: 201 })
   bankStatements = []
   handleDeleteBankStatements = ({ ids }) => Response.json({ bankStatementsDeleted: ids.length, transactionsDeleted: 0 })
+  deleteCounts = { transactionCount: 0 }
+  handleDeleteAllTransactions = () => Response.json({ transactionsDeleted: 0 })
   rules = [
     { id: 1, keyword: 'kiwi', categoryId: 1, aiGenerated: false, isNew: false },
     { id: 2, keyword: 'overføring mellom egne kontoer', categoryId: 13, aiGenerated: false, isNew: false },
@@ -7533,6 +7542,10 @@ describe('Delete data', () => {
     return bankStatementsSection().getByRole('button', { name: 'Delete selected' })
   }
 
+  function deleteAllTransactions() {
+    return deleteData().getByRole('button', { name: 'Delete all Transactions' })
+  }
+
   // Each listed Bank Statement as its checkbox names it.
   async function listedBankStatements() {
     await bankStatementsSection().findAllByRole('checkbox')
@@ -7688,6 +7701,107 @@ describe('Delete data', () => {
     expect(bankStatementsSection().getByRole('checkbox', { name: /^1111\.22\.3333301\.08/ })).toBeChecked()
   })
 
+  it('asks with the count of every Transaction, then deletes them all, says how many and lists what is left', async () => {
+    bankStatements = [august, augustOfSavings]
+    deleteCounts = { transactionCount: 1032 }
+    let deleted = false
+    handleDeleteAllTransactions = () => {
+      deleted = true
+      bankStatements = []
+      deleteCounts = { transactionCount: 0 }
+      return Response.json({ transactionsDeleted: 1032 })
+    }
+    const user = await openUserPage()
+    await waitFor(() => expect(deleteAllTransactions()).toBeEnabled())
+
+    await user.click(deleteAllTransactions())
+
+    expect(deleted).toBe(false)
+    expect(deleteData().getByText('Delete all 1 032 Transactions?')).toBeInTheDocument()
+
+    await user.click(deleteData().getByRole('button', { name: 'Confirm delete' }))
+
+    expect(deleted).toBe(true)
+    expect(await deleteData().findByRole('status')).toHaveTextContent('1 032 Transactions deleted.')
+    expect(await bankStatementsSection().findByText('There are no Bank Statements.')).toBeInTheDocument()
+    await waitFor(() => expect(deleteAllTransactions()).toBeDisabled())
+    expect(deleteData().queryByRole('button', { name: 'Confirm delete' })).not.toBeInTheDocument()
+  })
+
+  it('words the question and the status line for one Transaction', async () => {
+    deleteCounts = { transactionCount: 1 }
+    handleDeleteAllTransactions = () => Response.json({ transactionsDeleted: 1 })
+    const user = await openUserPage()
+    await waitFor(() => expect(deleteAllTransactions()).toBeEnabled())
+
+    await user.click(deleteAllTransactions())
+    expect(deleteData().getByText('Delete all 1 Transaction?')).toBeInTheDocument()
+    await user.click(deleteData().getByRole('button', { name: 'Confirm delete' }))
+
+    expect(await deleteData().findByRole('status')).toHaveTextContent('1 Transaction deleted.')
+  })
+
+  it('disables Delete all Transactions when there are none', async () => {
+    await openUserPage()
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/user/delete-counts', undefined))
+    await bankStatementsSection().findByText('There are no Bank Statements.')
+    expect(deleteAllTransactions()).toBeDisabled()
+  })
+
+  it('keeps Delete all Transactions disabled, saying so, when counting them again fails', async () => {
+    bankStatements = [july]
+    deleteCounts = { transactionCount: 1001 }
+    handleDeleteBankStatements = () => {
+      deleteCounts = new Response(null, { status: 500 })
+      return Response.json({ bankStatementsDeleted: 1, transactionsDeleted: 1 })
+    }
+    const user = await openUserPage()
+    await waitFor(() => expect(deleteAllTransactions()).toBeEnabled())
+
+    await user.click(bankStatementsSection().getByRole('checkbox', { name: /01\.07\.2026/ }))
+    await user.click(deleteSelected())
+    await user.click(bankStatementsSection().getByRole('button', { name: 'Confirm delete' }))
+
+    expect(await deleteData().findByText('Could not count the Transactions.')).toBeInTheDocument()
+    expect(deleteAllTransactions()).toBeDisabled()
+  })
+
+  it('counts the Transactions again after deleting Bank Statements', async () => {
+    bankStatements = [august, july]
+    deleteCounts = { transactionCount: 1001 }
+    handleDeleteBankStatements = () => {
+      bankStatements = [august]
+      deleteCounts = { transactionCount: 1000 }
+      return Response.json({ bankStatementsDeleted: 1, transactionsDeleted: 1 })
+    }
+    const user = await openUserPage()
+    await listedBankStatements()
+
+    await user.click(bankStatementsSection().getByRole('checkbox', { name: /01\.07\.2026/ }))
+    await user.click(deleteSelected())
+    await user.click(bankStatementsSection().getByRole('button', { name: 'Confirm delete' }))
+    await deleteData().findByText('1 Bank Statement deleted.')
+    await user.click(deleteAllTransactions())
+
+    expect(await deleteData().findByText('Delete all 1 000 Transactions?')).toBeInTheDocument()
+  })
+
+  it('says so when deleting all Transactions fails, leaving them to try again', async () => {
+    bankStatements = [july]
+    deleteCounts = { transactionCount: 1 }
+    handleDeleteAllTransactions = () => new Response(null, { status: 500 })
+    const user = await openUserPage()
+    await waitFor(() => expect(deleteAllTransactions()).toBeEnabled())
+
+    await user.click(deleteAllTransactions())
+    await user.click(deleteData().getByRole('button', { name: 'Confirm delete' }))
+
+    expect(await deleteData().findByRole('alert')).toHaveTextContent('Deleting failed (500).')
+    expect(await listedBankStatements()).toHaveLength(1)
+    expect(deleteAllTransactions()).toBeEnabled()
+  })
+
   it('disables deleting while an Upload is in progress, saying why, and enables it once it finishes', async () => {
     bankStatements = [july]
     let respond: (response: Response) => void = () => {}
@@ -7700,13 +7814,16 @@ describe('Delete data', () => {
 
     await user.click(bankStatementsSection().getByRole('checkbox', { name: /01\.07\.2026/ }))
     expect(deleteSelected()).toBeDisabled()
+    expect(deleteAllTransactions()).toBeDisabled()
     expect(deleteData().getByText('Deleting waits for the Upload in progress to finish.')).toBeInTheDocument()
 
-    // The Upload imported a Bank Statement, which the list then shows.
+    // The Upload imported a Bank Statement, which the list and the counts then show.
     bankStatements = [august, july]
+    deleteCounts = { transactionCount: 1001 }
     respond(Response.json(importedStatement, { status: 201 }))
 
     await waitFor(() => expect(deleteSelected()).toBeEnabled())
+    await waitFor(() => expect(deleteAllTransactions()).toBeEnabled())
     expect(deleteData().queryByText('Deleting waits for the Upload in progress to finish.')).not.toBeInTheDocument()
     await waitFor(async () => expect(await listedBankStatements()).toHaveLength(2))
     expect(bankStatementsSection().getByRole('checkbox', { name: /01\.07\.2026/ })).toBeChecked()

@@ -1,5 +1,12 @@
-import { useEffect, useId, useState } from 'react'
-import { deleteBankStatements, fetchBankStatements, type ListedBankStatement } from '../lib/api'
+import { useEffect, useId, useState, type ReactNode } from 'react'
+import {
+  deleteAllTransactions,
+  deleteBankStatements,
+  fetchBankStatements,
+  fetchDeleteCounts,
+  type DeleteCounts,
+  type ListedBankStatement,
+} from '../lib/api'
 import { counted } from '../lib/count'
 import { formatNorwegianDate } from '../lib/date'
 import { ErrorMessage, StatusMessage } from './Messages'
@@ -12,24 +19,35 @@ interface DeleteDataSectionProps {
   onDeleted: () => void
 }
 
+// The delete whose question is open. One question is asked at a time.
+type Confirming = 'bankStatements' | 'allTransactions'
+
+// How a confirmed delete went: the status line saying what it deleted, or why it failed.
+type DeleteOutcome = { ok: true; status: string } | { ok: false; message: string }
+
 const buttonClass =
   'rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-900 shadow-sm hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60'
 const smallButtonClass =
   'rounded-lg px-2 py-1 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-300'
+const cardClass = 'rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-sm'
 
-// The User's deletes, least destructive first: the ticked Bank Statements with their Transactions.
-// Each asks for confirmation with exact counts. One status line, for whichever delete ran last,
-// stays until the next action.
+// The User's deletes, least destructive first: the ticked Bank Statements with their Transactions,
+// then every Transaction. Each asks for confirmation with exact counts. One status line, for
+// whichever delete ran last, stays until the next action.
 export function DeleteDataSection({ isUploading, onDeleted }: DeleteDataSectionProps) {
   const headingId = useId()
   const bankStatementsHeadingId = useId()
   // Null until loaded, so "There are no Bank Statements." never shows before they are.
   const [bankStatements, setBankStatements] = useState<ListedBankStatement[] | null>(null)
   const [loadFailed, setLoadFailed] = useState(false)
-  // Bumped after a delete, to list what is left.
-  const [listVersion, setListVersion] = useState(0)
+  // Null until loaded, and the deletes they count stay disabled until then, or when counting again
+  // fails, so no question asks with a count from before the last delete.
+  const [counts, setCounts] = useState<DeleteCounts | null>(null)
+  const [countsFailed, setCountsFailed] = useState(false)
+  // Bumped after a delete, to list and count what is left.
+  const [dataVersion, setDataVersion] = useState(0)
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<number>>(new Set())
-  const [isConfirming, setIsConfirming] = useState(false)
+  const [confirming, setConfirming] = useState<Confirming | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
@@ -51,7 +69,26 @@ export function DeleteDataSection({ isUploading, onDeleted }: DeleteDataSectionP
     return () => {
       ignore = true
     }
-  }, [isUploading, listVersion])
+  }, [isUploading, dataVersion])
+
+  // Counted again whenever the list is loaded, so the next question counts what is there now.
+  useEffect(() => {
+    let ignore = false
+    fetchDeleteCounts()
+      .then((loaded) => {
+        if (ignore) return
+        setCounts(loaded)
+        setCountsFailed(false)
+      })
+      .catch(() => {
+        if (ignore) return
+        setCounts(null)
+        setCountsFailed(true)
+      })
+    return () => {
+      ignore = true
+    }
+  }, [isUploading, dataVersion])
 
   function clearMessages() {
     setStatusMessage(null)
@@ -67,26 +104,48 @@ export function DeleteDataSection({ isUploading, onDeleted }: DeleteDataSectionP
     })
   }
 
+  function ask(question: Confirming) {
+    clearMessages()
+    setConfirming(question)
+  }
+
   // In list order, which is what the counts and the request are made from.
   const selected = (bankStatements ?? []).filter((s) => selectedIds.has(s.id))
   const selectedTransactions = selected.reduce((sum, s) => sum + s.transactionCount, 0)
+  const transactionCount = counts?.transactionCount ?? 0
 
-  // Changes nothing when it fails, keeping the ticks for another try. The list is loaded again either
-  // way: a delete is refused when a ticked Bank Statement was already deleted elsewhere, as by another
-  // visitor using the Guest, and it is then no longer offered.
-  async function confirmDelete() {
+  // Runs the confirmed delete, then lists and counts again either way: a delete may be refused
+  // because of a change made elsewhere, as by another visitor using the Guest, and the next question
+  // should count what is there now. A failed one changes nothing, keeping the ticks for another try.
+  async function confirmDelete(run: () => Promise<DeleteOutcome>) {
     setIsDeleting(true)
-    const result = await deleteBankStatements(selected.map((s) => s.id)).finally(() => setIsDeleting(false))
-    setIsConfirming(false)
-    setListVersion((version) => version + 1)
+    const result = await run().finally(() => setIsDeleting(false))
+    setConfirming(null)
+    setDataVersion((version) => version + 1)
     if (result.ok) {
-      setStatusMessage(`${counted(result.bankStatementsDeleted, 'Bank Statement')} deleted.`)
+      setStatusMessage(result.status)
       setSelectedIds(new Set())
       onDeleted()
     } else {
       setErrorMessage(result.message)
     }
   }
+
+  const confirmDeleteBankStatements = () =>
+    confirmDelete(async () => {
+      const result = await deleteBankStatements(selected.map((s) => s.id))
+      return result.ok ? { ok: true, status: `${counted(result.bankStatementsDeleted, 'Bank Statement')} deleted.` } : result
+    })
+
+  const confirmDeleteAllTransactions = () =>
+    confirmDelete(async () => {
+      const result = await deleteAllTransactions()
+      return result.ok ? { ok: true, status: `${counted(result.transactionsDeleted, 'Transaction')} deleted.` } : result
+    })
+
+  // Each delete's button stays disabled while any question is open, during an Upload and while
+  // deleting.
+  const isBusy = isUploading || confirming !== null || isDeleting
 
   return (
     <section aria-labelledby={headingId} className="mt-8">
@@ -102,10 +161,7 @@ export function DeleteDataSection({ isUploading, onDeleted }: DeleteDataSectionP
         <StatusMessage message={statusMessage} className="mt-3" />
       )}
 
-      <section
-        aria-labelledby={bankStatementsHeadingId}
-        className="mt-2 rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-sm"
-      >
+      <section aria-labelledby={bankStatementsHeadingId} className={`mt-2 ${cardClass}`}>
         <h4 id={bankStatementsHeadingId} className="text-sm font-semibold text-slate-900">
           Bank Statements
         </h4>
@@ -122,7 +178,7 @@ export function DeleteDataSection({ isUploading, onDeleted }: DeleteDataSectionP
                   <input
                     type="checkbox"
                     checked={selectedIds.has(statement.id)}
-                    disabled={isConfirming || isDeleting}
+                    disabled={confirming === 'bankStatements' || isDeleting}
                     onChange={() => toggle(statement.id)}
                     className="size-4 shrink-0"
                   />
@@ -142,40 +198,75 @@ export function DeleteDataSection({ isUploading, onDeleted }: DeleteDataSectionP
 
         <button
           type="button"
-          disabled={selected.length === 0 || isUploading || isConfirming || isDeleting}
-          onClick={() => {
-            clearMessages()
-            setIsConfirming(true)
-          }}
+          disabled={selected.length === 0 || isBusy}
+          onClick={() => ask('bankStatements')}
           className={`mt-3 ${buttonClass}`}
         >
           Delete selected
         </button>
-        {isConfirming && (
-          <div className="mt-3 flex flex-wrap items-center justify-end gap-2 rounded-lg bg-red-50 px-3 py-2 text-sm">
-            <span className="mr-auto text-red-800">
-              Delete {counted(selected.length, 'Bank Statement')} and {selected.length === 1 ? 'its' : 'their'}{' '}
-              {counted(selectedTransactions, 'Transaction')}?
-            </span>
-            <button
-              type="button"
-              disabled={isDeleting || isUploading}
-              onClick={() => void confirmDelete()}
-              className={smallButtonClass}
-            >
-              Confirm delete
-            </button>
-            <button
-              type="button"
-              disabled={isDeleting}
-              onClick={() => setIsConfirming(false)}
-              className={smallButtonClass}
-            >
-              Cancel
-            </button>
-          </div>
+        {confirming === 'bankStatements' && (
+          <ConfirmDelete
+            isUploading={isUploading}
+            isDeleting={isDeleting}
+            onConfirm={() => void confirmDeleteBankStatements()}
+            onCancel={() => setConfirming(null)}
+          >
+            Delete {counted(selected.length, 'Bank Statement')} and {selected.length === 1 ? 'its' : 'their'}{' '}
+            {counted(selectedTransactions, 'Transaction')}?
+          </ConfirmDelete>
         )}
       </section>
+
+      {/* An imported Transaction goes only with its whole Bank Statement, so this deletes every Bank
+          Statement too. The question deliberately counts only the Transactions. */}
+      <div className={`mt-3 ${cardClass}`}>
+        <p className="text-sm text-slate-600">
+          Every Transaction, manually-entered and imported, and so every Bank Statement too.
+        </p>
+        {countsFailed && <ErrorMessage className="mt-3">Could not count the Transactions.</ErrorMessage>}
+        <button
+          type="button"
+          disabled={transactionCount === 0 || isBusy}
+          onClick={() => ask('allTransactions')}
+          className={`mt-3 ${buttonClass}`}
+        >
+          Delete all Transactions
+        </button>
+        {confirming === 'allTransactions' && (
+          <ConfirmDelete
+            isUploading={isUploading}
+            isDeleting={isDeleting}
+            onConfirm={() => void confirmDeleteAllTransactions()}
+            onCancel={() => setConfirming(null)}
+          >
+            Delete all {counted(transactionCount, 'Transaction')}?
+          </ConfirmDelete>
+        )}
+      </div>
     </section>
+  )
+}
+
+interface ConfirmDeleteProps {
+  // The question, with the exact counts of what goes.
+  children: ReactNode
+  isUploading: boolean
+  isDeleting: boolean
+  onConfirm: () => void
+  onCancel: () => void
+}
+
+// A delete's question, under the button that asked it.
+function ConfirmDelete({ children, isUploading, isDeleting, onConfirm, onCancel }: ConfirmDeleteProps) {
+  return (
+    <div className="mt-3 flex flex-wrap items-center justify-end gap-2 rounded-lg bg-red-50 px-3 py-2 text-sm">
+      <span className="mr-auto text-red-800">{children}</span>
+      <button type="button" disabled={isDeleting || isUploading} onClick={onConfirm} className={smallButtonClass}>
+        Confirm delete
+      </button>
+      <button type="button" disabled={isDeleting} onClick={onCancel} className={smallButtonClass}>
+        Cancel
+      </button>
+    </div>
   )
 }

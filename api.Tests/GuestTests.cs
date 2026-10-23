@@ -1,7 +1,10 @@
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using PersonligFinans.Api.BankStatements;
 using PersonligFinans.Api.Categories;
 using PersonligFinans.Api.Data;
+using PersonligFinans.Api.Transactions;
 using PersonligFinans.Api.Users;
 
 namespace PersonligFinans.Api.Tests;
@@ -106,5 +109,22 @@ public class GuestTests
         // Started like a new User once: each seeded Category, and only once.
         foreach (var seed in Seeds.Categories)
             Assert.Single(names, seed.Name);
+    }
+
+    // So any visitor can wipe the Guest and try the app again from the start.
+    [Fact]
+    public async Task TheGuest_CanDeleteAllTransactions()
+    {
+        var guest = await _factory.CreateGuestClientAsync();
+        var file = new ByteArrayContent(StatementPdf.WithPurchasesFrom("Kafé"));
+        file.Headers.ContentType = new MediaTypeHeaderValue("application/pdf");
+        using var form = new MultipartFormDataContent { { file, "file", "kontoutskrift.pdf" } };
+        Assert.Equal(HttpStatusCode.Created, (await guest.PostAsync("/api/bank-statements", form)).StatusCode);
+
+        var response = await guest.DeleteAsync("/api/transactions");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Empty((await guest.GetFromJsonAsync<List<TransactionMonthResponse>>("/api/transactions/months"))!);
+        Assert.Empty((await guest.GetFromJsonAsync<List<ListedBankStatementResponse>>("/api/bank-statements"))!);
     }
 }

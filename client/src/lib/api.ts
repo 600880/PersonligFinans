@@ -825,6 +825,34 @@ export async function deleteBankStatements(ids: number[]): Promise<DeleteBankSta
   return { ok: false, message: `Deleting failed (${response.status}).` }
 }
 
+// What the User page's confirm dialogs ask with. transactionCount: every Transaction of the User,
+// manually-entered and imported.
+export interface DeleteCounts {
+  transactionCount: number
+}
+
+export async function fetchDeleteCounts(): Promise<DeleteCounts> {
+  const response = await apiFetch('/api/user/delete-counts')
+  if (!response.ok) throw new Error(`Loading the counts failed (${response.status})`)
+  return (await response.json()) as DeleteCounts
+}
+
+export type DeleteAllTransactionsResult = { ok: true; transactionsDeleted: number } | { ok: false; message: string }
+
+// Deletes every Transaction of the User, and so every Bank Statement too.
+export async function deleteAllTransactions(): Promise<DeleteAllTransactionsResult> {
+  let response: Response
+  try {
+    response = await apiFetch('/api/transactions', { method: 'DELETE' })
+  } catch {
+    return { ok: false, message: 'Could not reach the server.' }
+  }
+
+  if (!response.ok) return { ok: false, message: `Deleting failed (${response.status}).` }
+  const { transactionsDeleted } = (await response.json()) as { transactionsDeleted: number }
+  return { ok: true, transactionsDeleted }
+}
+
 // read: the receipt reader read the Receipt. unreadable: it couldn't. unavailable: no receipt reader
 // is configured. limitReached: the reader wasn't asked, because the Daily AI limit was reached.
 export type ReceiptOutcome = 'read' | 'unreadable' | 'unavailable' | 'limitReached'

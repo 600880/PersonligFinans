@@ -37,6 +37,8 @@ public record TransactionMonthResponse(int Year, int Month);
 
 public record PossibleDuplicateResponse(int Id, DateOnly Date, string Description, decimal Amount);
 
+public record DeletedTransactionsResponse(int TransactionsDeleted);
+
 public static class TransactionEndpoints
 {
     // numeric(12,2) holds at most 10 digits before the decimal point.
@@ -67,6 +69,9 @@ public static class TransactionEndpoints
         api.MapPut("/transactions/{id:int}/category", ChangeCategory);
         api.MapPut("/transactions/{id:int}/note", ChangeNote);
         api.MapDelete("/transactions/{id:int}", DeleteTransaction);
+        // A DELETE rather than a POST: it takes no JSON, and another site's page can't send a DELETE
+        // without a preflight, which the API never grants.
+        api.MapDelete("/transactions", DeleteAllTransactions);
     }
 
     // A month's Transactions, or a whole year's when no month is given, imported and manual, newest
@@ -294,6 +299,25 @@ public static class TransactionEndpoints
         await db.SaveChangesAsync();
 
         return Results.NoContent();
+    }
+
+    // Deletes every Transaction of the User: the manually-entered ones, and every Bank Statement, since
+    // an imported Transaction goes only with its whole Bank Statement. Each Bank Statement can then be
+    // imported again. Bookmarks go with their Transactions, while Folders, the last used folder,
+    // Categories and Categorization Rules stay, the rules with their AI-generated and New marks.
+    private static async Task<IResult> DeleteAllTransactions(AppDbContext db)
+    {
+        // Under the rule-change lock, so it can't interleave with an import from another browser,
+        // whose Transactions would otherwise outlive the delete, or with a rule change re-matching them.
+        await using var transaction = await Categorizer.BeginRuleChangeAsync(db);
+
+        // The Transactions first, imported ones included, so the count is of exactly those deleted. The
+        // database deletes their Bookmarks by cascade.
+        var transactionsDeleted = await db.Transactions.ExecuteDeleteAsync();
+        await db.BankStatements.ExecuteDeleteAsync();
+        await transaction.CommitAsync();
+
+        return Results.Ok(new DeletedTransactionsResponse(transactionsDeleted));
     }
 
     private static IResult CategoryProblem(string message) =>
