@@ -120,9 +120,9 @@ export function LandingPage({ onSignedIn }: LandingPageProps) {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      <header className="border-b border-slate-200 bg-white px-6 py-4 max-sm:px-4">
-        <h1 className="text-xl font-semibold tracking-tight text-slate-900">PersonligFinans</h1>
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950">
+      <header className="border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-6 py-4 max-sm:px-4">
+        <h1 className="text-xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">PersonligFinans</h1>
       </header>
 
       <main className="flex flex-col items-center gap-6 px-6 py-10 max-sm:px-4">
@@ -140,14 +140,14 @@ export function LandingPage({ onSignedIn }: LandingPageProps) {
         <section
           hidden={isAskingForReset}
           aria-labelledby="credentials-heading"
-          className="w-full max-w-sm rounded-xl border border-slate-200 bg-white p-6 shadow-sm max-sm:p-4"
+          className="w-full max-w-sm rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 shadow-sm max-sm:p-4"
         >
-          <h2 id="credentials-heading" className="text-lg font-semibold text-slate-900">
+          <h2 id="credentials-heading" className="text-lg font-semibold text-slate-900 dark:text-slate-100">
             {current.label}
           </h2>
 
           {errorMessage && (
-            <p role="alert" className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+            <p role="alert" className="mt-3 rounded-lg bg-red-50 dark:bg-red-950/40 px-3 py-2 text-sm text-red-700 dark:text-red-300">
               {isLockedOut && passwordReset ? withResetOffer(errorMessage) : errorMessage}
             </p>
           )}
@@ -182,7 +182,7 @@ export function LandingPage({ onSignedIn }: LandingPageProps) {
             <button
               type="submit"
               disabled={isSubmitting}
-              className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+              className="rounded-lg bg-slate-900 dark:bg-slate-100 px-4 py-2 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-700 dark:hover:bg-slate-300 disabled:cursor-not-allowed disabled:bg-slate-300 dark:disabled:bg-slate-800 dark:disabled:text-slate-500"
             >
               {isSubmitting ? current.submittingLabel : current.label}
             </button>
@@ -193,33 +193,33 @@ export function LandingPage({ onSignedIn }: LandingPageProps) {
               <button
                 type="button"
                 onClick={() => setIsAskingForReset(true)}
-                className="font-medium text-slate-900 underline"
+                className="font-medium text-slate-900 dark:text-slate-100 underline"
               >
                 Forgot your password?
               </button>
             </p>
           )}
 
-          <p className="mt-4 text-center text-sm text-slate-600">
+          <p className="mt-4 text-center text-sm text-slate-600 dark:text-slate-400">
             {current.switchPrompt}
-            <button type="button" onClick={switchMode} className="font-medium text-slate-900 underline">
+            <button type="button" onClick={switchMode} className="font-medium text-slate-900 dark:text-slate-100 underline">
               {MODES[current.other].label}
             </button>
           </p>
         </section>
 
         <section aria-label="Try as Guest" className="flex w-full max-w-sm flex-col items-center gap-3 text-center">
-          <p className="text-sm text-slate-600">Or try the app first, without signing up.</p>
+          <p className="text-sm text-slate-600 dark:text-slate-400">Or try the app first, without signing up.</p>
           <button
             type="button"
             onClick={() => void handleContinueAsGuest()}
             disabled={isContinuingAsGuest}
-            className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-900 shadow-sm hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
+            className="rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-2 text-sm font-medium text-slate-900 dark:text-slate-100 shadow-sm hover:bg-slate-100 dark:hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {isContinuingAsGuest ? 'Continuing as Guest…' : 'Continue as Guest'}
           </button>
           {guestError && (
-            <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+            <p role="alert" className="rounded-lg bg-red-50 dark:bg-red-950/40 px-3 py-2 text-sm text-red-700 dark:text-red-300">
               {guestError}
             </p>
           )}

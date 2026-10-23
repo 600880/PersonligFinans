@@ -56,17 +56,17 @@ export function ChooseNewPasswordPage({ link, onSignedIn, onLeave }: ChooseNewPa
   }
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      <header className="border-b border-slate-200 bg-white px-6 py-4 max-sm:px-4">
-        <h1 className="text-xl font-semibold tracking-tight text-slate-900">PersonligFinans</h1>
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950">
+      <header className="border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-6 py-4 max-sm:px-4">
+        <h1 className="text-xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">PersonligFinans</h1>
       </header>
 
       <main className="flex flex-col items-center px-6 py-10 max-sm:px-4">
         <section
           aria-labelledby="new-password-heading"
-          className="w-full max-w-sm rounded-xl border border-slate-200 bg-white p-6 shadow-sm max-sm:p-4"
+          className="w-full max-w-sm rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 shadow-sm max-sm:p-4"
         >
-          <h2 id="new-password-heading" className="text-lg font-semibold text-slate-900">
+          <h2 id="new-password-heading" className="text-lg font-semibold text-slate-900 dark:text-slate-100">
             Choose a new password
           </h2>
 
@@ -74,12 +74,12 @@ export function ChooseNewPasswordPage({ link, onSignedIn, onLeave }: ChooseNewPa
             <ExpiredLink email={link.email} />
           ) : (
             <>
-              <p className="mt-2 text-sm break-all text-slate-600">
-                For <span className="font-medium text-slate-900">{link.email}</span>
+              <p className="mt-2 text-sm break-all text-slate-600 dark:text-slate-400">
+                For <span className="font-medium text-slate-900 dark:text-slate-100">{link.email}</span>
               </p>
 
               {errorMessage && (
-                <p role="alert" className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+                <p role="alert" className="mt-3 rounded-lg bg-red-50 dark:bg-red-950/40 px-3 py-2 text-sm text-red-700 dark:text-red-300">
                   {errorMessage}
                 </p>
               )}
@@ -102,7 +102,7 @@ export function ChooseNewPasswordPage({ link, onSignedIn, onLeave }: ChooseNewPa
                 <button
                   type="submit"
                   disabled={isSubmitting}
-                  className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+                  className="rounded-lg bg-slate-900 dark:bg-slate-100 px-4 py-2 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-700 dark:hover:bg-slate-300 disabled:cursor-not-allowed disabled:bg-slate-300 dark:disabled:bg-slate-800 dark:disabled:text-slate-500"
                 >
                   {isSubmitting ? 'Setting new password…' : 'Set new password'}
                 </button>
@@ -111,7 +111,7 @@ export function ChooseNewPasswordPage({ link, onSignedIn, onLeave }: ChooseNewPa
           )}
 
           <p className="mt-4 text-center text-sm">
-            <button type="button" onClick={onLeave} className="font-medium text-slate-900 underline">
+            <button type="button" onClick={onLeave} className="font-medium text-slate-900 dark:text-slate-100 underline">
               Back to Sign in
             </button>
           </p>
@@ -152,19 +152,19 @@ function ExpiredLink({ email }: { email: string }) {
 
   return (
     <>
-      <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
+      <p className="mt-3 rounded-lg bg-amber-50 dark:bg-amber-950/40 px-3 py-2 text-sm text-amber-900 dark:text-amber-200">
         This link has expired or was already used.
       </p>
 
       {errorMessage && (
-        <p role="alert" className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+        <p role="alert" className="mt-3 rounded-lg bg-red-50 dark:bg-red-950/40 px-3 py-2 text-sm text-red-700 dark:text-red-300">
           {errorMessage}
         </p>
       )}
 
       {passwordReset && email !== '' && (
         isSent ? (
-          <p role="status" className="mt-3 rounded-lg bg-slate-100 px-3 py-2 text-sm text-slate-700">
+          <p role="status" className="mt-3 rounded-lg bg-slate-100 dark:bg-slate-800 px-3 py-2 text-sm text-slate-700 dark:text-slate-300">
             {linkSent(passwordReset.linkHours)}
           </p>
         ) : (
@@ -172,7 +172,7 @@ function ExpiredLink({ email }: { email: string }) {
             type="button"
             onClick={() => void handleSendNewLink()}
             disabled={isSending}
-            className="mt-4 w-full rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+            className="mt-4 w-full rounded-lg bg-slate-900 dark:bg-slate-100 px-4 py-2 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-700 dark:hover:bg-slate-300 disabled:cursor-not-allowed disabled:bg-slate-300 dark:disabled:bg-slate-800 dark:disabled:text-slate-500"
           >
             {isSending ? 'Sending link…' : 'Send a new link'}
           </button>

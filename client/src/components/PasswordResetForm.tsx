@@ -38,20 +38,20 @@ export function PasswordResetForm({ email, onEmailChange, linkHours, onBack }: P
   return (
     <section
       aria-labelledby="reset-heading"
-      className="w-full max-w-sm rounded-xl border border-slate-200 bg-white p-6 shadow-sm max-sm:p-4"
+      className="w-full max-w-sm rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 shadow-sm max-sm:p-4"
     >
-      <h2 id="reset-heading" className="text-lg font-semibold text-slate-900">
+      <h2 id="reset-heading" className="text-lg font-semibold text-slate-900 dark:text-slate-100">
         Reset your password
       </h2>
 
       {isSent ? (
-        <p role="status" className="mt-3 rounded-lg bg-slate-100 px-3 py-2 text-sm text-slate-700">
+        <p role="status" className="mt-3 rounded-lg bg-slate-100 dark:bg-slate-800 px-3 py-2 text-sm text-slate-700 dark:text-slate-300">
           {linkSent(linkHours)}
         </p>
       ) : (
         <>
           {errorMessage && (
-            <p role="alert" className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+            <p role="alert" className="mt-3 rounded-lg bg-red-50 dark:bg-red-950/40 px-3 py-2 text-sm text-red-700 dark:text-red-300">
               {errorMessage}
             </p>
           )}
@@ -69,7 +69,7 @@ export function PasswordResetForm({ email, onEmailChange, linkHours, onBack }: P
             <button
               type="submit"
               disabled={isSending}
-              className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+              className="rounded-lg bg-slate-900 dark:bg-slate-100 px-4 py-2 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-700 dark:hover:bg-slate-300 disabled:cursor-not-allowed disabled:bg-slate-300 dark:disabled:bg-slate-800 dark:disabled:text-slate-500"
             >
               {isSending ? 'Sending link…' : 'Send link'}
             </button>
@@ -78,7 +78,7 @@ export function PasswordResetForm({ email, onEmailChange, linkHours, onBack }: P
       )}
 
       <p className="mt-4 text-center text-sm">
-        <button type="button" onClick={onBack} className="font-medium text-slate-900 underline">
+        <button type="button" onClick={onBack} className="font-medium text-slate-900 dark:text-slate-100 underline">
           Back to Sign in
         </button>
       </p>
