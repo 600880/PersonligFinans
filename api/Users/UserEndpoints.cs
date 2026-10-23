@@ -8,6 +8,8 @@ namespace PersonligFinans.Api.Users;
 
 public record CredentialsRequest(string? Email, string? Password);
 
+public record ChangePasswordRequest(string? CurrentPassword, string? NewPassword);
+
 // The signed-in User, by their email, and whether they are the Guest.
 public record UserResponse(string Email, bool IsGuest)
 {
@@ -36,6 +38,9 @@ public static class UserEndpoints
         api.MapPost("/sign-in", SignIn).AllowAnonymous();
         api.MapPost("/continue-as-guest", ContinueAsGuest).AllowAnonymous();
         api.MapPost("/sign-out", SignOut).AllowAnonymous();
+
+        // Like Sign in it takes only JSON, which another site's form can't send.
+        api.MapPost("/change-password", ChangePassword);
     }
 
     // Creates a User whose user name is their email, with copies of the seeds of their own, and signs
@@ -62,8 +67,7 @@ public static class UserEndpoints
         var identityErrors = new List<IdentityError>();
         foreach (var validator in userManager.UserValidators)
             identityErrors.AddRange((await validator.ValidateAsync(userManager, user)).Errors);
-        foreach (var validator in userManager.PasswordValidators)
-            identityErrors.AddRange((await validator.ValidateAsync(userManager, user, password)).Errors);
+        identityErrors.AddRange(await PasswordRuleErrors(userManager, user, password));
         var fieldErrors = FieldErrors(identityErrors);
         // The Guest's email, which is taken, and any other on its domain, which is kept for the
         // Guest.
@@ -105,9 +109,7 @@ public static class UserEndpoints
 
         var result = await signInManager.PasswordSignInAsync(email, password, isPersistent: true, lockoutOnFailure: true);
         if (result.IsLockedOut)
-            return Results.Problem(
-                detail: "Too many failed sign-ins, so this email is locked for a few minutes. Try again later.",
-                statusCode: StatusCodes.Status429TooManyRequests);
+            return EmailLocked();
         if (!result.Succeeded)
             return WrongEmailOrPassword();
 
@@ -130,6 +132,76 @@ public static class UserEndpoints
         await signInManager.SignInAsync(guest, isPersistent: true);
         return Results.Ok(UserResponse.Of(guest.Email!));
     }
+
+    // Change password: sets a new password for the signed-in User, given the current one, so that
+    // someone using an open tab can't take the User over. A wrong current password counts towards the
+    // same lockout as a failed sign-in, and a locked email is refused with Sign in's message, even
+    // with the right password. The new password follows Sign up's rules, and every field that is wrong
+    // is reported at once. The Guest has no password, so nobody can give the shared Guest one.
+    private static async Task<IResult> ChangePassword(
+        ChangePasswordRequest request,
+        ClaimsPrincipal principal,
+        UserManager<IdentityUser> userManager,
+        SignInManager<IdentityUser> signInManager)
+    {
+        if (Guest.Is(principal.Identity!.Name!))
+            return Results.Problem(detail: "The Guest has no password.", statusCode: StatusCodes.Status403Forbidden);
+
+        var currentPassword = request.CurrentPassword ?? "";
+        var newPassword = request.NewPassword ?? "";
+        var errors = new Dictionary<string, string[]>();
+        if (currentPassword.Length == 0)
+            errors["currentPassword"] = ["Current password is required."];
+        if (newPassword.Length == 0)
+            errors["newPassword"] = ["New password is required."];
+        if (errors.Count > 0)
+            return Results.ValidationProblem(errors);
+
+        // Only a signed-in User gets here, and the security stamp check has just found it.
+        var user = (await userManager.GetUserAsync(principal))!;
+
+        // As at Sign in, a locked email is refused before its password is tried, and the failure that
+        // locks it gets the lockout's answer.
+        var check = await signInManager.CheckPasswordSignInAsync(user, currentPassword, lockoutOnFailure: true);
+        if (check.IsLockedOut)
+            return EmailLocked();
+        if (!check.Succeeded)
+            errors["currentPassword"] = ["Wrong password."];
+
+        if (FieldErrors(await PasswordRuleErrors(userManager, user, newPassword)).TryGetValue("password", out var newPasswordErrors))
+            errors["newPassword"] = newPasswordErrors;
+        if (errors.Count > 0)
+            return Results.ValidationProblem(errors);
+
+        // Both passwords were just checked, so this fails only if the User changes its password in
+        // another request at the same moment.
+        var result = await userManager.ChangePasswordAsync(user, currentPassword, newPassword);
+        if (!result.Succeeded)
+            throw new InvalidOperationException(
+                "Changing the password failed: " + string.Join(" ", result.Errors.Select(e => e.Description)));
+
+        // Changing the password changed the User's security stamp, so every other browser's sign-in
+        // as the User ends at its next request (see UserSetup), while this one gets a fresh cookie with
+        // the new stamp, as persistent as the one it replaces.
+        await signInManager.RefreshSignInAsync(user);
+        return Results.NoContent();
+    }
+
+    // Every way the password breaks Sign up's rules, found without setting it, so that the other
+    // fields can be reported along with it.
+    private static async Task<List<IdentityError>> PasswordRuleErrors(
+        UserManager<IdentityUser> userManager, IdentityUser user, string password)
+    {
+        var errors = new List<IdentityError>();
+        foreach (var validator in userManager.PasswordValidators)
+            errors.AddRange((await validator.ValidateAsync(userManager, user, password)).Errors);
+        return errors;
+    }
+
+    private static IResult EmailLocked() =>
+        Results.Problem(
+            detail: "Too many failed sign-ins, so this email is locked for a few minutes. Try again later.",
+            statusCode: StatusCodes.Status429TooManyRequests);
 
     private static IResult WrongEmailOrPassword() =>
         Results.Problem(detail: "Wrong email or password.", statusCode: StatusCodes.Status401Unauthorized);

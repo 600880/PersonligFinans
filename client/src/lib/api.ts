@@ -249,6 +249,41 @@ export async function chooseNewPassword(request: NewPasswordRequest): Promise<Ch
   return { ok: false, expired: false, fieldErrors: {}, message: `Setting the new password failed (${response.status}).` }
 }
 
+export interface ChangePasswordRequest {
+  currentPassword: string
+  newPassword: string
+}
+
+export type ChangePasswordResult =
+  | { ok: true }
+  | { ok: false; fieldErrors: Partial<Record<keyof ChangePasswordRequest, string>>; message: string | null }
+
+// Changes the signed-in User's password, which keeps this browser signed in and signs the User out
+// everywhere else. A wrong current password or a new one that breaks Sign up's rules gets a field
+// error, and a locked email gets Sign in's message. Sent as JSON, which the server requires, like
+// Sign in.
+export async function changePassword(request: ChangePasswordRequest): Promise<ChangePasswordResult> {
+  let response: Response
+  try {
+    response = await apiFetch('/api/user/change-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request),
+    })
+  } catch {
+    return { ok: false, fieldErrors: {}, message: UNREACHABLE }
+  }
+  if (response.ok) return { ok: true }
+
+  // 400 is a validation problem keyed on the fields, and 429 a locked email, whose detail says so.
+  if (response.status === 400 || response.status === 429) {
+    const { fieldErrors, detail } = await readProblem<ChangePasswordRequest>(response)
+    if (Object.keys(fieldErrors).length > 0) return { ok: false, fieldErrors, message: null }
+    if (detail) return { ok: false, fieldErrors: {}, message: detail }
+  }
+  return { ok: false, fieldErrors: {}, message: `Changing the password failed (${response.status}).` }
+}
+
 // Ends the sign-in. Resolves false when the server couldn't be told, so the User is still signed in.
 export async function signOut(): Promise<boolean> {
   try {

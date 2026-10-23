@@ -108,6 +108,7 @@ let handleSignOut: () => Response
 let passwordResetAvailability: { available: boolean; linkHours: number } | Response
 let handleRequestPasswordReset: PostHandler
 let handleChooseNewPassword: PostHandler
+let handleChangePassword: PostHandler
 // How many antiforgery tokens the server has given. Each is new: token-1, token-2 and so on.
 let antiforgeryTokensGiven: number
 const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
@@ -126,6 +127,9 @@ const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
   }
   if (url === '/api/user/password-reset/new-password' && init?.method === 'POST') {
     return handleChooseNewPassword(JSON.parse(init.body as string))
+  }
+  if (url === '/api/user/change-password' && init?.method === 'POST') {
+    return handleChangePassword(JSON.parse(init.body as string))
   }
   if (url === '/api/antiforgery-token') return Response.json({ token: `token-${++antiforgeryTokensGiven}` })
   const monthlyUrl =
@@ -264,6 +268,7 @@ beforeEach(() => {
   passwordResetAvailability = { available: false, linkHours: 1 }
   handleRequestPasswordReset = () => new Response(null, { status: 204 })
   handleChooseNewPassword = (body) => Response.json({ email: (body as { email: string }).email, isGuest: false })
+  handleChangePassword = () => new Response(null, { status: 204 })
   vi.stubGlobal('fetch', fetchMock)
 })
 
@@ -7019,6 +7024,142 @@ describe('User page', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Signing out failed. Try again.')
     expect(screen.getByRole('navigation')).toBeInTheDocument()
+  })
+
+  describe('Change password', () => {
+    async function openForm(user: ReturnType<typeof userEvent.setup>) {
+      await renderApp()
+      await user.click(userButton())
+      await user.click(screen.getByRole('button', { name: 'Change password' }))
+    }
+
+    async function fillIn(
+      user: ReturnType<typeof userEvent.setup>,
+      currentPassword: string,
+      newPassword: string,
+      confirmPassword = newPassword,
+    ) {
+      await user.type(screen.getByLabelText(/^current password/i), currentPassword)
+      await user.type(screen.getByLabelText(/^new password/i), newPassword)
+      await user.type(screen.getByLabelText(/^confirm password/i), confirmPassword)
+      await user.click(screen.getByRole('button', { name: 'Change password' }))
+    }
+
+    function passwordRegion() {
+      return screen.getByRole('region', { name: 'Password' })
+    }
+
+    // The Change password status line, apart from the Delete data section's below it.
+    function passwordStatus() {
+      return within(passwordRegion()).findByRole('status')
+    }
+
+    function changePasswordRequests() {
+      return fetchMock.mock.calls.filter(([url]) => url === '/api/user/change-password')
+    }
+
+    it('opens a form with the current password, a new one and the confirm field, and changes the password', async () => {
+      const user = userEvent.setup()
+      await openForm(user)
+
+      expect(screen.getByLabelText(/^current password/i)).toHaveAttribute('autocomplete', 'current-password')
+      expect(screen.getByLabelText(/^new password/i)).toHaveAttribute('autocomplete', 'new-password')
+      expect(screen.getByLabelText(/^confirm password/i)).toHaveAttribute('autocomplete', 'new-password')
+      await fillIn(user, 'my long passphrase', 'my new passphrase')
+
+      expect(await passwordStatus()).toHaveTextContent('Password changed.')
+      expect(screen.queryByLabelText(/^current password/i)).not.toBeInTheDocument()
+      const [request] = changePasswordRequests()
+      expect(request[1]?.headers).toEqual({ 'Content-Type': 'application/json' })
+      expect(JSON.parse(request[1]?.body as string)).toEqual({
+        currentPassword: 'my long passphrase',
+        newPassword: 'my new passphrase',
+      })
+      expect(screen.getByText(/signed in as/i)).toHaveTextContent('Signed in as me@example.com')
+    })
+
+    it("says the new passwords don't match and sends nothing", async () => {
+      const user = userEvent.setup()
+      await openForm(user)
+
+      await fillIn(user, 'my long passphrase', 'my new passphrase', 'my new passphrse')
+
+      expect(screen.getByLabelText(/^confirm password/i).closest('label')).toHaveTextContent("Passwords don't match")
+      expect(changePasswordRequests()).toHaveLength(0)
+    })
+
+    it('shows each field error of a refused change under its field, keeping the form open', async () => {
+      handleChangePassword = () =>
+        Response.json(
+          {
+            errors: {
+              currentPassword: ['Wrong password.'],
+              newPassword: ['Password must be at least 8 characters.'],
+            },
+          },
+          { status: 400 },
+        )
+      const user = userEvent.setup()
+      await openForm(user)
+
+      await fillIn(user, 'wrong password', 'short')
+
+      expect(await screen.findByText('Wrong password.')).toBeInTheDocument()
+      expect(screen.getByLabelText(/^current password/i).closest('label')).toHaveTextContent('Wrong password.')
+      expect(screen.getByLabelText(/^new password/i).closest('label')).toHaveTextContent(
+        'Password must be at least 8 characters.',
+      )
+      expect(screen.getByRole('button', { name: 'Change password' })).toBeEnabled()
+      expect(within(passwordRegion()).getByRole('status')).toHaveTextContent('')
+    })
+
+    it('says so when the email is locked, with the message Sign in gives', async () => {
+      const locked = 'Too many failed sign-ins, so this email is locked for a few minutes. Try again later.'
+      handleChangePassword = () => Response.json({ detail: locked }, { status: 429 })
+      const user = userEvent.setup()
+      await openForm(user)
+
+      await fillIn(user, 'my long passphrase', 'my new passphrase')
+
+      expect(await screen.findByRole('alert')).toHaveTextContent(locked)
+      expect(screen.getByLabelText(/^current password/i)).toBeInTheDocument()
+    })
+
+    it('shows Password changed. until the next action, and opens an empty form again', async () => {
+      const user = userEvent.setup()
+      await openForm(user)
+      await fillIn(user, 'my long passphrase', 'my new passphrase')
+      expect(await passwordStatus()).toHaveTextContent('Password changed.')
+
+      await user.click(screen.getByRole('button', { name: 'Change password' }))
+
+      expect(within(passwordRegion()).getByRole('status')).toHaveTextContent('')
+      expect(screen.getByLabelText(/^current password/i)).toHaveValue('')
+      expect(screen.getByLabelText(/^new password/i)).toHaveValue('')
+      expect(screen.getByLabelText(/^confirm password/i)).toHaveValue('')
+    })
+
+    it('closes without sending anything on Cancel', async () => {
+      const user = userEvent.setup()
+      await openForm(user)
+      await user.type(screen.getByLabelText(/^current password/i), 'my long passphrase')
+
+      await user.click(screen.getByRole('button', { name: 'Cancel' }))
+
+      expect(screen.queryByLabelText(/^current password/i)).not.toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Change password' })).toBeEnabled()
+      expect(changePasswordRequests()).toHaveLength(0)
+    })
+
+    it('is disabled for the Guest', async () => {
+      currentUser = guest
+      const user = userEvent.setup()
+      await renderApp()
+
+      await user.click(userButton())
+
+      expect(screen.getByRole('button', { name: 'Change password' })).toBeDisabled()
+    })
   })
 })
 
