@@ -32,20 +32,23 @@ type Confirming = 'bankStatements' | 'allTransactions' | 'allRules' | 'user'
 // How a confirmed delete went: the status line saying what it deleted, or why it failed.
 type DeleteOutcome = { ok: true; status: string } | { ok: false; message: string }
 
-const buttonClass =
-  'rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-900 shadow-sm hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60'
+// The User page's one secondary button, Sign out's too.
+export const secondaryButtonClass =
+  'rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-900 shadow-sm hover:bg-slate-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:text-slate-400 disabled:shadow-none disabled:hover:bg-white'
 const smallButtonClass =
   'rounded-lg px-2 py-1 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-300'
-const cardClass = 'rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-sm'
+// Confirm delete, the one choice in a question that stands out.
+const confirmButtonClass =
+  'rounded-lg bg-red-600 px-2 py-1 text-sm font-medium text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:bg-red-300'
 
-// The User's deletes, least destructive first: in one Transactions card the ticked Bank Statements
-// with their Transactions, or every Transaction, then every Categorization Rule. Each asks for
-// confirmation with exact counts. One status line, for whichever delete ran last, stays until the
+// The User's deletes, least destructive first, one card each: the ticked Bank Statements with their
+// Transactions, or every Transaction, then every Categorization Rule. Each asks for confirmation with
+// exact counts. One status line, beside the heading, for whichever delete ran last, stays until the
 // next action.
-// Last, in red, Delete your User, which asks for the password instead and ends on the landing page.
+// Last, in a red card, Delete your User, which asks for the password instead and ends on the landing
+// page.
 export function DeleteDataSection({ isUploading, onDeleted, isGuest, onUserDeleted }: DeleteDataSectionProps) {
   const headingId = useId()
-  const transactionsHeadingId = useId()
   const bankStatementListId = useId()
   // Null until loaded, so "There are no Bank Statements." never shows before they are.
   const [bankStatements, setBankStatements] = useState<ListedBankStatement[] | null>(null)
@@ -175,30 +178,25 @@ export function DeleteDataSection({ isUploading, onDeleted, isGuest, onUserDelet
   const isBusy = isUploading || confirming !== null || isDeleting
 
   return (
-    <section aria-labelledby={headingId} className="mt-8">
-      <h3 id={headingId} className="text-base font-semibold text-slate-900">
-        Delete data
-      </h3>
-      {isUploading && (
-        <p className="mt-1 text-sm text-slate-600">Deleting waits for the Upload in progress to finish.</p>
-      )}
-      {errorMessage ? (
-        <ErrorMessage className="mt-3">{errorMessage}</ErrorMessage>
-      ) : (
-        <StatusMessage message={statusMessage} className="mt-3" />
-      )}
+    <section aria-labelledby={headingId} className="mt-8 flex flex-col gap-3">
+      {/* The status line keeps its place beside the heading, or under it on a phone, so the cards never
+          move when it comes or goes. */}
+      <div className="flex items-center justify-between gap-4 max-sm:flex-col max-sm:items-start max-sm:gap-3">
+        <h3 id={headingId} className="text-base font-semibold text-slate-900">
+          Delete data
+        </h3>
+        {errorMessage ? <ErrorMessage>{errorMessage}</ErrorMessage> : <StatusMessage message={statusMessage} />}
+      </div>
+      {isUploading && <p className="text-sm text-slate-600">Deleting waits for the Upload in progress to finish.</p>}
 
       {/* Imported Transactions go only with their whole Bank Statement, so Delete selected deletes
           ticked Bank Statements and Delete all deletes every Bank Statement too. Delete all's question
           deliberately counts only the Transactions. */}
-      <section aria-labelledby={transactionsHeadingId} className={`mt-2 ${cardClass}`}>
-        <h4 id={transactionsHeadingId} className="text-sm font-semibold text-slate-900">
-          Transactions
-        </h4>
+      <Card title="Delete Transactions">
         {loadFailed ? (
-          <ErrorMessage className="mt-3">Could not load the Bank Statements.</ErrorMessage>
+          <ErrorMessage>Could not load the Bank Statements.</ErrorMessage>
         ) : bankStatements?.length === 0 ? (
-          <p className="mt-2 text-sm text-slate-600">There are no Bank Statements.</p>
+          <p className="text-sm text-slate-600">There are no Bank Statements.</p>
         ) : (
           // Collapsed until asked for, and the ticks stay while it is. Counted once loaded.
           <>
@@ -208,7 +206,7 @@ export function DeleteDataSection({ isUploading, onDeleted, isGuest, onUserDelet
               aria-controls={bankStatementListId}
               disabled={bankStatements === null}
               onClick={() => setIsListOpen((open) => !open)}
-              className="mt-2 -ml-2 flex items-center gap-1.5 rounded-lg px-2 py-1 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-default disabled:hover:bg-transparent"
+              className="-my-1 -ml-2 flex items-center gap-1.5 self-start rounded-lg px-2 py-1 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-default disabled:hover:bg-transparent"
             >
               <span aria-hidden="true" className={`text-xs transition-transform ${isListOpen ? 'rotate-90' : ''}`}>
                 ▶
@@ -216,7 +214,7 @@ export function DeleteDataSection({ isUploading, onDeleted, isGuest, onUserDelet
               Bank Statements{bankStatementsCounted}
             </button>
             {isListOpen && bankStatements && (
-              <ul id={bankStatementListId} className="mt-2 divide-y divide-slate-200">
+              <ul id={bankStatementListId} className="divide-y divide-slate-200">
                 {bankStatements.map((statement) => (
                   <li key={statement.id}>
                     {/* On a phone the details wrap under one another beside the checkbox. */}
@@ -244,14 +242,13 @@ export function DeleteDataSection({ isUploading, onDeleted, isGuest, onUserDelet
           </>
         )}
 
-        <p className="mt-3 text-sm text-slate-600">Deletes every Transaction, including manually-entered ones.</p>
-        {countsFailed && <ErrorMessage className="mt-3">Could not count the Transactions.</ErrorMessage>}
-        <div className="mt-3 flex flex-wrap gap-3">
+        {countsFailed && <ErrorMessage>Could not count the Transactions.</ErrorMessage>}
+        <div className="flex flex-wrap gap-3">
           <button
             type="button"
             disabled={selected.length === 0 || isBusy}
             onClick={() => ask('bankStatements')}
-            className={buttonClass}
+            className={secondaryButtonClass}
           >
             Delete selected
           </button>
@@ -259,7 +256,7 @@ export function DeleteDataSection({ isUploading, onDeleted, isGuest, onUserDelet
             type="button"
             disabled={transactionCount === 0 || isBusy}
             onClick={() => ask('allTransactions')}
-            className={buttonClass}
+            className={secondaryButtonClass}
           >
             Delete all
           </button>
@@ -285,22 +282,18 @@ export function DeleteDataSection({ isUploading, onDeleted, isGuest, onUserDelet
             Delete all {counted(transactionCount, 'Transaction')}?
           </ConfirmDelete>
         )}
-      </section>
+      </Card>
 
       {/* Locked Transactions keep their Category, and the Categories stay. */}
-      <div className={`mt-3 ${cardClass}`}>
-        <p className="text-sm text-slate-600">
-          Every Categorization Rule, seeded ones included. Imported Transactions that aren't Locked become
-          Uncategorized.
-        </p>
-        {countsFailed && <ErrorMessage className="mt-3">Could not count the Categorization Rules.</ErrorMessage>}
+      <Card title="Delete Categorization Rules" description="Transactions that aren't Locked become Uncategorized.">
+        {countsFailed && <ErrorMessage>Could not count the Categorization Rules.</ErrorMessage>}
         <button
           type="button"
           disabled={ruleCount === 0 || isBusy}
           onClick={() => ask('allRules')}
-          className={`mt-3 ${buttonClass}`}
+          className={`self-start ${secondaryButtonClass}`}
         >
-          Delete all rules
+          Delete all
         </button>
         {confirming === 'allRules' && (
           <ConfirmDelete
@@ -315,19 +308,16 @@ export function DeleteDataSection({ isUploading, onDeleted, isGuest, onUserDelet
               ` ${counted(ruleCategorizedTransactionCount, 'Transaction')} will become Uncategorized.`}
           </ConfirmDelete>
         )}
-      </div>
+      </Card>
 
       {/* Shown to the Guest too, disabled with no explanation, so the Guest sees what a signed-up User
           can do. */}
-      <div className={`mt-3 ${cardClass}`}>
-        <p className="text-sm text-slate-600">
-          Your User and everything it owns, for good.
-        </p>
+      <Card title="Delete your User" description="Your User and all personal data." isDanger>
         <button
           type="button"
           disabled={isGuest || isBusy}
           onClick={() => ask('user')}
-          className="mt-3 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-red-700 disabled:cursor-not-allowed disabled:bg-red-300"
+          className="self-start rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-red-700 disabled:cursor-not-allowed disabled:bg-red-300 disabled:shadow-none"
         >
           Delete user and all data
         </button>
@@ -338,7 +328,36 @@ export function DeleteDataSection({ isUploading, onDeleted, isGuest, onUserDelet
             onCancel={() => setConfirming(null)}
           />
         )}
+      </Card>
+    </section>
+  )
+}
+
+interface CardProps {
+  title: string
+  // A short grey line under the title.
+  description?: string
+  // Red-tinted, for the one delete that takes everything.
+  isDanger?: boolean
+  children: ReactNode
+}
+
+// One delete's card, its own region named by its title: the title and its line, then the content and
+// the buttons, all evenly spaced.
+function Card({ title, description, isDanger = false, children }: CardProps) {
+  const headingId = useId()
+  return (
+    <section
+      aria-labelledby={headingId}
+      className={`flex flex-col gap-3 rounded-lg border bg-white p-4 shadow-sm ${isDanger ? 'border-red-200' : 'border-slate-200'}`}
+    >
+      <div>
+        <h4 id={headingId} className="text-sm font-semibold text-slate-900">
+          {title}
+        </h4>
+        {description && <p className="mt-1 text-sm text-slate-600">{description}</p>}
       </div>
+      {children}
     </section>
   )
 }
@@ -377,7 +396,7 @@ function ConfirmDeleteYourUser({ isUploading, onDeleted, onCancel }: ConfirmDele
     <form
       noValidate
       onSubmit={handleSubmit}
-      className="mt-3 flex flex-col gap-3 rounded-lg bg-red-50 px-3 py-2 text-sm"
+      className="flex flex-col gap-3 rounded-lg bg-red-50 p-3 text-sm"
     >
       <p className="text-red-800">Delete your User and all its data for good? Enter your password to confirm.</p>
       {errorMessage && <ErrorMessage>{errorMessage}</ErrorMessage>}
@@ -393,7 +412,7 @@ function ConfirmDeleteYourUser({ isUploading, onDeleted, onCancel }: ConfirmDele
         </Field>
       </div>
       <div className="flex flex-wrap justify-end gap-2">
-        <button type="submit" disabled={isDeleting || isUploading} className={smallButtonClass}>
+        <button type="submit" disabled={isDeleting || isUploading} className={confirmButtonClass}>
           Confirm delete
         </button>
         <button type="button" disabled={isDeleting} onClick={onCancel} className={smallButtonClass}>
@@ -416,9 +435,9 @@ interface ConfirmDeleteProps {
 // A delete's question, under the button that asked it.
 function ConfirmDelete({ children, isUploading, isDeleting, onConfirm, onCancel }: ConfirmDeleteProps) {
   return (
-    <div className="mt-3 flex flex-wrap items-center justify-end gap-2 rounded-lg bg-red-50 px-3 py-2 text-sm">
+    <div className="flex flex-wrap items-center justify-end gap-2 rounded-lg bg-red-50 p-3 text-sm">
       <span className="mr-auto text-red-800">{children}</span>
-      <button type="button" disabled={isDeleting || isUploading} onClick={onConfirm} className={smallButtonClass}>
+      <button type="button" disabled={isDeleting || isUploading} onClick={onConfirm} className={confirmButtonClass}>
         Confirm delete
       </button>
       <button type="button" disabled={isDeleting} onClick={onCancel} className={smallButtonClass}>

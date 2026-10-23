@@ -8,7 +8,9 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
     proxy: {
-      '/api': 'http://localhost:5260',
+      // HTTPS, since the API only gives antiforgery tokens over it. secure: false accepts the local
+      // ASP.NET development certificate.
+      '/api': { target: 'https://localhost:7166', secure: false },
     },
   },
   test: {

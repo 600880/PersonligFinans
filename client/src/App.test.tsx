@@ -7537,7 +7537,7 @@ describe('Delete data', () => {
   }
 
   function transactionsCard() {
-    return within(screen.getByRole('region', { name: 'Transactions' }))
+    return within(screen.getByRole('region', { name: 'Delete Transactions' }))
   }
 
   // The toggle the Bank Statement list is collapsed behind, once it has loaded and counted them.
@@ -7569,7 +7569,9 @@ describe('Delete data', () => {
   }
 
   function deleteAllRules() {
-    return deleteData().getByRole('button', { name: 'Delete all rules' })
+    return within(screen.getByRole('region', { name: 'Delete Categorization Rules' })).getByRole('button', {
+      name: 'Delete all',
+    })
   }
 
   it('keeps the Bank Statements collapsed on opening, counting them, and lists them from the toggle', async () => {
@@ -7624,12 +7626,11 @@ describe('Delete data', () => {
     expect(transactionsCard().queryAllByRole('checkbox')).toHaveLength(0)
   })
 
-  it('explains Delete all beside Delete selected, both shown while the list is collapsed', async () => {
+  it('shows Delete all beside Delete selected while the list is collapsed', async () => {
     bankStatements = [july]
     await openUserPage()
     await bankStatementsToggle()
 
-    expect(transactionsCard().getByText('Deletes every Transaction, including manually-entered ones.')).toBeInTheDocument()
     expect(deleteSelected()).toBeDisabled()
     expect(deleteAllTransactions()).toBeInTheDocument()
   })
@@ -7929,7 +7930,7 @@ describe('Delete data', () => {
     expect(deleteData().getByText('Delete all 2 Categorization Rules?')).toBeInTheDocument()
   })
 
-  it('keeps Delete all rules disabled after another delete until the rules are counted again', async () => {
+  it('keeps Delete all Categorization Rules disabled after another delete until the rules are counted again', async () => {
     deleteCounts = { transactionCount: 5, ruleCount: 3, ruleCategorizedTransactionCount: 2 }
     let respond: (response: Response) => void = () => {}
     handleDeleteAllTransactions = () => {
@@ -7951,7 +7952,7 @@ describe('Delete data', () => {
     expect(deleteData().getByText('Delete all 3 Categorization Rules?')).toBeInTheDocument()
   })
 
-  it('disables Delete all rules when there are none', async () => {
+  it('disables Delete all Categorization Rules when there are none', async () => {
     deleteCounts = { transactionCount: 1 }
     await openUserPage()
 
@@ -7959,7 +7960,7 @@ describe('Delete data', () => {
     expect(deleteAllRules()).toBeDisabled()
   })
 
-  it('keeps Delete all rules disabled, saying so, when counting them fails', async () => {
+  it('keeps Delete all Categorization Rules disabled, saying so, when counting them fails', async () => {
     deleteCounts = new Response(null, { status: 500 })
     await openUserPage()
 

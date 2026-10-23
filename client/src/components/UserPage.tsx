@@ -2,7 +2,7 @@ import { useId, useState, type FormEvent } from 'react'
 import { changePassword, signOut, type ChangePasswordRequest, type User } from '../lib/api'
 import { confirmPasswordError } from '../lib/confirmPassword'
 import { ConfirmPasswordField } from './ConfirmPasswordField'
-import { DeleteDataSection } from './DeleteDataSection'
+import { DeleteDataSection, secondaryButtonClass } from './DeleteDataSection'
 import { ErrorMessage, StatusMessage } from './Messages'
 import { Field, inputClassName } from './TransactionForm'
 
@@ -33,20 +33,18 @@ export function UserPage({ user, onSignedOut, isUploading, onDataDeleted }: User
       <h2 className="text-lg font-semibold text-slate-900">User</h2>
 
       <div className="mt-4 rounded-lg border border-slate-200 bg-white shadow-sm">
-        {/* Sign out stays beside the email at any width; a long email breaks across lines instead. */}
-        <div className="flex items-center justify-between gap-3 px-4 py-3">
-          <p className="min-w-0 text-sm break-all text-slate-600">
-            Signed in as <span className="font-medium text-slate-900">{user.isGuest ? 'Guest' : user.email}</span>
-          </p>
-          <button
-            type="button"
-            onClick={() => void handleSignOut()}
-            className={`shrink-0 ${secondaryButtonClassName}`}
-          >
-            Sign out
-          </button>
+        <div className="flex flex-col gap-3 p-4">
+          {/* Sign out stays beside the email at any width; a long email breaks across lines instead. */}
+          <div className="flex items-center justify-between gap-3">
+            <p className="min-w-0 text-sm break-all text-slate-600">
+              Signed in as <span className="font-medium text-slate-900">{user.isGuest ? 'Guest' : user.email}</span>
+            </p>
+            <button type="button" onClick={() => void handleSignOut()} className={`shrink-0 ${secondaryButtonClass}`}>
+              Sign out
+            </button>
+          </div>
+          {signOutFailed && <ErrorMessage>Signing out failed. Try again.</ErrorMessage>}
         </div>
-        {signOutFailed && <ErrorMessage className="mx-4 mb-3">Signing out failed. Try again.</ErrorMessage>}
 
         <div className="border-t border-slate-200 p-4">
           {/* The Guest has no password, so it has no Change password. The form is shown anyway,
@@ -65,9 +63,6 @@ export function UserPage({ user, onSignedOut, isUploading, onDataDeleted }: User
     </section>
   )
 }
-
-const secondaryButtonClassName =
-  'rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-900 shadow-sm hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-400 disabled:hover:bg-white'
 
 interface ChangePasswordFormProps {
   disabled: boolean
@@ -148,7 +143,8 @@ function ChangePasswordForm({ disabled }: ChangePasswordFormProps) {
             />
           </Field>
           <ConfirmPasswordField value={confirmPassword} onChange={setConfirmPassword} error={confirmPasswordFieldError} />
-          <div>
+          {/* The status line keeps its place beside the button, so the card never grows when it comes. */}
+          <div className="flex flex-wrap items-center gap-3">
             <button
               type="submit"
               disabled={isSubmitting}
@@ -156,10 +152,10 @@ function ChangePasswordForm({ disabled }: ChangePasswordFormProps) {
             >
               {isSubmitting ? 'Changing password…' : 'Change password'}
             </button>
+            <StatusMessage message={statusMessage} />
           </div>
         </fieldset>
       </form>
-      <StatusMessage message={statusMessage} className="mt-3" />
     </section>
   )
 }
