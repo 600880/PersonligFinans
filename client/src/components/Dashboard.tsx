@@ -9,6 +9,7 @@ import {
   type TransactionMonth,
 } from '../lib/api'
 import { formatAmount } from '../lib/amount'
+import { useIsDark } from '../lib/appearance'
 import { categoryColour } from '../lib/categoryColours'
 import { categoryName } from '../lib/categoryName'
 import { percent } from '../lib/percent'
@@ -30,7 +31,12 @@ const LOAD_ERROR = 'Could not load the Spending.'
 
 const CHART_SIZE = 240
 
-const EMPTY_RING_COLOUR = '#e2e8f0'
+// The empty ring, and the borders between slices in the colour behind the donut, switched with the
+// theme.
+const RING_COLOURS = {
+  light: { empty: '#e2e8f0', border: '#ffffff' },
+  dark: { empty: '#1e293b', border: '#020617' },
+}
 
 // Shared by the Spending ring and the empty ring.
 const RING = { innerRadius: 76, outerRadius: 116, isAnimationActive: false } as const
@@ -52,14 +58,14 @@ interface LoadedSpending {
   spending: Spending
 }
 
-function toSliceViews(spending: Spending, categories: Category[]): SliceView[] {
+function toSliceViews(spending: Spending, categories: Category[], dark: boolean): SliceView[] {
   return spending.slices.map(({ categoryId, amount }) => ({
     key: String(categoryId),
     categoryId,
     name: categoryName(categoryId, categories),
     amount,
     share: amount / spending.total,
-    colour: categoryColour(categoryId, categories),
+    colour: categoryColour(categoryId, categories, dark),
   }))
 }
 
@@ -77,6 +83,8 @@ export function Dashboard({
   onOpenTransactions: (target: TransactionsTarget) => void
 }) {
   const headingId = useId()
+  const dark = useIsDark()
+  const ringColours = RING_COLOURS[dark ? 'dark' : 'light']
   // Null until loaded, so the donut never shows a Category without its name.
   const [categories, setCategories] = useState<Category[] | null>(null)
   // The months with Transactions, newest first, or the current month when there are none. The
@@ -147,7 +155,7 @@ export function Dashboard({
     categories && loaded && selected && loaded.period === selected && loaded.includeTransfers === includeTransfers
       ? loaded.spending
       : null
-  const slices = spending && categories ? toSliceViews(spending, categories) : []
+  const slices = spending && categories ? toSliceViews(spending, categories, dark) : []
   const periodOptions = selected ? periodsOfMonths(months, selected.granularity) : []
   // The Period the slices lead to, once its Spending shows. The Transactions page finds a quarter's
   // first month where the Category has Transactions.
@@ -170,7 +178,7 @@ export function Dashboard({
   return (
     <>
       <section aria-labelledby={headingId} className="mt-6 w-full max-w-3xl">
-        <h2 id={headingId} className="text-lg font-semibold text-slate-900">
+        <h2 id={headingId} className="text-lg font-semibold text-slate-900 dark:text-slate-100">
           Spending
         </h2>
 
@@ -180,14 +188,14 @@ export function Dashboard({
               value={selected.granularity}
               onChange={(granularity) => choosePeriod(switchGranularity(selected, granularity, months))}
             />
-            <label className="flex w-fit flex-col gap-1 text-sm font-medium text-slate-700">
+            <label className="flex w-fit flex-col gap-1 text-sm font-medium text-slate-700 dark:text-slate-300">
               Period
               <select
                 value={periodValue(selected)}
                 onChange={(event) =>
                   choosePeriod(periodOptions.find((option) => periodValue(option) === event.target.value)!)
                 }
-                className="rounded-lg border border-slate-300 px-3 py-2 font-normal"
+                className="rounded-lg border border-slate-300 dark:border-slate-700 px-3 py-2 font-normal"
               >
                 {periodOptions.map((option) => (
                   <option key={periodValue(option)} value={periodValue(option)}>
@@ -199,12 +207,12 @@ export function Dashboard({
           </div>
         )}
 
-        <label className="mt-3 flex w-fit items-center gap-2 text-sm font-medium text-slate-700">
+        <label className="mt-3 flex w-fit items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-300">
           <input
             type="checkbox"
             checked={includeTransfers}
             onChange={(event) => chooseIncludeTransfers(event.target.checked)}
-            className="size-4 rounded border-slate-300"
+            className="size-4 rounded border-slate-300 dark:border-slate-700"
           />
           Include transfers
         </label>
@@ -220,7 +228,7 @@ export function Dashboard({
                   dataKey="amount"
                   nameKey="name"
                   {...RING}
-                  stroke="#ffffff"
+                  stroke={ringColours.border}
                   strokeWidth={2}
                   onClick={(_sector, index) => openSlice(slices[index])}
                   style={targetPeriod ? { cursor: 'pointer' } : undefined}
@@ -234,7 +242,7 @@ export function Dashboard({
                   data={[{ amount: 1 }]}
                   dataKey="amount"
                   {...RING}
-                  fill={EMPTY_RING_COLOUR}
+                  fill={ringColours.empty}
                   stroke="none"
                 />
               )}
@@ -244,9 +252,9 @@ export function Dashboard({
                     const slice = active ? (payload?.[0]?.payload as SliceView | undefined) : undefined
                     if (!slice) return null
                     return (
-                      <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm">
-                        <p className="font-medium text-slate-900">{slice.name}</p>
-                        <p className="text-slate-600 tabular-nums">
+                      <div className="rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3 py-2 text-sm shadow-sm">
+                        <p className="font-medium text-slate-900 dark:text-slate-100">{slice.name}</p>
+                        <p className="text-slate-600 dark:text-slate-400 tabular-nums">
                           {formatAmount(slice.amount)} · {percent.format(slice.share)}
                         </p>
                       </div>
@@ -257,15 +265,15 @@ export function Dashboard({
             </PieChart>
             {spending && (
               <p className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-                <span className="text-xs text-slate-500">Total</span>{' '}
-                <span className="text-lg font-semibold text-slate-900">{formatAmount(spending.total)}</span>
+                <span className="text-xs text-slate-500 dark:text-slate-400">Total</span>{' '}
+                <span className="text-lg font-semibold text-slate-900 dark:text-slate-100">{formatAmount(spending.total)}</span>
               </p>
             )}
           </div>
 
           {slices.length > 0 && (
             <table className="w-full text-sm">
-              <tbody className="divide-y divide-slate-200 text-slate-900">
+              <tbody className="divide-y divide-slate-200 dark:divide-slate-800 text-slate-900 dark:text-slate-100">
                 {slices.map((slice) => (
                   <tr key={slice.key}>
                     <td className="py-2 pr-3">
@@ -286,7 +294,7 @@ export function Dashboard({
                     <td className="py-2 pr-3 text-right whitespace-nowrap tabular-nums">
                       {formatAmount(slice.amount)}
                     </td>
-                    <td className="py-2 text-right whitespace-nowrap text-slate-500 tabular-nums">
+                    <td className="py-2 text-right whitespace-nowrap text-slate-500 dark:text-slate-400 tabular-nums">
                       {percent.format(slice.share)}
                     </td>
                   </tr>

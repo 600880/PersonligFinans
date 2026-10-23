@@ -13,6 +13,7 @@ import {
 } from 'recharts'
 import { fetchMonthlySpending, type Category, type MonthSpending, type TransactionMonth } from '../lib/api'
 import { formatAmount } from '../lib/amount'
+import { useIsDark } from '../lib/appearance'
 import { categoryColour } from '../lib/categoryColours'
 import { categoryName } from '../lib/categoryName'
 import type { Granularity } from '../lib/period'
@@ -51,8 +52,28 @@ const TOO_FEW_PERIODS: Record<Granularity, string> = {
 
 const CHART_HEIGHT = 280
 
-// Dark slate, outside the Category palette, so the Total line stands apart from every Category.
-const TOTAL_COLOUR = '#1e293b'
+// The chart's own colours, switched with the theme. The Total line is slate outside the Category
+// palette, dark in Light and pale in Dark, so it stands apart from every Category. Light keeps
+// recharts' own greys for the axes, their label and the line following the pointer, and its white
+// ring round the dot under the pointer, which Dark gives the page's colour.
+const CHART_COLOURS = {
+  light: {
+    total: '#1e293b',
+    grid: '#e2e8f0',
+    axis: '#666666',
+    label: '#808080',
+    cursor: '#cccccc',
+    ring: '#ffffff',
+  },
+  dark: {
+    total: '#e2e8f0',
+    grid: '#1e293b',
+    axis: '#94a3b8',
+    label: '#94a3b8',
+    cursor: '#475569',
+    ring: '#020617',
+  },
+}
 
 const wholeKroner = new Intl.NumberFormat('nb-NO', { maximumFractionDigits: 0 })
 
@@ -83,8 +104,13 @@ function YAxisInverseScale({ onScale }: { onScale: (scale: InverseScaleFunction 
 
 // The Total row, then one per Category with Spending in the Span, largest first. The Categories wait
 // for their names, so a Category is never shown without its name.
-function trendRows(monthly: MonthSpending[], categories: Category[] | null): TrendRow[] {
-  const total = { key: TOTAL_ROW, categoryId: 'all' as const, name: 'Total', colour: TOTAL_COLOUR }
+function trendRows(monthly: MonthSpending[], categories: Category[] | null, dark: boolean): TrendRow[] {
+  const total = {
+    key: TOTAL_ROW,
+    categoryId: 'all' as const,
+    name: 'Total',
+    colour: CHART_COLOURS[dark ? 'dark' : 'light'].total,
+  }
   if (!categories) return [total]
   return [
     total,
@@ -92,7 +118,7 @@ function trendRows(monthly: MonthSpending[], categories: Category[] | null): Tre
       key: categoryRow(categoryId),
       categoryId,
       name: categoryName(categoryId, categories),
-      colour: categoryColour(categoryId, categories),
+      colour: categoryColour(categoryId, categories, dark),
     })),
   ]
 }
@@ -117,6 +143,8 @@ export function SpendingTrend({
   onOpenTransactions: (target: TransactionsTarget) => void
 }) {
   const headingId = useId()
+  const dark = useIsDark()
+  const colours = CHART_COLOURS[dark ? 'dark' : 'light']
   const offered = useMemo(() => offeredMonths(months), [months])
   const [granularity, setGranularity] = useState<Granularity>('month')
   // The Span shown, remembered with the months it was worked out from. When the months are reloaded
@@ -152,7 +180,7 @@ export function SpendingTrend({
   const points = current?.monthly ? trendPoints(current.monthly, granularity) : []
   const first = points[0]
   const last = points[points.length - 1]
-  const rows = current?.monthly ? trendRows(current.monthly, categories) : []
+  const rows = current?.monthly ? trendRows(current.monthly, categories, dark) : []
   const drawn = rows.filter((row) => switchedOn.has(row.key))
   const yValueAt = useRef<InverseScaleFunction | undefined>(undefined)
 
@@ -202,23 +230,23 @@ export function SpendingTrend({
 
   return (
     <section aria-labelledby={headingId} className="mt-10 w-full max-w-3xl">
-      <h2 id={headingId} className="text-lg font-semibold text-slate-900">
+      <h2 id={headingId} className="text-lg font-semibold text-slate-900 dark:text-slate-100">
         Spending trend
       </h2>
 
       {offered.length < 2 ? (
-        <p className="mt-4 text-sm text-slate-600">{TOO_FEW_PERIODS.month}</p>
+        <p className="mt-4 text-sm text-slate-600 dark:text-slate-400">{TOO_FEW_PERIODS.month}</p>
       ) : (
         <div className="mt-4 flex flex-wrap gap-4">
           <GranularitySelect value={granularity} onChange={chooseGranularity} />
           {span &&
             (['from', 'to'] as const).map((end) => (
-              <label key={end} className="flex w-fit flex-col gap-1 text-sm font-medium text-slate-700">
+              <label key={end} className="flex w-fit flex-col gap-1 text-sm font-medium text-slate-700 dark:text-slate-300">
                 {end === 'from' ? 'From' : 'To'}
                 <select
                   value={monthValue(span[end])}
                   onChange={(event) => chooseMonth(end, event.target.value)}
-                  className="rounded-lg border border-slate-300 px-3 py-2 font-normal"
+                  className="rounded-lg border border-slate-300 dark:border-slate-700 px-3 py-2 font-normal"
                 >
                   {offered.map((option) => (
                     <option key={monthValue(option)} value={monthValue(option)}>
@@ -232,18 +260,18 @@ export function SpendingTrend({
       )}
 
       {offered.length >= 2 && !span && (
-        <p className="mt-4 text-sm text-slate-600">{TOO_FEW_PERIODS[granularity]}</p>
+        <p className="mt-4 text-sm text-slate-600 dark:text-slate-400">{TOO_FEW_PERIODS[granularity]}</p>
       )}
 
       {span && (
         <>
 
-          <label className="mt-3 flex w-fit items-center gap-2 text-sm font-medium text-slate-700">
+          <label className="mt-3 flex w-fit items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-300">
             <input
               type="checkbox"
               checked={includeTransfers}
               onChange={(event) => setIncludeTransfers(event.target.checked)}
-              className="size-4 rounded border-slate-300"
+              className="size-4 rounded border-slate-300 dark:border-slate-700"
             />
             Include transfers
           </label>
@@ -261,26 +289,34 @@ export function SpendingTrend({
                 onClick={openNearestLine}
               >
                 <YAxisInverseScale onScale={(scale) => (yValueAt.current = scale)} />
-                <CartesianGrid stroke="#e2e8f0" vertical={false} />
-                <XAxis dataKey="label" tick={{ fontSize: 12 }} />
+                <CartesianGrid stroke={colours.grid} vertical={false} />
+                <XAxis dataKey="label" stroke={colours.axis} tick={{ fontSize: 12 }} />
                 <YAxis
                   tickFormatter={(value: number) => wholeKroner.format(value)}
+                  stroke={colours.axis}
                   tick={{ fontSize: 12 }}
                   width={72}
-                  label={{ value: 'NOK per month', angle: -90, position: 'insideLeft', fontSize: 12 }}
+                  label={{
+                    value: 'NOK per month',
+                    angle: -90,
+                    position: 'insideLeft',
+                    fontSize: 12,
+                    fill: colours.label,
+                  }}
                 />
                 <Tooltip
+                  cursor={{ stroke: colours.cursor }}
                   content={({ active, payload }) => {
                     const point = active ? (payload?.[0]?.payload as TrendPoint | undefined) : undefined
                     if (!point) return null
                     return (
-                      <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm">
-                        <p className="font-medium text-slate-900">
+                      <div className="rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3 py-2 text-sm shadow-sm">
+                        <p className="font-medium text-slate-900 dark:text-slate-100">
                           {point.label}
                           {coverageNote(point)}
                         </p>
                         {drawn.map((row) => (
-                          <p key={row.key} className="text-slate-600 tabular-nums">
+                          <p key={row.key} className="text-slate-600 dark:text-slate-400 tabular-nums">
                             {row.name} {formatAmount(point.values[row.key])} per month
                           </p>
                         ))}
@@ -297,6 +333,7 @@ export function SpendingTrend({
                     stroke={row.colour}
                     strokeWidth={row.key === TOTAL_ROW ? 3 : 2}
                     dot={{ r: row.key === TOTAL_ROW ? 3 : 2, fill: row.colour }}
+                    activeDot={{ stroke: colours.ring }}
                     isAnimationActive={false}
                   />
                 ))}
@@ -305,7 +342,7 @@ export function SpendingTrend({
               {/* On a phone the table scrolls sideways on its own, so the page never runs wider than the screen. */}
               <div className="mt-4 max-sm:overflow-x-auto">
                 <table className="w-full text-sm">
-                  <thead className="text-slate-500">
+                  <thead className="text-slate-500 dark:text-slate-400">
                     <tr>
                       <th />
                       <th className="py-2 pr-3 text-right font-medium">{first.label}</th>
@@ -313,7 +350,7 @@ export function SpendingTrend({
                       <th className="py-2 text-right font-medium">Change</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-200 text-slate-900">
+                  <tbody className="divide-y divide-slate-200 dark:divide-slate-800 text-slate-900 dark:text-slate-100">
                     {rows.map((row) => (
                       <tr key={row.key}>
                         <td className="py-2 pr-3">
@@ -322,7 +359,7 @@ export function SpendingTrend({
                               type="checkbox"
                               checked={switchedOn.has(row.key)}
                               onChange={(event) => switchRow(row.key, event.target.checked)}
-                              className="size-4 rounded border-slate-300"
+                              className="size-4 rounded border-slate-300 dark:border-slate-700"
                             />
                             <span
                               aria-hidden="true"
@@ -338,7 +375,7 @@ export function SpendingTrend({
                         <td className="py-2 pr-3 text-right whitespace-nowrap tabular-nums">
                           {formatAmount(last.values[row.key])}
                         </td>
-                        <td className="py-2 text-right whitespace-nowrap text-slate-600 tabular-nums">
+                        <td className="py-2 text-right whitespace-nowrap text-slate-600 dark:text-slate-400 tabular-nums">
                           {formatChange(first.values[row.key], last.values[row.key])}
                         </td>
                       </tr>
