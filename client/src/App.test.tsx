@@ -7300,6 +7300,33 @@ describe('Appearance', () => {
     device.change(true)
     expect(isDark()).toBe(false)
   })
+
+  describe('before signing in', () => {
+    // Signed out, with a pick made earlier in this browser and the page opened not yet dark.
+    beforeEach(() => {
+      currentUser = new Response(null, { status: 401 })
+      localStorage.setItem('appearance', 'dark')
+    })
+
+    afterEach(() => {
+      window.history.replaceState(null, '', '/')
+    })
+
+    it('opens the landing page in the pick made earlier in this browser', async () => {
+      render(<App />)
+
+      expect(await screen.findByRole('heading', { name: 'Sign in' })).toBeInTheDocument()
+      expect(isDark()).toBe(true)
+    })
+
+    it('opens Choose a new password, from the link in a reset email, in the pick made earlier', async () => {
+      window.history.replaceState(null, '', '/reset-password?email=me%40example.com&token=dG9rZW4')
+      render(<App />)
+
+      expect(await screen.findByRole('heading', { name: 'Choose a new password' })).toBeInTheDocument()
+      expect(isDark()).toBe(true)
+    })
+  })
 })
 
 describe('Password reset', () => {
