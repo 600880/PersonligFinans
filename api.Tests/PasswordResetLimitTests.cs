@@ -215,6 +215,24 @@ public class PasswordResetLimitTests
         Assert.Equal([a, b], SentTo(sender));
     }
 
+    // Otherwise deleting a User could raise the day's email-sending past the cap.
+    [Fact]
+    public async Task ADeletedUsersEmails_StillCountAgainstTheDailyCap()
+    {
+        var sender = new FakeEmailSender();
+        await using var api = Api(OnFebruary(13), sender, perAddressMinutes: 5, perDay: 1);
+        var deletedEmail = SignedInClient.UniqueEmail();
+        var deleted = await api.CreateSignedInClientAsync(deletedEmail);
+        var other = await SignUp(api);
+
+        await RequestReset(api, deletedEmail);
+        var deleting = await deleted.PostAsJsonAsync("/api/user/delete", new { password = SignedInClient.Password });
+        Assert.Equal(HttpStatusCode.NoContent, deleting.StatusCode);
+        await RequestReset(api, other);
+
+        Assert.Equal([deletedEmail], SentTo(sender));
+    }
+
     [Fact]
     public async Task ConcurrentRequestsForAnAddress_SendOneEmail()
     {

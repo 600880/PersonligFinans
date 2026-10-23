@@ -1,7 +1,8 @@
-import { useEffect, useId, useState, type ReactNode } from 'react'
+import { useEffect, useId, useState, type FormEvent, type ReactNode } from 'react'
 import {
   deleteAllTransactions,
   deleteBankStatements,
+  deleteYourUser,
   fetchBankStatements,
   fetchDeleteCounts,
   type DeleteCounts,
@@ -10,6 +11,7 @@ import {
 import { counted } from '../lib/count'
 import { formatNorwegianDate } from '../lib/date'
 import { ErrorMessage, StatusMessage } from './Messages'
+import { Field, inputClassName } from './TransactionForm'
 
 interface DeleteDataSectionProps {
   // While an Upload is in progress nothing can be deleted, so Transactions don't keep appearing
@@ -17,10 +19,14 @@ interface DeleteDataSectionProps {
   isUploading: boolean
   // Called after each delete, so the app's other pages show what is left.
   onDeleted: () => void
+  // The Guest is shared by every visitor, so it can't be deleted.
+  isGuest: boolean
+  // Called once the User is deleted and this browser signed out, as after Sign out.
+  onUserDeleted: () => void
 }
 
 // The delete whose question is open. One question is asked at a time.
-type Confirming = 'bankStatements' | 'allTransactions'
+type Confirming = 'bankStatements' | 'allTransactions' | 'user'
 
 // How a confirmed delete went: the status line saying what it deleted, or why it failed.
 type DeleteOutcome = { ok: true; status: string } | { ok: false; message: string }
@@ -34,7 +40,8 @@ const cardClass = 'rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-
 // The User's deletes, least destructive first: the ticked Bank Statements with their Transactions,
 // then every Transaction. Each asks for confirmation with exact counts. One status line, for
 // whichever delete ran last, stays until the next action.
-export function DeleteDataSection({ isUploading, onDeleted }: DeleteDataSectionProps) {
+// Last, in red, Delete your User, which asks for the password instead and ends on the landing page.
+export function DeleteDataSection({ isUploading, onDeleted, isGuest, onUserDeleted }: DeleteDataSectionProps) {
   const headingId = useId()
   const bankStatementsHeadingId = useId()
   // Null until loaded, so "There are no Bank Statements." never shows before they are.
@@ -243,7 +250,91 @@ export function DeleteDataSection({ isUploading, onDeleted }: DeleteDataSectionP
           </ConfirmDelete>
         )}
       </div>
+
+      {/* Shown to the Guest too, disabled with no explanation, so the Guest sees what a signed-up User
+          can do. */}
+      <div className={`mt-3 ${cardClass}`}>
+        <p className="text-sm text-slate-600">
+          Your User and everything it owns, for good.
+        </p>
+        <button
+          type="button"
+          disabled={isGuest || isBusy}
+          onClick={() => ask('user')}
+          className="mt-3 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-red-700 disabled:cursor-not-allowed disabled:bg-red-300"
+        >
+          Delete user and all data
+        </button>
+        {confirming === 'user' && (
+          <ConfirmDeleteYourUser
+            isUploading={isUploading}
+            onDeleted={onUserDeleted}
+            onCancel={() => setConfirming(null)}
+          />
+        )}
+      </div>
     </section>
+  )
+}
+
+interface ConfirmDeleteYourUserProps {
+  isUploading: boolean
+  onDeleted: () => void
+  onCancel: () => void
+}
+
+// Delete your User's question, which asks for the password, so that someone using an open tab can't
+// delete the User. A wrong password or a locked email is shown here, keeping the question open.
+function ConfirmDeleteYourUser({ isUploading, onDeleted, onCancel }: ConfirmDeleteYourUserProps) {
+  const [password, setPassword] = useState('')
+  const [passwordError, setPasswordError] = useState<string | undefined>()
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [isDeleting, setIsDeleting] = useState(false)
+
+  async function handleSubmit(event: FormEvent) {
+    event.preventDefault()
+    setPasswordError(undefined)
+    setErrorMessage(null)
+    setIsDeleting(true)
+    const result = await deleteYourUser(password)
+    // Deleted, the app unmounts and shows the landing page.
+    if (result.ok) {
+      onDeleted()
+      return
+    }
+    setIsDeleting(false)
+    setPasswordError(result.fieldErrors.password)
+    setErrorMessage(result.message)
+  }
+
+  return (
+    <form
+      noValidate
+      onSubmit={handleSubmit}
+      className="mt-3 flex flex-col gap-3 rounded-lg bg-red-50 px-3 py-2 text-sm"
+    >
+      <p className="text-red-800">Delete your User and all its data for good? Enter your password to confirm.</p>
+      {errorMessage && <ErrorMessage>{errorMessage}</ErrorMessage>}
+      <div className="max-w-sm max-sm:max-w-none">
+        <Field label="Password" error={passwordError}>
+          <input
+            type="password"
+            autoComplete="current-password"
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+            className={`bg-white ${inputClassName}`}
+          />
+        </Field>
+      </div>
+      <div className="flex flex-wrap justify-end gap-2">
+        <button type="submit" disabled={isDeleting || isUploading} className={smallButtonClass}>
+          Confirm delete
+        </button>
+        <button type="button" disabled={isDeleting} onClick={onCancel} className={smallButtonClass}>
+          Cancel
+        </button>
+      </div>
+    </form>
   )
 }
 

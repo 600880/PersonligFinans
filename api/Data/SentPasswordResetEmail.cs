@@ -6,7 +6,8 @@ public class SentPasswordResetEmail
 {
     public long Id { get; set; }
 
-    public required string UserId { get; set; }
+    // Null once its User is deleted, when it still counts towards the daily cap.
+    public string? UserId { get; set; }
 
     public DateTimeOffset SentAt { get; set; }
 }

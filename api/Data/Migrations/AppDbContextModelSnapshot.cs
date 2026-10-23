@@ -199,7 +199,6 @@ namespace PersonligFinans.Api.Data.Migrations
                         .HasColumnName("made_at");
 
                     b.Property<string>("UserId")
-                        .IsRequired()
                         .HasColumnType("text")
                         .HasColumnName("user_id");
 
@@ -504,7 +503,6 @@ namespace PersonligFinans.Api.Data.Migrations
                         .HasColumnName("sent_at");
 
                     b.Property<string>("UserId")
-                        .IsRequired()
                         .HasColumnType("text")
                         .HasColumnName("user_id");
 
@@ -622,8 +620,7 @@ namespace PersonligFinans.Api.Data.Migrations
                     b.HasOne("Microsoft.AspNetCore.Identity.IdentityUser", null)
                         .WithMany()
                         .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired()
+                        .OnDelete(DeleteBehavior.SetNull)
                         .HasConstraintName("fk_ai_requests_asp_net_users_user_id");
                 });
 
@@ -730,8 +727,7 @@ namespace PersonligFinans.Api.Data.Migrations
                     b.HasOne("Microsoft.AspNetCore.Identity.IdentityUser", null)
                         .WithMany()
                         .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired()
+                        .OnDelete(DeleteBehavior.SetNull)
                         .HasConstraintName("fk_sent_password_reset_emails_asp_net_users_user_id");
                 });
 
