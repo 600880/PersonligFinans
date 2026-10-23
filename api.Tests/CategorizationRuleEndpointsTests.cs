@@ -508,6 +508,24 @@ public class CategorizationRuleEndpointsTests : IAsyncLifetime
         (await _client.GetFromJsonAsync<List<TransactionResponse>>("/api/transactions?year=2026&month=8"))!
             .ToDictionary(t => t.Description, t => t.CategoryId);
 
+    // Categorizes the August 2026 Transaction with the description by hand, which Locks it.
+    private async Task CategorizeByHand(string description, int categoryId)
+    {
+        var august = await _client.GetFromJsonAsync<List<TransactionResponse>>("/api/transactions?year=2026&month=8");
+        var transaction = august!.Single(t => t.Description == description);
+        var response = await _client.PutAsJsonAsync($"/api/transactions/{transaction.Id}/category", new { categoryId });
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    private async Task AddManualAugustTransaction(string description, int categoryId)
+    {
+        var response = await _client.PostAsJsonAsync("/api/transactions", new
+        {
+            date = "2026-08-05", description, amount = -100m, categoryId,
+        });
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+    }
+
     [Fact]
     public async Task DeleteAll_DeletesEveryRuleSeededOnesIncluded_AndUncategorizesWhatTheyCategorized()
     {
@@ -534,19 +552,9 @@ public class CategorizationRuleEndpointsTests : IAsyncLifetime
     public async Task DeleteAll_LeavesLockedTransactionsAndTheCategoriesAsTheyWere()
     {
         await UploadPurchasesFrom("Rema 1000", "Kiwi Sentrum");
-        var august = await _client.GetFromJsonAsync<List<TransactionResponse>>("/api/transactions?year=2026&month=8");
-        var kiwi = august!.Single(t => t.Description == "Kiwi Sentrum");
-        // Categorized manually, which Locks it, though a seeded rule matches it.
-        var recategorized = await _client.PutAsJsonAsync($"/api/transactions/{kiwi.Id}/category", new { categoryId = _categories.Other });
-        Assert.Equal(HttpStatusCode.OK, recategorized.StatusCode);
-        var manual = await _client.PostAsJsonAsync("/api/transactions", new
-        {
-            date = "2026-08-05",
-            description = "Rema 1000 Torget",
-            amount = -100m,
-            categoryId = _categories.Restaurants,
-        });
-        Assert.Equal(HttpStatusCode.Created, manual.StatusCode);
+        // Locked, though a seeded rule matches it.
+        await CategorizeByHand("Kiwi Sentrum", _categories.Other);
+        await AddManualAugustTransaction("Rema 1000 Torget", _categories.Restaurants);
         var categories = await _client.GetFromJsonAsync<List<CategoryResponse>>("/api/categories");
 
         Assert.Equal(HttpStatusCode.OK, (await DeleteAllRules()).StatusCode);
@@ -573,13 +581,8 @@ public class CategorizationRuleEndpointsTests : IAsyncLifetime
     {
         // Two categorized by a seeded rule, one no rule matches, and one Locked though a rule matches it.
         await UploadPurchasesFrom("Rema 1000", "Cubus", "Kiosk", "Kiwi Sentrum");
-        var kiwi = (await _client.GetFromJsonAsync<List<TransactionResponse>>("/api/transactions?year=2026&month=8"))!
-            .Single(t => t.Description == "Kiwi Sentrum");
-        await _client.PutAsJsonAsync($"/api/transactions/{kiwi.Id}/category", new { categoryId = _categories.Other });
-        await _client.PostAsJsonAsync("/api/transactions", new
-        {
-            date = "2026-08-05", description = "Rema 1000 Torget", amount = -100m, categoryId = _categories.Groceries,
-        });
+        await CategorizeByHand("Kiwi Sentrum", _categories.Other);
+        await AddManualAugustTransaction("Rema 1000 Torget", _categories.Groceries);
         var before = await AugustCategories();
 
         var counted = await DeleteCounts();
@@ -602,6 +605,6 @@ public class CategorizationRuleEndpointsTests : IAsyncLifetime
         var response = await DeleteAllRules();
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.Equal(new DeletedCategorizationRulesResponse(0), await response.Content.ReadFromJsonAsync<DeletedCategorizationRulesResponse>());
+        Assert.Equal(new DeletedCategorizationRulesResponse(RulesDeleted: 0), await response.Content.ReadFromJsonAsync<DeletedCategorizationRulesResponse>());
     }
 }

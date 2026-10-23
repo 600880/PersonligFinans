@@ -124,6 +124,9 @@ export function DeleteDataSection({ isUploading, onDeleted }: DeleteDataSectionP
     setIsDeleting(true)
     const result = await run().finally(() => setIsDeleting(false))
     setConfirming(null)
+    // One delete changes what another counts, as deleting every Transaction leaves none for deleting
+    // the rules to make Uncategorized, so every delete waits to be counted again.
+    setCounts(null)
     setDataVersion((version) => version + 1)
     if (result.ok) {
       setStatusMessage(result.status)
