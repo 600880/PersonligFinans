@@ -112,6 +112,7 @@ let passwordResetAvailability: { available: boolean; linkHours: number } | Respo
 let handleRequestPasswordReset: PostHandler
 let handleChooseNewPassword: PostHandler
 let handleChangePassword: PostHandler
+let handleDeleteYourUser: PostHandler
 // How many antiforgery tokens the server has given. Each is new: token-1, token-2 and so on.
 let antiforgeryTokensGiven: number
 const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
@@ -134,6 +135,7 @@ const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
   if (url === '/api/user/change-password' && init?.method === 'POST') {
     return handleChangePassword(JSON.parse(init.body as string))
   }
+  if (url === '/api/user/delete' && init?.method === 'POST') return handleDeleteYourUser(JSON.parse(init.body as string))
   if (url === '/api/antiforgery-token') return Response.json({ token: `token-${++antiforgeryTokensGiven}` })
   const monthlyUrl =
     /^\/api\/spending\/monthly\?fromYear=(\d+)&fromMonth=(\d+)&toYear=(\d+)&toMonth=(\d+)(&includeTransfers=true)?$/.exec(url)
@@ -278,6 +280,7 @@ beforeEach(() => {
   handleRequestPasswordReset = () => new Response(null, { status: 204 })
   handleChooseNewPassword = (body) => Response.json({ email: (body as { email: string }).email, isGuest: false })
   handleChangePassword = () => new Response(null, { status: 204 })
+  handleDeleteYourUser = () => new Response(null, { status: 204 })
   vi.stubGlobal('fetch', fetchMock)
 })
 
@@ -7862,6 +7865,119 @@ describe('Delete data', () => {
     await user.click(screen.getByRole('button', { name: 'Transactions' }))
     expect(await screen.findByText(/no transactions/i)).toBeInTheDocument()
     expect(screen.queryByText('Rema 1000')).not.toBeInTheDocument()
+  })
+})
+
+describe('Delete user and all data', () => {
+  async function openUserPage() {
+    const user = userEvent.setup()
+    await renderApp()
+    await user.click(screen.getByRole('button', { name: 'User' }))
+    return user
+  }
+
+  function deleteData() {
+    return within(screen.getByRole('region', { name: 'Delete data' }))
+  }
+
+  function deleteYourUser() {
+    return deleteData().getByRole('button', { name: 'Delete user and all data' })
+  }
+
+  function deleteYourUserRequests() {
+    return fetchMock.mock.calls.filter(([url]) => url === '/api/user/delete')
+  }
+
+  async function confirmWith(user: ReturnType<typeof userEvent.setup>, password: string) {
+    await user.type(deleteData().getByLabelText(/^password/i), password)
+    await user.click(deleteData().getByRole('button', { name: 'Confirm delete' }))
+  }
+
+  it('comes last, after every other delete', async () => {
+    await openUserPage()
+
+    expect(deleteData().getAllByRole('button').at(-1)).toBe(deleteYourUser())
+    expect(deleteYourUser()).toBeEnabled()
+  })
+
+  it('asks for the password, then deletes the User and shows the landing page with no notice', async () => {
+    const user = await openUserPage()
+
+    await user.click(deleteYourUser())
+
+    expect(deleteYourUserRequests()).toHaveLength(0)
+    expect(
+      deleteData().getByText('Delete your User and all its data for good? Enter your password to confirm.'),
+    ).toBeInTheDocument()
+    expect(deleteData().getByLabelText(/^password/i)).toHaveAttribute('autocomplete', 'current-password')
+
+    await confirmWith(user, 'my long passphrase')
+
+    expect(await screen.findByRole('heading', { name: 'Sign in' })).toBeInTheDocument()
+    expect(screen.queryByRole('navigation')).not.toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    const [request] = deleteYourUserRequests()
+    expect(request[1]?.headers).toEqual({ 'Content-Type': 'application/json' })
+    expect(JSON.parse(request[1]?.body as string)).toEqual({ password: 'my long passphrase' })
+  })
+
+  it('shows a wrong password under the field, keeping the dialog open and the User signed in', async () => {
+    handleDeleteYourUser = () => Response.json({ errors: { password: ['Wrong password.'] } }, { status: 400 })
+    const user = await openUserPage()
+    await user.click(deleteYourUser())
+
+    await confirmWith(user, 'wrong password')
+
+    expect(await deleteData().findByText('Wrong password.')).toBeInTheDocument()
+    expect(deleteData().getByLabelText(/^password/i).closest('label')).toHaveTextContent('Wrong password.')
+    expect(deleteData().getByRole('button', { name: 'Confirm delete' })).toBeEnabled()
+    expect(screen.getByRole('navigation')).toBeInTheDocument()
+  })
+
+  it('says so in the dialog when the email is locked, with the message Sign in gives', async () => {
+    const locked = 'Too many failed sign-ins, so this email is locked for a few minutes. Try again later.'
+    handleDeleteYourUser = () => Response.json({ detail: locked }, { status: 429 })
+    const user = await openUserPage()
+    await user.click(deleteYourUser())
+
+    await confirmWith(user, 'my long passphrase')
+
+    expect(await deleteData().findByRole('alert')).toHaveTextContent(locked)
+    expect(deleteData().getByLabelText(/^password/i)).toBeInTheDocument()
+    expect(screen.getByRole('navigation')).toBeInTheDocument()
+  })
+
+  it('closes without deleting anything on Cancel', async () => {
+    const user = await openUserPage()
+    await user.click(deleteYourUser())
+    await user.type(deleteData().getByLabelText(/^password/i), 'my long passphrase')
+
+    await user.click(deleteData().getByRole('button', { name: 'Cancel' }))
+
+    expect(deleteData().queryByLabelText(/^password/i)).not.toBeInTheDocument()
+    expect(deleteYourUser()).toBeEnabled()
+    expect(deleteYourUserRequests()).toHaveLength(0)
+  })
+
+  it('is disabled for the Guest', async () => {
+    currentUser = guest
+    await openUserPage()
+
+    expect(deleteYourUser()).toBeDisabled()
+  })
+
+  it('is disabled while an Upload is in progress, and enabled once it finishes', async () => {
+    let respond: (response: Response) => void = () => {}
+    handleUpload = () => new Promise((resolve) => (respond = resolve))
+    const user = userEvent.setup()
+    await renderApp()
+    await user.upload(screen.getByLabelText(/bank statement pdf/i), statementPdf)
+    await user.click(screen.getByRole('button', { name: 'User' }))
+
+    expect(deleteYourUser()).toBeDisabled()
+
+    respond(Response.json(importedStatement, { status: 201 }))
+    await waitFor(() => expect(deleteYourUser()).toBeEnabled())
   })
 })
 

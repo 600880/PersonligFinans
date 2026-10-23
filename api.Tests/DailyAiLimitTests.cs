@@ -253,6 +253,24 @@ public class DailyAiLimitTests
         Assert.Empty(generator.Calls);
     }
 
+    // Otherwise deleting a User and signing up again could raise the day's LLM spending past the cap.
+    [Fact]
+    public async Task ADeletedUsersAiRequests_StillCountTowardsTheCapOnAllUsersTogether()
+    {
+        var reader = ReaderReadingEveryReceipt();
+        await using var api = Api(NoonOnJanuary(20), perUser: 5, allUsers: 2, receiptReader: reader);
+        var deleted = await api.CreateSignedInClientAsync();
+        var other = await api.CreateSignedInClientAsync();
+
+        await ReadReceipt(deleted);
+        await ReadReceipt(deleted);
+        var deleting = await deleted.PostAsJsonAsync("/api/user/delete", new { password = SignedInClient.Password });
+        Assert.Equal(HttpStatusCode.NoContent, deleting.StatusCode);
+
+        Assert.Equal(LimitReached, await ReadReceipt(other));
+        Assert.Equal(2, reader.Calls.Count);
+    }
+
     [Fact]
     public async Task ConcurrentAiRequests_CannotTakeMoreThanTheLimit()
     {

@@ -80,7 +80,14 @@ export function UserPage({ user, onSignedOut, isUploading, onDataDeleted }: User
         <StatusMessage message={statusMessage} className="mt-3" />
       </section>
 
-      <DeleteDataSection isUploading={isUploading} onDeleted={onDataDeleted} />
+      {/* Deleting the User signs this browser out, so the app goes on as after Sign out. */}
+      <DeleteDataSection
+        isUploading={isUploading}
+        onDeleted={onDataDeleted}
+        isGuest={user.isGuest}
+        onUserDeleted={onSignedOut}
+      />
+
     </section>
   )
 }

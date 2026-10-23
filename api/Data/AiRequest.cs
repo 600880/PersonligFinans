@@ -5,7 +5,8 @@ public class AiRequest
 {
     public long Id { get; set; }
 
-    public required string UserId { get; set; }
+    // Null once its User is deleted, when it still counts towards the cap on all Users together.
+    public string? UserId { get; set; }
 
     public DateTimeOffset MadeAt { get; set; }
 }

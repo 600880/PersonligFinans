@@ -2,6 +2,7 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
+using PersonligFinans.Api.CategorizationRules;
 using PersonligFinans.Api.Data;
 
 namespace PersonligFinans.Api.Users;
@@ -9,6 +10,8 @@ namespace PersonligFinans.Api.Users;
 public record CredentialsRequest(string? Email, string? Password);
 
 public record ChangePasswordRequest(string? CurrentPassword, string? NewPassword);
+
+public record DeleteYourUserRequest(string? Password);
 
 // What the User page's confirm dialogs count, so each asks with the exact number it deletes. The Bank
 // Statements' counts come from their list instead.
@@ -47,6 +50,9 @@ public static class UserEndpoints
         api.MapPost("/change-password", ChangePassword);
 
         api.MapGet("/delete-counts", DeleteCounts);
+
+        // Takes only JSON too, like Change password.
+        api.MapPost("/delete", DeleteYourUser);
     }
 
     // Creates a User whose user name is their email, with copies of the seeds of their own, and signs
@@ -190,6 +196,66 @@ public static class UserEndpoints
         // as the User ends at its next request (see UserSetup), while this one gets a fresh cookie with
         // the new stamp, as persistent as the one it replaces.
         await signInManager.RefreshSignInAsync(user);
+        return Results.NoContent();
+    }
+
+    // Delete your User: deletes the signed-in User and everything it owns, for good, given its
+    // password, so that someone using an open tab or a stolen sign-in can't. A wrong password counts
+    // towards the same lockout as a failed sign-in, and a locked email is refused with Sign in's
+    // message, even with the right password, as at Change password. The Guest is shared by every
+    // visitor, so nobody can delete it. The User's AI requests and sent reset emails are kept with no
+    // User, so that the caps on all Users together still count them.
+    private static async Task<IResult> DeleteYourUser(
+        DeleteYourUserRequest request,
+        ClaimsPrincipal principal,
+        UserManager<IdentityUser> userManager,
+        SignInManager<IdentityUser> signInManager,
+        AppDbContext db)
+    {
+        if (Guest.Is(principal.Identity!.Name!))
+            return Results.Problem(detail: "The Guest can't be deleted.", statusCode: StatusCodes.Status403Forbidden);
+
+        var password = request.Password ?? "";
+        if (password.Length == 0)
+            return Results.ValidationProblem(new Dictionary<string, string[]> { ["password"] = ["Password is required."] });
+
+        // Only a signed-in User gets here, and the security stamp check has just found it.
+        var user = (await userManager.GetUserAsync(principal))!;
+
+        // As at Sign in, a locked email is refused before its password is tried, and the failure that
+        // locks it gets the lockout's answer.
+        var check = await signInManager.CheckPasswordSignInAsync(user, password, lockoutOnFailure: true);
+        if (check.IsLockedOut)
+            return EmailLocked();
+        if (!check.Succeeded)
+            return Results.ValidationProblem(new Dictionary<string, string[]> { ["password"] = ["Wrong password."] });
+
+        // Under the rule-change lock, so it can't interleave with an import from another browser,
+        // whose Transactions would otherwise stop the User from being deleted.
+        await using (var transaction = await Categorizer.BeginRuleChangeAsync(db))
+        {
+            // Every row the User owns, which the query filters limit each delete to. Owners' keys are
+            // Restrict, so each kind is deleted here, in an order that leaves nothing another row
+            // still refers to, before the User itself.
+            await db.Bookmarks.ExecuteDeleteAsync();
+            await db.LastUsedFolders.ExecuteDeleteAsync();
+            await db.Folders.ExecuteDeleteAsync();
+            await db.Transactions.ExecuteDeleteAsync();
+            await db.BankStatements.ExecuteDeleteAsync();
+            await db.LatestUploads.ExecuteDeleteAsync();
+            await db.CategorizationRules.ExecuteDeleteAsync();
+            await db.Categories.ExecuteDeleteAsync();
+
+            var result = await userManager.DeleteAsync(user);
+            if (!result.Succeeded)
+                throw new InvalidOperationException(
+                    "Deleting the User failed: " + string.Join(" ", result.Errors.Select(e => e.Description)));
+            await transaction.CommitAsync();
+        }
+
+        // Every other browser's sign-in as the User ends at its next request, when the security stamp
+        // check finds no User (see UserSetup).
+        await signInManager.SignOutAsync();
         return Results.NoContent();
     }
 

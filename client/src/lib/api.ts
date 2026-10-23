@@ -284,6 +284,38 @@ export async function changePassword(request: ChangePasswordRequest): Promise<Ch
   return { ok: false, fieldErrors: {}, message: `Changing the password failed (${response.status}).` }
 }
 
+export type DeleteYourUserResult =
+  | { ok: true }
+  | { ok: false; fieldErrors: { password?: string }; message: string | null }
+
+// Deletes the signed-in User and everything it owns, for good, given its password, and signs this
+// browser out. A wrong password gets a field error, and a locked email gets Sign in's message. Sent
+// as JSON, which the server requires, like Sign in.
+export async function deleteYourUser(password: string): Promise<DeleteYourUserResult> {
+  let response: Response
+  try {
+    response = await apiFetch('/api/user/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password }),
+    })
+  } catch {
+    return { ok: false, fieldErrors: {}, message: UNREACHABLE }
+  }
+  if (response.ok) {
+    forgetAntiforgeryToken()
+    return { ok: true }
+  }
+
+  // 400 is a validation problem for the password, and 429 a locked email, whose detail says so.
+  if (response.status === 400 || response.status === 429) {
+    const { fieldErrors, detail } = await readProblem<{ password: string }>(response)
+    if (fieldErrors.password) return { ok: false, fieldErrors, message: null }
+    if (detail) return { ok: false, fieldErrors: {}, message: detail }
+  }
+  return { ok: false, fieldErrors: {}, message: `Deleting the user failed (${response.status}).` }
+}
+
 // Ends the sign-in. Resolves false when the server couldn't be told, so the User is still signed in.
 export async function signOut(): Promise<boolean> {
   try {

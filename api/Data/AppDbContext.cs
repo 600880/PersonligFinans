@@ -153,13 +153,14 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, CurrentUser cu
 
         // Not owned like the rows above: the AI request ledger counts every User's AI requests
         // towards the global cap, so there is no query filter, and nothing shows them to a User.
-        // They are only ever counted, by User and by time, within one day.
+        // They are only ever counted, by User and by time, within one day. Deleting the User keeps
+        // them with no User, so the global cap still counts them.
         modelBuilder.Entity<AiRequest>(request =>
         {
             request.HasOne<IdentityUser>()
                 .WithMany()
                 .HasForeignKey(r => r.UserId)
-                .OnDelete(DeleteBehavior.Cascade);
+                .OnDelete(DeleteBehavior.SetNull);
             request.HasIndex(r => new { r.UserId, r.MadeAt });
             request.HasIndex(r => r.MadeAt);
         });
@@ -167,13 +168,14 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, CurrentUser cu
         // Not owned either: nobody is signed in when a reset email is sent, since whoever asks for one
         // can't sign in, and the daily cap counts every User's. So there is no query filter, and
         // nothing shows them to a User. They are only ever counted, by User and by time, and deleted
-        // once no cap counts them any more.
+        // once no cap counts them any more. Deleting the User keeps them with no User until then, so
+        // the daily cap still counts them.
         modelBuilder.Entity<SentPasswordResetEmail>(email =>
         {
             email.HasOne<IdentityUser>()
                 .WithMany()
                 .HasForeignKey(e => e.UserId)
-                .OnDelete(DeleteBehavior.Cascade);
+                .OnDelete(DeleteBehavior.SetNull);
             email.HasIndex(e => new { e.UserId, e.SentAt });
             email.HasIndex(e => e.SentAt);
         });
