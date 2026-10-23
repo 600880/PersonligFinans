@@ -87,7 +87,6 @@ export function UserPage({ user, onSignedOut, isUploading, onDataDeleted }: User
         isGuest={user.isGuest}
         onUserDeleted={onSignedOut}
       />
-
     </section>
   )
 }

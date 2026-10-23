@@ -313,7 +313,7 @@ export async function deleteYourUser(password: string): Promise<DeleteYourUserRe
     if (fieldErrors.password) return { ok: false, fieldErrors, message: null }
     if (detail) return { ok: false, fieldErrors: {}, message: detail }
   }
-  return { ok: false, fieldErrors: {}, message: `Deleting the user failed (${response.status}).` }
+  return { ok: false, fieldErrors: {}, message: `Deleting the User failed (${response.status}).` }
 }
 
 // Ends the sign-in. Resolves false when the server couldn't be told, so the User is still signed in.

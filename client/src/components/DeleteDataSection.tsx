@@ -255,7 +255,7 @@ export function DeleteDataSection({ isUploading, onDeleted, isGuest, onUserDelet
           can do. */}
       <div className={`mt-3 ${cardClass}`}>
         <p className="text-sm text-slate-600">
-          Your User and everything it owns, for good. Its email can then Sign up again as a new User.
+          Your User and everything it owns, for good.
         </p>
         <button
           type="button"
