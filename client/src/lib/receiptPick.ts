@@ -2,7 +2,12 @@
 export const RECEIPT_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif']
 
 const MAX_RECEIPTS = 10
-const MAX_FILE_BYTES = 10 * 1024 * 1024
+// Large enough for a full-resolution phone photo. The Receipt is reduced before it is sent.
+const MAX_FILE_MB = 25
+const MAX_FILE_BYTES = MAX_FILE_MB * 1024 * 1024
+
+// Also why a picked image the browser can't decode is left out.
+export const NOT_A_RECEIPT_IMAGE = 'The file is not a JPEG, PNG, WebP or GIF image.'
 
 // A picked file left out of a Receipt scan, named by its filename, with why.
 export interface LeftOutReceipt {
@@ -24,9 +29,9 @@ export function checkReceiptPick(files: File[]): ReceiptPick {
   const leftOut: LeftOutReceipt[] = []
   for (const file of files) {
     if (!RECEIPT_IMAGE_TYPES.includes(file.type)) {
-      leftOut.push({ filename: file.name, message: 'The file is not a JPEG, PNG, WebP or GIF image.' })
+      leftOut.push({ filename: file.name, message: NOT_A_RECEIPT_IMAGE })
     } else if (file.size > MAX_FILE_BYTES) {
-      leftOut.push({ filename: file.name, message: 'The file is larger than 10 MB.' })
+      leftOut.push({ filename: file.name, message: `The file is larger than ${MAX_FILE_MB} MB.` })
     } else {
       receipts.push(file)
     }

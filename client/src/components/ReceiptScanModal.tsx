@@ -6,11 +6,12 @@ import { TransactionForm } from './TransactionForm'
 const smallButtonClass =
   'rounded-lg px-2 py-1 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:cursor-not-allowed disabled:text-slate-300 dark:disabled:text-slate-600'
 
-// One Receipt of a Receipt scan: its image, a browser-local URL showing it, and the server's
-// reading of it. The URL and the reading are made as soon as the Receipt is picked, so that every
-// Receipt is read at once. The URL is released once the Receipt is saved or skipped.
+// One Receipt of a Receipt scan: its image (the JPEG the picked file was reduced to), a browser-local
+// URL showing it, and the server's reading of it. The URL and the reading are made as soon as the
+// Receipt is reduced, so that every Receipt is read at once. The URL is released once the Receipt is
+// saved or skipped.
 export interface Receipt {
-  file: File
+  image: Blob
   previewUrl: string
   suggestion: Promise<ReceiptSuggestion>
 }

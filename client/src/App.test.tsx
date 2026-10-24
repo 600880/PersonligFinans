@@ -4,6 +4,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 import { todayIsoDate } from './lib/date'
 import { monthOfDate } from './lib/month'
+import { reduceReceipt } from './lib/reduceReceipt'
+
+// jsdom can't decode images, so the Receipt scan tests say what reducing each Receipt gives.
+vi.mock('./lib/reduceReceipt', () => ({ reduceReceipt: vi.fn() }))
 
 const categories = [
   {
@@ -6111,25 +6115,34 @@ describe('Dashboard', () => {
 describe('Scan receipts', () => {
   const unavailable = { outcome: 'unavailable', date: null, description: null, amount: null, categoryId: null }
 
-  // The file of each read-a-Receipt request, in the order they were sent.
-  let readRequests: (FormDataEntryValue | null)[]
+  // The name of the file in each read-a-Receipt request, in the order they were sent.
+  let readRequests: string[]
   // The antiforgery token sent with each read-a-Receipt request, in the order they were sent.
   let readTokens: (string | undefined)[]
   let handleReadReceipt: (body: FormData) => Response | Promise<Response>
   // The preview URLs released so far. Each is named after its Receipt's file.
   let releasedUrls: string[]
+  // The picked files the browser can't decode.
+  let undecodable: File[]
 
   beforeEach(() => {
     readRequests = []
     readTokens = []
     handleReadReceipt = () => Response.json(unavailable)
     releasedUrls = []
+    undecodable = []
+    // Each picked file is reduced to a JPEG named after it, so the tests can tell the two apart.
+    vi.mocked(reduceReceipt).mockImplementation(async (file) =>
+      undecodable.includes(file)
+        ? { ok: false }
+        : { ok: true, jpeg: new File([`reduced ${file.name}`], `reduced-${file.name}`, { type: 'image/jpeg' }) },
+    )
     vi.stubGlobal(
       'fetch',
       vi.fn(async (url: string, init?: RequestInit) => {
         if (url === '/api/receipts/read' && init?.method === 'POST') {
           const body = init.body as FormData
-          readRequests.push(body.get('file'))
+          readRequests.push((body.get('file') as File).name)
           readTokens.push((init.headers as Record<string, string> | undefined)?.['X-CSRF-TOKEN'])
           return handleReadReceipt(body)
         }
@@ -6198,7 +6211,7 @@ describe('Scan receipts', () => {
     await scanUntilFormIsReady([kiwi, rema, narvesen])
 
     const dialog = screen.getByRole('dialog', { name: 'Receipt 1 of 3' })
-    expect(within(dialog).getByRole('img', { name: 'Receipt' })).toHaveAttribute('src', 'blob:kiwi.jpg')
+    expect(within(dialog).getByRole('img', { name: 'Receipt' })).toHaveAttribute('src', 'blob:reduced-kiwi.jpg')
     expect(within(dialog).getByLabelText(/date/i)).toHaveValue(todayIsoDate())
     expect(within(dialog).getByLabelText(/description/i)).toHaveValue('')
     expect(within(dialog).getByLabelText(/^in$/i)).toHaveValue(null)
@@ -6212,8 +6225,22 @@ describe('Scan receipts', () => {
 
     await scan([kiwi, rema, narvesen])
 
-    await waitFor(() => expect(readRequests).toEqual([kiwi, rema, narvesen]))
+    await waitFor(() => expect(readRequests).toEqual(['reduced-kiwi.jpg', 'reduced-rema.png', 'reduced-narvesen.webp']))
     expect(screen.getByRole('dialog', { name: 'Receipt 1 of 3' })).toBeInTheDocument()
+  })
+
+  it('sends the reduced Receipt to be read, as a JPEG, not the picked file', async () => {
+    const sent: File[] = []
+    handleReadReceipt = (body) => {
+      sent.push(body.get('file') as File)
+      return Response.json(unavailable)
+    }
+
+    await scan([rema])
+
+    await waitFor(() => expect(sent).toHaveLength(1))
+    expect(sent[0].type).toBe('image/jpeg')
+    expect(await sent[0].text()).toBe('reduced rema.png')
   })
 
   it('sends the antiforgery token with every Receipt, fetching it once for them all', async () => {
@@ -6239,7 +6266,7 @@ describe('Scan receipts', () => {
       { date: todayIsoDate(), description: 'Rema 1000', amount: -249.9, note: 'Kontant', categoryId: 1 },
     ])
     const dialog = await screen.findByRole('dialog', { name: 'Receipt 2 of 2' })
-    expect(within(dialog).getByRole('img', { name: 'Receipt' })).toHaveAttribute('src', 'blob:rema.png')
+    expect(within(dialog).getByRole('img', { name: 'Receipt' })).toHaveAttribute('src', 'blob:reduced-rema.png')
     expect(within(dialog).getByLabelText(/description/i)).toHaveValue('')
   })
 
@@ -6295,7 +6322,7 @@ describe('Scan receipts', () => {
     const dialog = screen.getByRole('dialog', { name: 'Receipt 1 of 2' })
     expect(within(dialog).getByText('Description is required.')).toBeInTheDocument()
     expect(within(dialog).getByLabelText(/^out$/i)).toHaveValue(249.9)
-    expect(within(dialog).getByRole('img', { name: 'Receipt' })).toHaveAttribute('src', 'blob:kiwi.jpg')
+    expect(within(dialog).getByRole('img', { name: 'Receipt' })).toHaveAttribute('src', 'blob:reduced-kiwi.jpg')
   })
 
   it('closes after the last Receipt, reloads the Dashboard and says how many Transactions were saved', async () => {
@@ -6395,11 +6422,11 @@ describe('Scan receipts', () => {
     await fillValidForm(user)
     await user.click(screen.getByRole('button', { name: /^save$/i }))
     await screen.findByRole('dialog', { name: 'Receipt 2 of 2' })
-    expect(releasedUrls).toEqual(['blob:kiwi.jpg'])
+    expect(releasedUrls).toEqual(['blob:reduced-kiwi.jpg'])
 
     await user.click(screen.getByRole('button', { name: 'Skip' }))
 
-    expect(releasedUrls).toEqual(['blob:kiwi.jpg', 'blob:rema.png'])
+    expect(releasedUrls).toEqual(['blob:reduced-kiwi.jpg', 'blob:reduced-rema.png'])
   })
 
   it('rejects a pick of more than 10 files with only a message', async () => {
@@ -6412,19 +6439,50 @@ describe('Scan receipts', () => {
     expect(readRequests).toEqual([])
   })
 
-  it('leaves out a wrong-type and an over-10 MB file, naming each and why, and scans the rest', async () => {
+  it('leaves out a wrong-type and an over-25 MB file, naming each and why, and scans the rest', async () => {
     const pdf = receipt('faktura.pdf', 'application/pdf')
-    const huge = receipt('stor.jpg', 'image/jpeg', 10 * 1024 * 1024 + 1)
+    const huge = receipt('stor.jpg', 'image/jpeg', 25 * 1024 * 1024 + 1)
 
     await scan([pdf, kiwi, huge, rema])
 
-    const alert = screen.getByRole('alert')
+    const alert = await screen.findByRole('alert')
     expect([...alert.children].map((line) => line.textContent)).toEqual([
       'faktura.pdf: The file is not a JPEG, PNG, WebP or GIF image.',
-      'stor.jpg: The file is larger than 10 MB.',
+      'stor.jpg: The file is larger than 25 MB.',
     ])
-    expect(screen.getByRole('dialog', { name: 'Receipt 1 of 2' })).toBeInTheDocument()
-    await waitFor(() => expect(readRequests).toEqual([kiwi, rema]))
+    expect(await screen.findByRole('dialog', { name: 'Receipt 1 of 2' })).toBeInTheDocument()
+    await waitFor(() => expect(readRequests).toEqual(['reduced-kiwi.jpg', 'reduced-rema.png']))
+  })
+
+  it('scans a file between 10 and 25 MB, since it is reduced before it is sent', async () => {
+    const large = receipt('stor.jpg', 'image/jpeg', 10 * 1024 * 1024 + 1)
+
+    await scan([large])
+
+    expect(await screen.findByRole('dialog', { name: 'Receipt 1 of 1' })).toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    await waitFor(() => expect(readRequests).toEqual(['reduced-stor.jpg']))
+  })
+
+  it("leaves out an image the browser can't decode with the type message, and scans the rest in pick order", async () => {
+    const broken = receipt('ødelagt.jpg')
+    undecodable = [broken]
+
+    await scan([kiwi, broken, rema])
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('ødelagt.jpg: The file is not a JPEG, PNG, WebP or GIF image.')
+    expect(await screen.findByRole('dialog', { name: 'Receipt 1 of 2' })).toBeInTheDocument()
+    await waitFor(() => expect(readRequests).toEqual(['reduced-kiwi.jpg', 'reduced-rema.png']))
+  })
+
+  it('shows only the message when no picked image can be decoded', async () => {
+    undecodable = [kiwi]
+
+    await scan([kiwi])
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('kiwi.jpg: The file is not a JPEG, PNG, WebP or GIF image.')
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(readRequests).toEqual([])
   })
 
   it('shows only the message when every file is left out', async () => {
@@ -6453,6 +6511,27 @@ describe('Scan receipts', () => {
     expect(screen.getByLabelText(/date/i)).toHaveValue(todayIsoDate())
   })
 
+  it('never starts the scan of a pick replaced while it was being reduced, even by a rejected pick', async () => {
+    let finishReducing: () => void = () => {}
+    vi.mocked(reduceReceipt).mockImplementationOnce(
+      (file) =>
+        new Promise((resolve) => {
+          finishReducing = () => resolve({ ok: true, jpeg: file })
+        }),
+    )
+    const user = await scan([kiwi])
+
+    await user.upload(
+      screen.getByLabelText(/^receipts$/i),
+      Array.from({ length: 11 }, (_, i) => receipt(`${i}.jpg`)),
+    )
+    await act(async () => finishReducing())
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Pick at most 10 receipts')
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(readRequests).toEqual([])
+  })
+
   it('scans the same Receipts again when they are picked again', async () => {
     const user = await scanUntilFormIsReady([kiwi])
     await user.click(screen.getByRole('button', { name: 'Skip' }))
@@ -6477,7 +6556,7 @@ describe('Scan receipts', () => {
     }
 
     it("fills the form with the Receipt's date, Description, Out and Category, and leaves Note empty", async () => {
-      answer({ 'kiwi.jpg': kiwiRead })
+      answer({ 'reduced-kiwi.jpg': kiwiRead })
 
       await scanUntilFormIsReady([kiwi, rema])
 
@@ -6490,7 +6569,7 @@ describe('Scan receipts', () => {
     })
 
     it('fills a refund into In', async () => {
-      answer({ 'rema.png': remaRefund })
+      answer({ 'reduced-rema.png': remaRefund })
 
       await scanUntilFormIsReady([rema])
 
@@ -6505,7 +6584,7 @@ describe('Scan receipts', () => {
       await scan([kiwi])
 
       expect(within(dialog()).getByText('Reading…')).toBeInTheDocument()
-      expect(within(dialog()).getByRole('img', { name: 'Receipt' })).toHaveAttribute('src', 'blob:kiwi.jpg')
+      expect(within(dialog()).getByRole('img', { name: 'Receipt' })).toHaveAttribute('src', 'blob:reduced-kiwi.jpg')
       expect(within(dialog()).getByLabelText(/description/i)).toBeDisabled()
       expect(within(dialog()).getByRole('button', { name: /^save$/i })).toBeDisabled()
       expect(within(dialog()).getByRole('button', { name: 'Skip' })).toBeEnabled()
@@ -6521,7 +6600,7 @@ describe('Scan receipts', () => {
 
     it('opens the first form as soon as the first Receipt is read, while the others are still being read', async () => {
       handleReadReceipt = (body) =>
-        (body.get('file') as File).name === 'kiwi.jpg' ? Response.json(kiwiRead) : new Promise(() => {})
+        (body.get('file') as File).name === 'reduced-kiwi.jpg' ? Response.json(kiwiRead) : new Promise(() => {})
 
       const user = await scanUntilFormIsReady([kiwi, rema])
 
@@ -6531,7 +6610,7 @@ describe('Scan receipts', () => {
     })
 
     it("fills each Receipt's form with what was read on that Receipt", async () => {
-      answer({ 'kiwi.jpg': kiwiRead, 'rema.png': remaRefund })
+      answer({ 'reduced-kiwi.jpg': kiwiRead, 'reduced-rema.png': remaRefund })
       const user = await scanUntilFormIsReady([kiwi, rema])
 
       await user.click(screen.getByRole('button', { name: 'Skip' }))
@@ -6548,7 +6627,7 @@ describe('Scan receipts', () => {
         posted.push(body)
         return Response.json({ id: 1 }, { status: 201 })
       }
-      answer({ 'kiwi.jpg': kiwiRead })
+      answer({ 'reduced-kiwi.jpg': kiwiRead })
       const user = await scanUntilFormIsReady([kiwi])
       await user.clear(screen.getByLabelText(/description/i))
       await user.type(screen.getByLabelText(/description/i), 'Kiwi')
@@ -6559,7 +6638,7 @@ describe('Scan receipts', () => {
     })
 
     it("says Couldn't read this receipt above an empty form with today's date when it couldn't be read", async () => {
-      answer({ 'kiwi.jpg': unreadable })
+      answer({ 'reduced-kiwi.jpg': unreadable })
 
       await scanUntilFormIsReady([kiwi])
 
@@ -6580,7 +6659,7 @@ describe('Scan receipts', () => {
     })
 
     it("says the daily AI limit is reached above an empty form with today's date when the limit was reached", async () => {
-      answer({ 'kiwi.jpg': { outcome: 'limitReached', date: null, description: null, amount: null, categoryId: null } })
+      answer({ 'reduced-kiwi.jpg': { outcome: 'limitReached', date: null, description: null, amount: null, categoryId: null } })
 
       await scanUntilFormIsReady([kiwi])
 
@@ -6626,7 +6705,7 @@ describe('Scan receipts', () => {
       expect(within(dialog).getByLabelText(/description/i)).toHaveValue('Rema 1000')
       expect(within(dialog).getByLabelText(/^out$/i)).toHaveValue(249.9)
       expect(within(dialog).getByLabelText(/category/i)).toHaveValue('1')
-      expect(within(dialog).getByRole('img', { name: 'Receipt' })).toHaveAttribute('src', 'blob:rema.png')
+      expect(within(dialog).getByRole('img', { name: 'Receipt' })).toHaveAttribute('src', 'blob:reduced-rema.png')
     })
 
     it('discards the remaining Receipts, keeping and counting what was saved, with the Dashboard reloaded', async () => {
@@ -6649,7 +6728,7 @@ describe('Scan receipts', () => {
       expect(posted).toHaveLength(1)
       expect(screen.getByRole('status')).toHaveTextContent(/^1 transaction saved$/)
       await waitFor(() => expect(monthsRequests()).toBeGreaterThan(before))
-      expect(releasedUrls).toEqual(['blob:kiwi.jpg', 'blob:rema.png', 'blob:narvesen.webp'])
+      expect(releasedUrls).toEqual(['blob:reduced-kiwi.jpg', 'blob:reduced-rema.png', 'blob:reduced-narvesen.webp'])
     })
 
     it('says none were saved, and leaves the Dashboard as it was, when nothing was saved before Discard', async () => {
@@ -6663,7 +6742,7 @@ describe('Scan receipts', () => {
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
       expect(screen.getByRole('status')).toHaveTextContent('No transactions saved')
       expect(monthsRequests()).toBe(before)
-      expect(releasedUrls).toEqual(['blob:kiwi.jpg', 'blob:rema.png'])
+      expect(releasedUrls).toEqual(['blob:reduced-kiwi.jpg', 'blob:reduced-rema.png'])
     })
 
     it('asks about the last Receipt in the singular', async () => {
@@ -6718,7 +6797,7 @@ describe('Scan receipts', () => {
 
       await user.click(screen.getByRole('button', { name: 'Show the Receipt full-screen' }))
 
-      expect(within(fullScreenView()!).getByRole('img', { name: 'Receipt' })).toHaveAttribute('src', 'blob:kiwi.jpg')
+      expect(within(fullScreenView()!).getByRole('img', { name: 'Receipt' })).toHaveAttribute('src', 'blob:reduced-kiwi.jpg')
 
       await user.click(fullScreenView()!)
 

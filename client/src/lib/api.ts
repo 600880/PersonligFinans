@@ -927,11 +927,11 @@ const UNREADABLE: ReceiptSuggestion = {
   categoryId: null,
 }
 
-// Asks the server to read one Receipt's image. Never rejects: a Receipt the server refuses, or that
-// can't be sent, is treated as unreadable.
-export async function readReceipt(file: File): Promise<ReceiptSuggestion> {
+// Asks the server to read one Receipt's image, the JPEG it was reduced to when picked. Never
+// rejects: a Receipt the server refuses, or that can't be sent, is treated as unreadable.
+export async function readReceipt(image: Blob): Promise<ReceiptSuggestion> {
   const body = new FormData()
-  body.append('file', file)
+  body.append('file', image)
 
   try {
     const response = await postForm('/api/receipts/read', body)

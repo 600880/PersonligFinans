@@ -21,7 +21,8 @@ import { followAppearance } from './lib/appearance'
 import { counted } from './lib/count'
 import { formatNorwegianDate } from './lib/date'
 import { resetLinkAt } from './lib/passwordReset'
-import { checkReceiptPick, RECEIPT_IMAGE_TYPES } from './lib/receiptPick'
+import { checkReceiptPick, NOT_A_RECEIPT_IMAGE, RECEIPT_IMAGE_TYPES } from './lib/receiptPick'
+import { reduceReceipt } from './lib/reduceReceipt'
 import { useDismiss } from './lib/useDismiss'
 
 type View = 'home' | 'transactions' | 'categories' | 'rules' | 'user'
@@ -150,13 +151,17 @@ function SignedInApp({ user, onSignedOut }: SignedInAppProps) {
   const [transactionsTarget, setTransactionsTarget] = useState<TransactionsTarget | undefined>()
   const fileInputRef = useRef<HTMLInputElement>(null)
   const receiptInputRef = useRef<HTMLInputElement>(null)
+  // The id of the Receipt scan of the latest pick of Receipts, so that an earlier pick still being
+  // reduced never starts its scan.
+  const latestScanIdRef = useRef<string | null>(null)
   // On a narrow screen the pages, and the ways to add Transactions, each sit behind a menu.
   const [isNavOpen, setIsNavOpen] = useState(false)
   const [isAddMenuOpen, setIsAddMenuOpen] = useState(false)
   const headerRef = useRef<HTMLElement>(null)
   const addMenuRef = useRef<HTMLDivElement>(null)
   // Set once the User has signed out and the app is gone, so an Upload under way sends none of its
-  // remaining Bank Statements, which would otherwise go to whoever signs in next.
+  // remaining Bank Statements, and a pick of Receipts still being reduced sends none of them, which
+  // would otherwise go to whoever signs in next.
   const hasSignedOutRef = useRef(false)
   useEffect(() => {
     hasSignedOutRef.current = false
@@ -242,27 +247,43 @@ function SignedInApp({ user, onSignedOut }: SignedInAppProps) {
   }
 
   // Starts a Receipt scan of the picked images that can be read, after leaving out and naming the
-  // rest. Every Receipt is sent to be read at once, before the window opens on the first. Done here
-  // rather than when the window mounts, so each is read once.
-  function handleReceiptsChosen(files: File[]) {
+  // rest. Each is first reduced, and one the browser can't decode is left out too. Every Receipt is
+  // then sent to be read at once, before the window opens on the first. Done here rather than when
+  // the window mounts, so each is read once.
+  async function handleReceiptsChosen(files: File[]) {
     if (files.length === 0) return
     clearHomeMessages()
+    // Taken before the checks, so that even a rejected pick replaces one still being reduced.
+    const id = crypto.randomUUID()
+    latestScanIdRef.current = id
 
     const pick = checkReceiptPick(files)
     if (!pick.ok) {
       setReceiptPickError(pick.message)
       return
     }
-    setRejections(pick.leftOut)
-    if (pick.receipts.length === 0) return
 
-    const id = crypto.randomUUID()
+    // One after another, so that only one full-size photo is decoded at a time, which a phone's
+    // memory may need.
+    const images: Blob[] = []
+    const leftOut = [...pick.leftOut]
+    for (const file of pick.receipts) {
+      const reduced = await reduceReceipt(file)
+      if (reduced.ok) images.push(reduced.jpeg)
+      else leftOut.push({ filename: file.name, message: NOT_A_RECEIPT_IMAGE })
+    }
+    // Nothing is sent once the User has signed out, or for a pick replaced while it was reduced.
+    if (hasSignedOutRef.current || latestScanIdRef.current !== id) return
+
+    setRejections(leftOut)
+    if (images.length === 0) return
+
     setScan({
       id,
-      receipts: pick.receipts.map((file) => ({
-        file,
-        previewUrl: URL.createObjectURL(file),
-        suggestion: readReceipt(file),
+      receipts: images.map((image) => ({
+        image,
+        previewUrl: URL.createObjectURL(image),
+        suggestion: readReceipt(image),
       })),
     })
     setScanSaved({ scanId: id, count: 0 })
@@ -458,7 +479,7 @@ function SignedInApp({ user, onSignedOut }: SignedInAppProps) {
               multiple
               hidden
               onChange={(event) => {
-                handleReceiptsChosen([...(event.target.files ?? [])])
+                void handleReceiptsChosen([...(event.target.files ?? [])])
                 event.target.value = ''
               }}
             />

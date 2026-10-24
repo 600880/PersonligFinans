@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { checkReceiptPick } from './receiptPick'
 
 const TEN_MB = 10 * 1024 * 1024
+const TWENTY_FIVE_MB = 25 * 1024 * 1024
 
 function image(name: string, type = 'image/jpeg', size = 1024) {
   return new File([new Uint8Array(size)], name, { type })
@@ -34,14 +35,15 @@ describe('checkReceiptPick', () => {
     })
   })
 
-  it('leaves out an image larger than 10 MB, but keeps one of exactly 10 MB', () => {
-    const atLimit = image('at-limit.jpg', 'image/jpeg', TEN_MB)
-    const tooLarge = image('too-large.png', 'image/png', TEN_MB + 1)
+  it('leaves out an image larger than 25 MB, but keeps one of exactly 25 MB or between 10 and 25 MB', () => {
+    const overTen = image('over-ten.jpg', 'image/jpeg', TEN_MB + 1)
+    const atLimit = image('at-limit.jpg', 'image/jpeg', TWENTY_FIVE_MB)
+    const tooLarge = image('too-large.png', 'image/png', TWENTY_FIVE_MB + 1)
 
-    expect(checkReceiptPick([atLimit, tooLarge])).toEqual({
+    expect(checkReceiptPick([overTen, atLimit, tooLarge])).toEqual({
       ok: true,
-      receipts: [atLimit],
-      leftOut: [{ filename: 'too-large.png', message: 'The file is larger than 10 MB.' }],
+      receipts: [overTen, atLimit],
+      leftOut: [{ filename: 'too-large.png', message: 'The file is larger than 25 MB.' }],
     })
   })
 
