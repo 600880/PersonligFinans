@@ -90,7 +90,7 @@ let months: { year: number; month: number }[] | Response
 // month is undefined for a whole year.
 let handleListPeriod: (year: number, month: number | undefined) => Response | Promise<Response>
 let handleChangeCategory: (id: number, body: unknown) => Response | Promise<Response>
-let handleChangeNote: (id: number, body: unknown) => Response
+let handleChangeNote: (id: number, body: unknown) => Response | Promise<Response>
 let handleDeleteTransaction: (id: number) => Response | Promise<Response>
 let handleAddBookmark: (id: number) => Response | Promise<Response>
 let handleRemoveBookmark: (id: number) => Response | Promise<Response>
@@ -3547,6 +3547,67 @@ describe('Transactions page', () => {
 
       const folderThumbnail = screen.getByRole('button', { name: 'Show the Receipt full-screen' })
       expect(within(folderThumbnail).getByRole('img', { name: 'Receipt' })).toHaveAttribute('src', '/api/transactions/3/receipt')
+    })
+  })
+
+  describe('the Note button', () => {
+    async function openSeptember() {
+      months = [{ year: 2026, month: 9 }]
+      handleListPeriod = () => Response.json(septemberTransactions)
+      const user = await openTransactionsPage()
+      await screen.findByRole('cell', { name: 'Rema 1000' })
+      return user
+    }
+
+    it('closes its open Note editor when clicked again, discarding the draft and saving nothing', async () => {
+      const user = await openSeptember()
+      const button = screen.getByRole('button', { name: 'Add note for Rema 1000' })
+      expect(button).toHaveAttribute('aria-expanded', 'false')
+
+      await user.click(button)
+      expect(button).toHaveAttribute('aria-expanded', 'true')
+      await user.type(screen.getByRole('textbox', { name: 'Note' }), 'Kontant')
+      await user.click(button)
+
+      expect(screen.queryByRole('textbox', { name: 'Note' })).not.toBeInTheDocument()
+      expect(button).toHaveAttribute('aria-expanded', 'false')
+      expect(fetchMock.mock.calls.some(([url]) => url.endsWith('/note'))).toBe(false)
+
+      await user.click(button)
+      expect(screen.getByRole('textbox', { name: 'Note' })).toHaveValue('')
+    })
+
+    it("opens another Transaction's Note editor in place of the open one", async () => {
+      const user = await openSeptember()
+      await user.click(screen.getByRole('button', { name: 'Add note for Rema 1000' }))
+
+      await user.click(screen.getByRole('button', { name: 'Add note for Lønn Fra: Testfirma AS' }))
+
+      expect(screen.getAllByRole('textbox', { name: 'Note' })).toHaveLength(1)
+      expect(screen.getByRole('button', { name: 'Add note for Rema 1000' })).toHaveAttribute('aria-expanded', 'false')
+      expect(screen.getByRole('button', { name: 'Add note for Lønn Fra: Testfirma AS' })).toHaveAttribute(
+        'aria-expanded',
+        'true',
+      )
+    })
+
+    it('is disabled while its Note saves, so the editor stays open until the save is done', async () => {
+      let respond: (response: Response) => void = () => {}
+      handleChangeNote = () => new Promise((resolve) => (respond = resolve))
+      const user = await openSeptember()
+      const button = screen.getByRole('button', { name: 'Add note for Rema 1000' })
+      await user.click(button)
+      await user.type(screen.getByRole('textbox', { name: 'Note' }), 'Kontant')
+
+      await user.click(screen.getByRole('button', { name: 'Save' }))
+
+      expect(button).toBeDisabled()
+      await user.click(button)
+      expect(screen.getByRole('textbox', { name: 'Note' })).toBeInTheDocument()
+
+      respond(Response.json({ ...septemberTransactions[0], note: 'Kontant' }))
+      expect(await screen.findByText('Note saved.')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Edit note for Rema 1000' })).toBeEnabled()
     })
   })
 

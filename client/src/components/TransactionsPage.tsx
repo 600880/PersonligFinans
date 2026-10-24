@@ -460,7 +460,13 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
     star?.focus()
   }, [])
 
-  function openNoteEditor(transaction: Transaction) {
+  // Opens the Transaction's Note editor, or closes it if open, discarding the draft as Cancel does.
+  function toggleNoteEditor(transaction: Transaction) {
+    if (editingNoteId === transaction.id) {
+      setEditingNoteId(null)
+      return
+    }
+
     setStatusMessage(null)
     setErrorMessage(null)
     setConfirmingDeleteId(null)
@@ -764,8 +770,9 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
                       }
                       disabled={bookmarkSavingIds.has(transaction.id)}
                       onClick={() => toggleBookmark(transaction)}
-                      className="rounded p-1 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:cursor-not-allowed"
+                      className="group rounded p-1 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:cursor-not-allowed"
                     >
+                      {/* An empty star turns amber on hover, showing what a click does. */}
                       <svg
                         viewBox="0 0 16 16"
                         fill={transaction.bookmarked ? 'currentColor' : 'none'}
@@ -773,7 +780,11 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
                         strokeWidth="1.25"
                         strokeLinejoin="round"
                         aria-hidden="true"
-                        className={`h-4 w-4 ${transaction.bookmarked ? 'text-amber-500' : 'text-slate-300 dark:text-slate-600'}`}
+                        className={`h-4 w-4 ${
+                          transaction.bookmarked
+                            ? 'text-amber-500'
+                            : 'text-slate-500 dark:text-slate-400 group-hover:text-amber-500'
+                        }`}
                       >
                         <path d="M8 1.75 9.93 5.66l4.32.63-3.13 3.04.74 4.3L8 11.6l-3.86 2.03.74-4.3L1.75 6.29l4.32-.63L8 1.75Z" />
                       </svg>
@@ -794,13 +805,24 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
                       type="button"
                       aria-label={`${transaction.note ? 'Edit' : 'Add'} note for ${transaction.description}`}
                       title={transaction.note ?? undefined}
-                      onClick={() => openNoteEditor(transaction)}
-                      className="rounded p-1 hover:bg-slate-100 dark:hover:bg-slate-800"
+                      aria-expanded={editingNoteId === transaction.id}
+                      // Disabled while its Note saves, so closing can't hide the save or its error.
+                      disabled={isSavingNote && editingNoteId === transaction.id}
+                      onClick={() => toggleNoteEditor(transaction)}
+                      className={`group rounded p-1 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:cursor-not-allowed ${
+                        editingNoteId === transaction.id ? 'bg-slate-100 dark:bg-slate-800' : ''
+                      }`}
                     >
-                      {/* Lit when the Note editor has something to show: a Note or a kept Receipt. */}
-                      <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" className={`h-4 w-4 ${transaction.note || transaction.hasReceipt ? 'text-slate-600 dark:text-slate-400' : 'text-slate-300 dark:text-slate-600'}`}>
-                        <path d="M0 3.75C0 2.784.784 2 1.75 2h12.5c.966 0 1.75.784 1.75 1.75v8.5A1.75 1.75 0 0 1 14.25 14H1.75A1.75 1.75 0 0 1 0 12.25Zm1.75-.25a.25.25 0 0 0-.25.25v8.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-8.5a.25.25 0 0 0-.25-.25ZM3.5 6.25a.75.75 0 0 1 .75-.75h7a.75.75 0 0 1 0 1.5h-7a.75.75 0 0 1-.75-.75Zm.75 2.25h4a.75.75 0 0 1 0 1.5h-4a.75.75 0 0 1 0-1.5Z" />
-                      </svg>
+                      {/* Filled when the Note editor has something to show: a Note or a kept Receipt. */}
+                      {transaction.note || transaction.hasReceipt ? (
+                        <svg viewBox="0 0 16 16" fill="currentColor" fillRule="evenodd" aria-hidden="true" className="h-4 w-4 text-slate-600 dark:text-slate-300">
+                          <path d="M1.75 2h12.5c.966 0 1.75.784 1.75 1.75v8.5A1.75 1.75 0 0 1 14.25 14H1.75A1.75 1.75 0 0 1 0 12.25v-8.5C0 2.784.784 2 1.75 2Zm2.5 3.5a.75.75 0 0 0 0 1.5h7a.75.75 0 0 0 0-1.5h-7Zm0 3a.75.75 0 0 0 0 1.5h4a.75.75 0 0 0 0-1.5h-4Z" />
+                        </svg>
+                      ) : (
+                        <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" className="h-4 w-4 text-slate-500 dark:text-slate-400 group-hover:text-slate-700 dark:group-hover:text-slate-200">
+                          <path d="M0 3.75C0 2.784.784 2 1.75 2h12.5c.966 0 1.75.784 1.75 1.75v8.5A1.75 1.75 0 0 1 14.25 14H1.75A1.75 1.75 0 0 1 0 12.25Zm1.75-.25a.25.25 0 0 0-.25.25v8.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-8.5a.25.25 0 0 0-.25-.25ZM3.5 6.25a.75.75 0 0 1 .75-.75h7a.75.75 0 0 1 0 1.5h-7a.75.75 0 0 1-.75-.75Zm.75 2.25h4a.75.75 0 0 1 0 1.5h-4a.75.75 0 0 1 0-1.5Z" />
+                        </svg>
+                      )}
                     </button>
                   </td>
                   <td className="py-2 pl-1 text-right max-sm:col-start-4 max-sm:row-start-3 max-sm:p-0">
