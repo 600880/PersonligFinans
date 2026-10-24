@@ -1,6 +1,7 @@
-import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import type { ReceiptSuggestion } from '../lib/api'
 import { emptyTransactionForm, suggestedTransactionForm } from '../lib/transactionForm'
+import { ZoomableReceipt } from './ZoomableReceipt'
 import { TransactionForm } from './TransactionForm'
 
 const smallButtonClass =
@@ -197,54 +198,13 @@ function ReceiptStep({ receipt, heading, headingId, onSaved, onDone }: ReceiptSt
 }
 
 // The Receipt beside its form, or above it on a narrow screen, scrolling within its panel when tall
-// so the form stays in view. A click shows it full-screen, where a click or Escape closes it again.
-// The full-screen view keeps the keyboard to itself, so its Escape never reaches the window.
+// so the form stays in view. A click shows it full-screen.
 function ReceiptPreview({ previewUrl }: { previewUrl: string }) {
-  const [isFullScreen, setIsFullScreen] = useState(false)
-  const showButtonRef = useRef<HTMLButtonElement>(null)
-
-  function closeFullScreen() {
-    setIsFullScreen(false)
-    showButtonRef.current?.focus()
-  }
-
-  function handleFullScreenKeyDown(event: KeyboardEvent) {
-    // The view covers the whole screen and is its only control, so Tab stays on it.
-    if (event.key === 'Tab') event.preventDefault()
-    if (event.key === 'Escape') {
-      event.stopPropagation()
-      closeFullScreen()
-    }
-  }
-
   return (
-    <>
-      {/* Placed first rather than reversing the row, which would start a narrow window scrolled to
-          the bottom of the form. */}
-      <div className="order-first max-h-72 shrink-0 overflow-auto rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 md:order-none md:max-h-none md:min-w-0 md:flex-1">
-        <button
-          ref={showButtonRef}
-          type="button"
-          aria-label="Show the Receipt full-screen"
-          onClick={() => setIsFullScreen(true)}
-          className="block w-full cursor-zoom-in"
-        >
-          <img src={previewUrl} alt="Receipt" className="w-full" />
-        </button>
-      </div>
-
-      {isFullScreen && (
-        <button
-          type="button"
-          aria-label="Close the full-screen Receipt"
-          autoFocus
-          onClick={closeFullScreen}
-          onKeyDown={handleFullScreenKeyDown}
-          className="fixed inset-0 z-10 flex cursor-zoom-out items-center justify-center bg-slate-900/90 p-4"
-        >
-          <img src={previewUrl} alt="Receipt" className="max-h-full max-w-full object-contain" />
-        </button>
-      )}
-    </>
+    // Placed first rather than reversing the row, which would start a narrow window scrolled to the
+    // bottom of the form.
+    <div className="order-first max-h-72 shrink-0 overflow-auto rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 md:order-none md:max-h-none md:min-w-0 md:flex-1">
+      <ZoomableReceipt src={previewUrl} className="block w-full" imageClassName="w-full" />
+    </div>
   )
 }

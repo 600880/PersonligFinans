@@ -527,7 +527,8 @@ export async function fetchFolderBookmarks(folderId: number): Promise<Transactio
 // categoryId is null for an Uncategorized Transaction. locked is set when the Categorization Rules
 // will never change its Category: it was entered manually, or its Category was chosen manually.
 // imported is set when it came from a Bank Statement, so it can't be deleted. bookmarked is set when
-// the User has put a Bookmark on it.
+// the User has put a Bookmark on it. hasReceipt is set when its Receipt was kept, which receiptUrl
+// serves.
 export interface Transaction {
   id: number
   date: string
@@ -538,6 +539,13 @@ export interface Transaction {
   locked: boolean
   imported: boolean
   bookmarked: boolean
+  hasReceipt: boolean
+}
+
+// Where a Transaction's kept Receipt is served, as a JPEG. Loaded by the browser as an image, so only
+// once it is shown.
+export function receiptUrl(transactionId: number): string {
+  return `/api/transactions/${transactionId}/receipt`
 }
 
 export interface TransactionMonth {

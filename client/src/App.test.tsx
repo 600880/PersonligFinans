@@ -3393,6 +3393,163 @@ describe('Transactions page', () => {
     })
   })
 
+  describe('a kept Receipt', () => {
+    // A manually-entered Transaction saved from a Receipt scan with its Receipt kept, one with a Note
+    // and no Receipt, and one with neither.
+    const keptReceiptTransactions = [
+      {
+        id: 31,
+        date: '2026-09-18',
+        description: 'Kiwi Bryggen',
+        amount: -312.5,
+        note: null,
+        categoryId: 1,
+        locked: true,
+        imported: false,
+        bookmarked: false,
+        hasReceipt: true,
+      },
+      { ...septemberTransactions[0], note: 'Kontant', hasReceipt: false },
+      { ...septemberTransactions[1], hasReceipt: false },
+    ]
+
+    async function openKeptReceiptMonth() {
+      months = [{ year: 2026, month: 9 }]
+      handleListPeriod = () => Response.json(keptReceiptTransactions)
+      const user = await openTransactionsPage()
+      await screen.findByRole('cell', { name: 'Kiwi Bryggen' })
+      return user
+    }
+
+    // How a Note button's icon looks, which is what tells a lit button from a greyed-out one.
+    function noteIconLook(name: string) {
+      return screen.getByRole('button', { name }).querySelector('svg')!.getAttribute('class')
+    }
+
+    it('lights the Note button of a Transaction with a Receipt and no Note, keeping its label and having no tooltip', async () => {
+      await openKeptReceiptMonth()
+
+      const litLook = noteIconLook('Edit note for Rema 1000')
+      expect(noteIconLook('Add note for Kiwi Bryggen')).toBe(litLook)
+      expect(noteIconLook('Add note for Lønn Fra: Testfirma AS')).not.toBe(litLook)
+      expect(screen.getByRole('button', { name: 'Add note for Kiwi Bryggen' })).not.toHaveAttribute('title')
+    })
+
+    it('shows the Receipt, served for that Transaction, in the Note editor only once it opens', async () => {
+      const user = await openKeptReceiptMonth()
+      expect(screen.queryByRole('img', { name: 'Receipt' })).not.toBeInTheDocument()
+
+      await user.click(screen.getByRole('button', { name: 'Add note for Kiwi Bryggen' }))
+
+      const thumbnail = screen.getByRole('button', { name: 'Show the Receipt full-screen' })
+      expect(within(thumbnail).getByRole('img', { name: 'Receipt' })).toHaveAttribute('src', '/api/transactions/31/receipt')
+      expect(screen.getByRole('textbox', { name: 'Note' })).toHaveAttribute('placeholder', 'Add a note…')
+    })
+
+    it('shows no Receipt in the Note editor of a Transaction without one', async () => {
+      const user = await openKeptReceiptMonth()
+
+      await user.click(screen.getByRole('button', { name: 'Edit note for Rema 1000' }))
+
+      expect(screen.getByRole('textbox', { name: 'Note' })).toHaveValue('Kontant')
+      expect(screen.queryByRole('img', { name: 'Receipt' })).not.toBeInTheDocument()
+    })
+
+    describe('full-screen', () => {
+      function fullScreenView() {
+        return screen.queryByRole('button', { name: 'Close the full-screen Receipt' })
+      }
+
+      it('opens on a click on the Receipt and closes on a click, leaving the Note editor with its draft', async () => {
+        const user = await openKeptReceiptMonth()
+        await user.click(screen.getByRole('button', { name: 'Add note for Kiwi Bryggen' }))
+        await user.type(screen.getByRole('textbox', { name: 'Note' }), 'Kontant')
+
+        await user.click(screen.getByRole('button', { name: 'Show the Receipt full-screen' }))
+
+        expect(within(fullScreenView()!).getByRole('img', { name: 'Receipt' })).toHaveAttribute(
+          'src',
+          '/api/transactions/31/receipt',
+        )
+
+        await user.click(fullScreenView()!)
+
+        expect(fullScreenView()).not.toBeInTheDocument()
+        expect(screen.getByRole('textbox', { name: 'Note' })).toHaveValue('Kontant')
+      })
+
+      it('closes on Escape, leaving the Note editor with its draft and focus back on the Receipt', async () => {
+        const user = await openKeptReceiptMonth()
+        await user.click(screen.getByRole('button', { name: 'Add note for Kiwi Bryggen' }))
+        await user.type(screen.getByRole('textbox', { name: 'Note' }), 'Kontant')
+        await user.click(screen.getByRole('button', { name: 'Show the Receipt full-screen' }))
+
+        await user.tab()
+        expect(fullScreenView()).toHaveFocus()
+        await user.keyboard('{Escape}')
+
+        expect(fullScreenView()).not.toBeInTheDocument()
+        expect(screen.getByRole('textbox', { name: 'Note' })).toHaveValue('Kontant')
+        expect(screen.getByRole('button', { name: 'Show the Receipt full-screen' })).toHaveFocus()
+      })
+    })
+
+    it('saves a first Note for a Transaction with a Receipt as before, keeping the button lit', async () => {
+      const changes: { id: number; body: unknown }[] = []
+      handleChangeNote = (id, body) => {
+        changes.push({ id, body })
+        return Response.json({ ...keptReceiptTransactions[0], ...(body as object) })
+      }
+      const user = await openKeptReceiptMonth()
+      await user.click(screen.getByRole('button', { name: 'Add note for Kiwi Bryggen' }))
+      await user.type(screen.getByRole('textbox', { name: 'Note' }), 'Kontant')
+
+      await user.click(screen.getByRole('button', { name: 'Save' }))
+
+      expect(await screen.findByText('Note saved.')).toBeInTheDocument()
+      expect(changes).toEqual([{ id: 31, body: { note: 'Kontant' } }])
+      expect(screen.queryByRole('textbox', { name: 'Note' })).not.toBeInTheDocument()
+      const button = screen.getByRole('button', { name: 'Edit note for Kiwi Bryggen' })
+      expect(button).toHaveAttribute('title', 'Kontant')
+      expect(noteIconLook('Edit note for Kiwi Bryggen')).toBe(noteIconLook('Edit note for Rema 1000'))
+    })
+
+    it('cancels the Note editor of a Transaction with a Receipt as before, saving nothing', async () => {
+      const user = await openKeptReceiptMonth()
+      await user.click(screen.getByRole('button', { name: 'Add note for Kiwi Bryggen' }))
+      await user.type(screen.getByRole('textbox', { name: 'Note' }), 'Kontant')
+
+      await user.click(screen.getByRole('button', { name: 'Cancel' }))
+
+      expect(screen.queryByRole('textbox', { name: 'Note' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('img', { name: 'Receipt' })).not.toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Add note for Kiwi Bryggen' })).not.toHaveAttribute('title')
+      expect(fetchMock.mock.calls.some(([url]) => url.endsWith('/note'))).toBe(false)
+    })
+
+    it('shows the Receipt in the Note editor in Bookmarks and in a Folder too', async () => {
+      folders = [{ id: 21, name: 'Warranty' }]
+      handleListBookmarks = () => Response.json([{ ...keptReceiptTransactions[0], bookmarked: true }])
+      handleListFolderBookmarks = () =>
+        Response.json([{ ...keptReceiptTransactions[0], id: 3, description: 'Power', bookmarked: true }])
+      const user = await openKeptReceiptMonth()
+      await user.click(within(screen.getByRole('group', { name: 'Show' })).getByRole('button', { name: 'Bookmarks' }))
+      await screen.findByRole('option', { name: 'Warranty' })
+
+      await user.click(screen.getByRole('button', { name: 'Add note for Kiwi Bryggen' }))
+
+      const thumbnail = screen.getByRole('button', { name: 'Show the Receipt full-screen' })
+      expect(within(thumbnail).getByRole('img', { name: 'Receipt' })).toHaveAttribute('src', '/api/transactions/31/receipt')
+
+      await user.selectOptions(screen.getByLabelText('Folder'), 'Warranty')
+      await screen.findByRole('cell', { name: 'Power' })
+      await user.click(screen.getByRole('button', { name: 'Add note for Power' }))
+
+      const folderThumbnail = screen.getByRole('button', { name: 'Show the Receipt full-screen' })
+      expect(within(folderThumbnail).getByRole('img', { name: 'Receipt' })).toHaveAttribute('src', '/api/transactions/3/receipt')
+    })
+  })
+
   describe('All | Bookmarks switch', () => {
     // Bookmarked Transactions from any date, newest first, as the bookmarks endpoint lists them.
     const bookmarks = [

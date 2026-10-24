@@ -14,6 +14,7 @@ import {
   fetchTransactionMonths,
   fetchTransactions,
   fileBookmark,
+  receiptUrl,
   removeBookmark,
   renameFolder,
   type Category,
@@ -33,6 +34,7 @@ import { firstMonthWithTransactions, monthsOfQuarter } from '../lib/quarter'
 import { BookmarkAddedPopup } from './BookmarkAddedPopup'
 import { FolderDropdown, FolderNameForm } from './FolderDropdown'
 import { ErrorMessage, StatusMessage } from './Messages'
+import { ZoomableReceipt } from './ZoomableReceipt'
 import { inputClassName } from './TransactionForm'
 
 const LOAD_ERROR = 'Could not load the transactions.'
@@ -795,7 +797,8 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
                       onClick={() => openNoteEditor(transaction)}
                       className="rounded p-1 hover:bg-slate-100 dark:hover:bg-slate-800"
                     >
-                      <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" className={`h-4 w-4 ${transaction.note ? 'text-slate-600 dark:text-slate-400' : 'text-slate-300 dark:text-slate-600'}`}>
+                      {/* Lit when the Note editor has something to show: a Note or a kept Receipt. */}
+                      <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" className={`h-4 w-4 ${transaction.note || transaction.hasReceipt ? 'text-slate-600 dark:text-slate-400' : 'text-slate-300 dark:text-slate-600'}`}>
                         <path d="M0 3.75C0 2.784.784 2 1.75 2h12.5c.966 0 1.75.784 1.75 1.75v8.5A1.75 1.75 0 0 1 14.25 14H1.75A1.75 1.75 0 0 1 0 12.25Zm1.75-.25a.25.25 0 0 0-.25.25v8.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-8.5a.25.25 0 0 0-.25-.25ZM3.5 6.25a.75.75 0 0 1 .75-.75h7a.75.75 0 0 1 0 1.5h-7a.75.75 0 0 1-.75-.75Zm.75 2.25h4a.75.75 0 0 1 0 1.5h-4a.75.75 0 0 1 0-1.5Z" />
                       </svg>
                     </button>
@@ -819,17 +822,28 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
                   <tr className="max-sm:block">
                     <td colSpan={7} className="pb-3 max-sm:block max-sm:pt-1">
                       <div className="flex flex-wrap items-end gap-2 rounded-lg bg-slate-50 dark:bg-slate-950 px-3 py-2">
-                        <label className="flex flex-1 flex-col gap-1 text-sm font-medium text-slate-700 dark:text-slate-300">
-                          Note
-                          <textarea
-                            rows={2}
-                            maxLength={256}
-                            value={noteDraft}
-                            onChange={(e) => setNoteDraft(e.target.value)}
-                            placeholder="Add a note…"
-                            className={`${inputClassName} font-normal`}
-                          />
-                        </label>
+                        {/* The Note with the kept Receipt to its right, or above it on a phone. The
+                            Receipt is loaded only now, so listing Transactions never loads one. */}
+                        <div className="flex flex-1 flex-col gap-2 sm:flex-row sm:items-end">
+                          <label className="flex flex-1 flex-col gap-1 text-sm font-medium text-slate-700 dark:text-slate-300">
+                            Note
+                            <textarea
+                              rows={2}
+                              maxLength={256}
+                              value={noteDraft}
+                              onChange={(e) => setNoteDraft(e.target.value)}
+                              placeholder="Add a note…"
+                              className={`${inputClassName} font-normal`}
+                            />
+                          </label>
+                          {transaction.hasReceipt && (
+                            <ZoomableReceipt
+                              src={receiptUrl(transaction.id)}
+                              className="shrink-0 self-start overflow-hidden rounded border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 max-sm:order-first sm:self-end"
+                              imageClassName="h-24 w-auto max-w-full"
+                            />
+                          )}
+                        </div>
                         <div className="flex gap-2">
                           <button
                             type="button"
