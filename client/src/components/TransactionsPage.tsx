@@ -822,9 +822,16 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
                   <tr className="max-sm:block">
                     <td colSpan={7} className="pb-3 max-sm:block max-sm:pt-1">
                       <div className="flex flex-wrap items-end gap-2 rounded-lg bg-slate-50 dark:bg-slate-950 px-3 py-2">
-                        {/* The Note with the kept Receipt to its right, or above it on a phone. The
+                        {/* The Note with the kept Receipt to its left, or above it on a phone. The
                             Receipt is loaded only now, so listing Transactions never loads one. */}
                         <div className="flex flex-1 flex-col gap-2 sm:flex-row sm:items-end">
+                          {transaction.hasReceipt && (
+                            <ZoomableReceipt
+                              src={receiptUrl(transaction.id)}
+                              className="shrink-0 self-start overflow-hidden rounded border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 sm:self-end"
+                              imageClassName="h-24 w-auto max-w-full"
+                            />
+                          )}
                           <label className="flex flex-1 flex-col gap-1 text-sm font-medium text-slate-700 dark:text-slate-300">
                             Note
                             <textarea
@@ -836,13 +843,6 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
                               className={`${inputClassName} font-normal`}
                             />
                           </label>
-                          {transaction.hasReceipt && (
-                            <ZoomableReceipt
-                              src={receiptUrl(transaction.id)}
-                              className="shrink-0 self-start overflow-hidden rounded border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 max-sm:order-first sm:self-end"
-                              imageClassName="h-24 w-auto max-w-full"
-                            />
-                          )}
                         </div>
                         <div className="flex gap-2">
                           <button
