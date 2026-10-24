@@ -20,7 +20,7 @@ using PersonligFinans.Api.Users;
 namespace PersonligFinans.Api.Tests;
 
 // Two Users side by side: each has their own Transactions, Bank Statements, Uploads, Categories,
-// Categorization Rules, Bookmarks and Folders, and never sees or changes the other's.
+// Categorization Rules, Bookmarks, Receipts and Folders, and never sees or changes the other's.
 [Collection(ApiCollection.Name)]
 public class UserIsolationTests : IAsyncLifetime
 {
@@ -218,6 +218,20 @@ public class UserIsolationTests : IAsyncLifetime
         Assert.Equal(
             [bookmarkedId],
             (await _a.GetFromJsonAsync<List<TransactionResponse>>("/api/bookmarks"))!.Select(t => t.Id));
+    }
+
+    // Answered as if it didn't exist, so nobody can even tell whether another User's Transaction has a
+    // Receipt.
+    [Fact]
+    public async Task AnotherUsersReceipt_GivesNotFound()
+    {
+        var transactionId = (await TransactionWithReceipt.CreateAsync(
+            _a, new { date = "2026-08-03", description = "Kafé Sentrum", amount = -100m, categoryId = _categoriesA.Other })).Id;
+
+        Assert.Equal(HttpStatusCode.NotFound, (await _b.GetAsync($"/api/transactions/{transactionId}/receipt")).StatusCode);
+
+        // The first User's is still served.
+        Assert.Equal(HttpStatusCode.OK, (await _a.GetAsync($"/api/transactions/{transactionId}/receipt")).StatusCode);
     }
 
     private static Task<HttpResponseMessage> PostFolder(HttpClient client, string name) =>

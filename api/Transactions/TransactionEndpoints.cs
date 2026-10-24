@@ -31,7 +31,9 @@ public record TransactionResponse(
     bool Locked,
     bool Imported,
     // Bookmarked: the User has put a Bookmark on it.
-    bool Bookmarked);
+    bool Bookmarked,
+    // HasReceipt: its Receipt was kept when it was saved from a Receipt scan.
+    bool HasReceipt);
 
 public record TransactionMonthResponse(int Year, int Month);
 
@@ -90,12 +92,14 @@ public static class TransactionEndpoints
     }
 
     // The Transactions as responses, newest first with the id as a stable tie-break, each saying
-    // whether it is bookmarked. Every list of Transactions has this order and shape.
+    // whether it is bookmarked and whether it has a Receipt, without loading the Receipt. Every list
+    // of Transactions has this order and shape.
     internal static Task<List<TransactionResponse>> ListNewestFirst(IQueryable<Transaction> transactions, AppDbContext db) =>
         transactions
             .OrderByDescending(t => t.PostedDate)
             .ThenByDescending(t => t.Id)
-            .Select(t => ToResponse(t, db.Bookmarks.Any(b => b.TransactionId == t.Id)))
+            .Select(t => ToResponse(
+                t, db.Bookmarks.Any(b => b.TransactionId == t.Id), db.Receipts.Any(r => r.TransactionId == t.Id)))
             .ToListAsync();
 
     // The Possible duplicates of a Transaction being entered by hand: every Transaction, imported or
@@ -156,6 +160,17 @@ public static class TransactionEndpoints
 
     private static async Task<IResult> CreateTransaction(CreateTransactionRequest request, AppDbContext db)
     {
+        var errors = await ValidateNew(request, db);
+        if (errors.Count > 0)
+            return Results.ValidationProblem(errors);
+
+        return await SaveNew(request, receipt: null, db);
+    }
+
+    // The errors per field of a request to create a manually-entered Transaction; empty when it can
+    // be saved. Shared by the JSON create and the create with a Receipt, so they never drift apart.
+    internal static async Task<Dictionary<string, string[]>> ValidateNew(CreateTransactionRequest request, AppDbContext db)
+    {
         var errors = new Dictionary<string, string[]>();
         void Fail(string field, string message) => errors[field] = [message];
 
@@ -185,22 +200,27 @@ public static class TransactionEndpoints
         if (request.Bookmark?.FolderId is { } folderId && !await db.Folders.AnyAsync(f => f.Id == folderId))
             Fail("bookmark", "The folder no longer exists.");
 
-        if (errors.Count > 0)
-            return Results.ValidationProblem(errors);
+        return errors;
+    }
 
+    // Saves the manually-entered Transaction of a request ValidateNew found no errors in, with its
+    // Bookmark when the request asks for one and its Receipt when an image is given, and answers
+    // Created with it.
+    internal static async Task<IResult> SaveNew(CreateTransactionRequest request, byte[]? receipt, AppDbContext db)
+    {
         var transaction = new Transaction
         {
             UserId = db.OwnerOfNewRows,
             PostedDate = request.Date!.Value,
-            Description = description,
+            Description = request.Description!.Trim(),
             Amount = request.Amount!.Value,
-            Note = note,
+            Note = NormalizeNote(request.Note),
             CategoryId = request.CategoryId,
         };
         db.Transactions.Add(transaction);
 
-        // The Transaction and its Bookmark are saved together or not at all. The Bookmark needs the
-        // Transaction's id, so it is saved second.
+        // The Transaction, its Bookmark and its Receipt are saved together or not at all. The Bookmark
+        // and the Receipt need the Transaction's id, so they are saved second.
         await using var saving = await db.Database.BeginTransactionAsync();
         try
         {
@@ -209,20 +229,24 @@ public static class TransactionEndpoints
             {
                 db.Bookmarks.Add(new Bookmark { UserId = db.OwnerOfNewRows, TransactionId = transaction.Id, FolderId = bookmark.FolderId });
                 await BookmarkEndpoints.MakeLastUsedFolder(db, bookmark.FolderId);
-                await db.SaveChangesAsync();
             }
+            if (receipt is not null)
+                db.Receipts.Add(new Receipt { UserId = db.OwnerOfNewRows, TransactionId = transaction.Id, Image = receipt });
+            await db.SaveChangesAsync();
             await saving.CommitAsync();
         }
-        // A first last used folder recorded concurrently, between the lookup and now: creating again
+        // A first last used folder recorded concurrently, between the lookup and now: saving again
         // finds that row and changes it instead.
         catch (DbUpdateException e) when (e.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
         {
             await saving.RollbackAsync();
             db.ChangeTracker.Clear();
-            return await CreateTransaction(request, db);
+            return await SaveNew(request, receipt, db);
         }
 
-        return Results.Created($"/api/transactions/{transaction.Id}", ToResponse(transaction, bookmarked: request.Bookmark is not null));
+        return Results.Created(
+            $"/api/transactions/{transaction.Id}",
+            ToResponse(transaction, bookmarked: request.Bookmark is not null, hasReceipt: receipt is not null));
     }
 
     // Sets the Note on any Transaction — imported or manual. Blank and null both clear it.
@@ -240,7 +264,7 @@ public static class TransactionEndpoints
         transaction.Note = note;
         await db.SaveChangesAsync();
 
-        return Results.Ok(ToResponse(transaction, await IsBookmarked(db, id)));
+        return Results.Ok(await ToResponseAsync(transaction, db));
     }
 
     // Why an Amount can't be a Transaction's, or null when it can.
@@ -279,11 +303,12 @@ public static class TransactionEndpoints
         await db.SaveChangesAsync();
         await dbTransaction.CommitAsync();
 
-        return Results.Ok(ToResponse(transaction, await IsBookmarked(db, id)));
+        return Results.Ok(await ToResponseAsync(transaction, db));
     }
 
-    // Deletes a manually-entered Transaction for good. An imported one can't be deleted, so every
-    // imported Bank Statement stays whole and reconciled.
+    // Deletes a manually-entered Transaction for good, and the database deletes its Bookmark and its
+    // Receipt with it by cascade. An imported one can't be deleted, so every imported Bank Statement
+    // stays whole and reconciled.
     private static async Task<IResult> DeleteTransaction(int id, AppDbContext db)
     {
         var transaction = await db.Transactions.FindAsync(id);
@@ -303,8 +328,8 @@ public static class TransactionEndpoints
 
     // Deletes every Transaction of the User: the manually-entered ones, and every Bank Statement, since
     // an imported Transaction goes only with its whole Bank Statement. Each Bank Statement can then be
-    // imported again. Bookmarks go with their Transactions, while Folders, the last used folder,
-    // Categories and Categorization Rules stay, the rules with their AI-generated and New marks.
+    // imported again. Bookmarks and Receipts go with their Transactions, while Folders, the last used
+    // folder, Categories and Categorization Rules stay, the rules with their AI-generated and New marks.
     private static async Task<IResult> DeleteAllTransactions(AppDbContext db)
     {
         // Under the rule-change lock, so it can't interleave with an import from another browser,
@@ -312,7 +337,7 @@ public static class TransactionEndpoints
         await using var transaction = await Categorizer.BeginRuleChangeAsync(db);
 
         // The Transactions first, imported ones included, so the count is of exactly those deleted. The
-        // database deletes their Bookmarks by cascade.
+        // database deletes their Bookmarks and Receipts by cascade.
         var transactionsDeleted = await db.Transactions.ExecuteDeleteAsync();
         await db.BankStatements.ExecuteDeleteAsync();
         await transaction.CommitAsync();
@@ -323,10 +348,15 @@ public static class TransactionEndpoints
     private static IResult CategoryProblem(string message) =>
         Results.ValidationProblem(new Dictionary<string, string[]> { ["categoryId"] = [message] });
 
-    private static Task<bool> IsBookmarked(AppDbContext db, int transactionId) =>
-        db.Bookmarks.AnyAsync(b => b.TransactionId == transactionId);
+    // The Transaction as a response, asking the database whether it is bookmarked and whether it has a
+    // Receipt.
+    private static async Task<TransactionResponse> ToResponseAsync(Transaction transaction, AppDbContext db) =>
+        ToResponse(
+            transaction,
+            await db.Bookmarks.AnyAsync(b => b.TransactionId == transaction.Id),
+            await db.Receipts.AnyAsync(r => r.TransactionId == transaction.Id));
 
-    private static TransactionResponse ToResponse(Transaction transaction, bool bookmarked) =>
+    private static TransactionResponse ToResponse(Transaction transaction, bool bookmarked, bool hasReceipt) =>
         new(
             transaction.Id,
             transaction.PostedDate,
@@ -336,5 +366,6 @@ public static class TransactionEndpoints
             transaction.CategoryId,
             Categorizer.IsLocked(transaction),
             transaction.IsImported,
-            bookmarked);
+            bookmarked,
+            hasReceipt);
 }

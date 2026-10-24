@@ -2,6 +2,7 @@ import { useEffect, useId, useState, type FormEvent, type ReactNode } from 'reac
 import { formatAmount } from '../lib/amount'
 import {
   createTransaction,
+  createTransactionWithReceipt,
   fetchCategories,
   fetchFolders,
   fetchPossibleDuplicates,
@@ -80,6 +81,8 @@ function usePossibleDuplicates(values: TransactionFormValues): PossibleDuplicate
 
 interface TransactionFormProps {
   initialValues: TransactionFormValues
+  // The Receipt the Transaction is entered from: the JPEG the picked file was reduced to.
+  receipt?: Blob
   disabled?: boolean
   secondaryAction: { label: string; onClick: () => void }
   onSaved: () => void
@@ -94,8 +97,12 @@ interface TransactionFormProps {
 // until the user chooses otherwise, and can only be chosen once the Folders are loaded; failing to
 // load them never keeps Save from being used. Under the fields, a notice lists the Possible
 // duplicates of the date and Amount entered; it only warns and never keeps Save from being used.
+// Given a Receipt, the form offers to keep it with the Transaction, ticked when the form starts:
+// ticked, Save creates the two together, and unticked it creates the Transaction alone, as without
+// a Receipt. A Receipt the server refuses is shown above the fields, as it has no field of its own.
 export function TransactionForm({
   initialValues,
+  receipt,
   disabled = false,
   secondaryAction,
   onSaved,
@@ -108,6 +115,7 @@ export function TransactionForm({
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({})
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [isSaving, setIsSaving] = useState(false)
+  const [keepReceipt, setKeepReceipt] = useState(true)
   const canSave = isTransactionFormValid(values) && !isSaving && !disabled
   const possibleDuplicates = usePossibleDuplicates(values)
   const possibleDuplicatesHeadingId = useId()
@@ -147,7 +155,11 @@ export function TransactionForm({
     setIsSaving(true)
     setFieldErrors({})
     setErrorMessage(null)
-    const result = await createTransaction(toCreateTransactionRequest(values))
+    const request = toCreateTransactionRequest(values)
+    const result =
+      receipt !== undefined && keepReceipt
+        ? await createTransactionWithReceipt(request, receipt)
+        : await createTransaction(request)
     setIsSaving(false)
 
     if (result.ok) {
@@ -266,6 +278,19 @@ export function TransactionForm({
             className={inputClassName}
           />
         </Field>
+
+        {receipt !== undefined && (
+          <label className="flex w-fit items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-300">
+            <input
+              type="checkbox"
+              checked={keepReceipt}
+              disabled={disabled}
+              onChange={(e) => setKeepReceipt(e.target.checked)}
+              className="size-4 rounded border-slate-300 dark:border-slate-700"
+            />
+            Keep the receipt
+          </label>
+        )}
 
         {possibleDuplicates.length > 0 && (
           <section

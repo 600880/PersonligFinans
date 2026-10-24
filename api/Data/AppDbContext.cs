@@ -25,6 +25,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, CurrentUser cu
     public DbSet<BankStatement> BankStatements => Set<BankStatement>();
     public DbSet<CategorizationRule> CategorizationRules => Set<CategorizationRule>();
     public DbSet<Bookmark> Bookmarks => Set<Bookmark>();
+    public DbSet<Receipt> Receipts => Set<Receipt>();
     public DbSet<Folder> Folders => Set<Folder>();
     public DbSet<LastUsedFolder> LastUsedFolders => Set<LastUsedFolder>();
     public DbSet<LatestUpload> LatestUploads => Set<LatestUpload>();
@@ -32,12 +33,12 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, CurrentUser cu
     public DbSet<SentPasswordResetEmail> SentPasswordResetEmails => Set<SentPasswordResetEmail>();
 
     // The User this context works for, or null for nobody. Its queries see only that User's
-    // Transactions, Bank Statements, Categories, Categorization Rules, Bookmarks, Folders, last used
-    // folder and latest Upload, through the query filters. Read at each query.
+    // Transactions, Bank Statements, Categories, Categorization Rules, Bookmarks, Receipts, Folders,
+    // last used folder and latest Upload, through the query filters. Read at each query.
     public string? CurrentUserId => currentUser.Id;
 
     // The owner every write gives a new Transaction, Bank Statement, Category, Categorization Rule,
-    // Bookmark, Folder, last used folder or latest Upload explicitly: the current User. Acting for
+    // Bookmark, Receipt, Folder, last used folder or latest Upload explicitly: the current User. Acting for
     // nobody, there is no one to own it, so the write fails here rather than in the database.
     public string OwnerOfNewRows => CurrentUserId
         ?? throw new InvalidOperationException("Only a signed-in User can own new rows.");
@@ -120,6 +121,19 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, CurrentUser cu
             bookmark.HasOne<Folder>()
                 .WithMany()
                 .HasForeignKey(b => b.FolderId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // A Transaction has at most one Receipt, keyed by the Transaction, and deleting the
+        // Transaction, or anything that deletes Transactions, deletes it in the database. A table of
+        // its own, so that loading Transactions never loads images.
+        modelBuilder.Entity<Receipt>(receipt =>
+        {
+            OwnedByAUser(receipt);
+            receipt.HasKey(r => r.TransactionId);
+            receipt.HasOne<Transaction>()
+                .WithOne()
+                .HasForeignKey<Receipt>(r => r.TransactionId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 

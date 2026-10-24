@@ -270,6 +270,8 @@ public class UserEndpointsTests
     [InlineData("POST", "/api/transactions")]
     [InlineData("POST", "/api/bank-statements")]
     [InlineData("POST", "/api/receipts/read")]
+    [InlineData("POST", "/api/transactions/with-receipt")]
+    [InlineData("GET", "/api/transactions/1/receipt")]
     [InlineData("GET", "/api/no-such-endpoint")]
     public async Task OtherEndpoints_SignedOut_Return401_NotARedirect(string method, string url)
     {

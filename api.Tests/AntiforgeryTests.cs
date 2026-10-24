@@ -15,10 +15,10 @@ public class AntiforgeryTests
         _factory = factory;
     }
 
-    // The two multipart forms, each with a file its endpoint accepts: a one-row Bank Statement to
-    // upload, and a JPEG Receipt to read, answered Unavailable since the tests configure no receipt
-    // reader.
-    public static TheoryData<string> Forms => ["bank statement", "receipt"];
+    // The three multipart forms, each with a file its endpoint accepts: a one-row Bank Statement to
+    // upload, a JPEG Receipt to read, answered Unavailable since the tests configure no receipt
+    // reader, and a manually-entered Transaction to create with its JPEG Receipt.
+    public static TheoryData<string> Forms => ["bank statement", "receipt", "transaction with a receipt"];
 
     private static async Task<HttpResponseMessage> PostForm(HttpClient client, string form)
     {
@@ -35,7 +35,12 @@ public class AntiforgeryTests
         }
 
         byte[] jpeg = [0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, .."JFIF"u8, 0x00];
-        return await Post(client, "/api/receipts/read", jpeg, "image/jpeg", "kvittering.jpg");
+        if (form == "receipt")
+            return await Post(client, "/api/receipts/read", jpeg, "image/jpeg", "kvittering.jpg");
+
+        var categoryId = (await TestCategories.Of(client)).Other;
+        return await TransactionWithReceipt.PostAsync(
+            client, new { date = "2026-08-03", description = "Kafé Sentrum", amount = -100m, categoryId }, jpeg);
     }
 
     private static async Task<HttpResponseMessage> Post(

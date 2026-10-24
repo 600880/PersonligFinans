@@ -75,8 +75,10 @@ public class DeleteYourUserTests
 
     // Each kind of row a User owns, so that deleting the User has to delete every one: Transactions,
     // imported and manually-entered, a Bank Statement and the Upload that imported it, a Category of
-    // the User's own, a Categorization Rule, a Folder, a Bookmark in it, and so the last used folder.
-    private static async Task AddOneOfEverythingAUserOwns(HttpClient client)
+    // the User's own, a Categorization Rule, a Receipt kept with the manually-entered Transaction, a
+    // Folder, a Bookmark in it, and so the last used folder. Returns the manually-entered
+    // Transaction's id.
+    private static async Task<int> AddOneOfEverythingAUserOwns(HttpClient client)
     {
         var file = new ByteArrayContent(StatementPdf.WithPurchasesFrom("Kafé", "Rema 1000"));
         file.Headers.ContentType = new MediaTypeHeaderValue("application/pdf");
@@ -88,10 +90,8 @@ public class DeleteYourUserTests
         var categoryId = (await category.Content.ReadFromJsonAsync<CategoryResponse>())!.Id;
         var rule = await client.PostAsJsonAsync("/api/categorization-rules", new { keyword = "kafé", categoryId });
         Assert.Equal(HttpStatusCode.Created, rule.StatusCode);
-        var manual = await client.PostAsJsonAsync(
-            "/api/transactions", new { date = "2026-08-20", description = "Garnbutikk", amount = -100m, categoryId });
-        Assert.Equal(HttpStatusCode.Created, manual.StatusCode);
-        var manualId = (await manual.Content.ReadFromJsonAsync<TransactionResponse>())!.Id;
+        var manualId = (await TransactionWithReceipt.CreateAsync(
+            client, new { date = "2026-08-20", description = "Garnbutikk", amount = -100m, categoryId })).Id;
 
         var folder = await client.PostAsJsonAsync("/api/folders", new { name = "Tax deductible" });
         Assert.Equal(HttpStatusCode.Created, folder.StatusCode);
@@ -99,6 +99,7 @@ public class DeleteYourUserTests
         Assert.Equal(
             HttpStatusCode.OK,
             (await client.PutAsJsonAsync($"/api/transactions/{manualId}/bookmark", new { folderId })).StatusCode);
+        return manualId;
     }
 
     // Everything the User's data endpoints list, as they answer it.
@@ -120,7 +121,7 @@ public class DeleteYourUserTests
     {
         var email = SignedInClient.UniqueEmail();
         var client = await _factory.CreateSignedInClientAsync(email);
-        await AddOneOfEverythingAUserOwns(client);
+        var manualId = await AddOneOfEverythingAUserOwns(client);
 
         Assert.Equal(HttpStatusCode.NoContent, (await DeleteYourUser(client, SignedInClient.Password)).StatusCode);
         var again = await _factory.CreateSignedInClientAsync(email);
@@ -137,6 +138,7 @@ public class DeleteYourUserTests
         Assert.Empty((await again.GetFromJsonAsync<List<ListedBankStatementResponse>>("/api/bank-statements"))!);
         Assert.Empty((await again.GetFromJsonAsync<List<FolderResponse>>("/api/folders"))!);
         Assert.Empty((await again.GetFromJsonAsync<List<TransactionResponse>>("/api/bookmarks"))!);
+        Assert.Equal(HttpStatusCode.NotFound, (await again.GetAsync($"/api/transactions/{manualId}/receipt")).StatusCode);
     }
 
     [Fact]
@@ -145,12 +147,13 @@ public class DeleteYourUserTests
         var client = await _factory.CreateSignedInClientAsync();
         var other = await _factory.CreateSignedInClientAsync();
         await AddOneOfEverythingAUserOwns(client);
-        await AddOneOfEverythingAUserOwns(other);
+        var othersManualId = await AddOneOfEverythingAUserOwns(other);
         var before = await EverythingListed(other);
 
         Assert.Equal(HttpStatusCode.NoContent, (await DeleteYourUser(client, SignedInClient.Password)).StatusCode);
 
         Assert.Equal(before, await EverythingListed(other));
+        Assert.Equal(HttpStatusCode.OK, (await other.GetAsync($"/api/transactions/{othersManualId}/receipt")).StatusCode);
     }
 
     [Fact]

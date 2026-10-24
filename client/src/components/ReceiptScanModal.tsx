@@ -181,6 +181,7 @@ function ReceiptStep({ receipt, heading, headingId, onSaved, onDone }: ReceiptSt
           // Started over from what was read, once the Receipt has been read.
           key={suggestion === null ? 'reading' : 'read'}
           initialValues={suggestion === null ? emptyTransactionForm() : suggestedTransactionForm(suggestion)}
+          receipt={receipt.image}
           disabled={suggestion === null}
           secondaryAction={{ label: 'Skip', onClick: done }}
           onSaved={() => {

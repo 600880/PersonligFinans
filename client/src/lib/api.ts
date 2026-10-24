@@ -21,8 +21,8 @@ async function apiFetch(input: string, init?: RequestInit): Promise<Response> {
   return response
 }
 
-// The header the multipart forms (a Bank Statement's Upload and reading a Receipt) send the
-// antiforgery token in.
+// The header the multipart forms (a Bank Statement's Upload, reading a Receipt and creating a
+// Transaction with its Receipt) send the antiforgery token in.
 const ANTIFORGERY_HEADER = 'X-CSRF-TOKEN'
 
 // The antiforgery token the multipart forms send, fetched at the first one after signing in, since the
@@ -745,16 +745,34 @@ export async function fetchPossibleDuplicates({ date, amount }: PossibleDuplicat
   return (await response.json()) as PossibleDuplicate[]
 }
 
-export async function createTransaction(
-  request: CreateTransactionRequest,
-): Promise<CreateTransactionResult> {
-  let response: Response
-  try {
-    response = await apiFetch('/api/transactions', {
+export function createTransaction(request: CreateTransactionRequest): Promise<CreateTransactionResult> {
+  return saveNewTransaction(() =>
+    apiFetch('/api/transactions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(request),
-    })
+    }),
+  )
+}
+
+// Creates the Transaction together with its Receipt, kept with it: both or neither. receipt is the
+// JPEG the picked file was reduced to. The form has no field for the Receipt, so a Receipt the
+// server refuses is the result's message.
+export function createTransactionWithReceipt(
+  request: CreateTransactionRequest,
+  receipt: Blob,
+): Promise<CreateTransactionResult> {
+  const body = new FormData()
+  body.append('transaction', JSON.stringify(request))
+  body.append('receipt', receipt)
+  return saveNewTransaction(() => postForm('/api/transactions/with-receipt', body))
+}
+
+// What sending a create of a Transaction ended in, with the refused fields and any refused Receipt.
+async function saveNewTransaction(send: () => Promise<Response>): Promise<CreateTransactionResult> {
+  let response: Response
+  try {
+    response = await send()
   } catch {
     return { ok: false, fieldErrors: {}, message: 'Could not reach the server.' }
   }
@@ -762,8 +780,12 @@ export async function createTransaction(
   if (response.ok) return { ok: true }
 
   if (response.status === 400) {
-    const { fieldErrors } = await readProblem<CreateTransactionRequest>(response)
-    if (Object.keys(fieldErrors).length > 0) return { ok: false, fieldErrors, message: null }
+    const {
+      fieldErrors: { receipt, ...fieldErrors },
+    } = await readProblem<CreateTransactionRequest & { receipt: Blob }>(response)
+    if (receipt !== undefined || Object.keys(fieldErrors).length > 0) {
+      return { ok: false, fieldErrors, message: receipt ?? null }
+    }
   }
 
   return { ok: false, fieldErrors: {}, message: `Saving failed (${response.status}).` }

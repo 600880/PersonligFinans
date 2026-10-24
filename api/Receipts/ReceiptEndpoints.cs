@@ -1,10 +1,13 @@
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using PersonligFinans.Api.AiRequests;
 using PersonligFinans.Api.BankStatements;
 using PersonligFinans.Api.CategorizationRules;
 using PersonligFinans.Api.Data;
+using PersonligFinans.Api.Transactions;
 using PersonligFinans.Api.Users;
 
 namespace PersonligFinans.Api.Receipts;
@@ -53,6 +56,95 @@ public static class ReceiptEndpoints
         var api = app.MapGroup("/api");
 
         api.MapPost("/receipts/read", ReadReceipt).RequireAntiforgeryToken();
+        api.MapPost("/transactions/with-receipt", CreateTransactionWithReceipt).RequireAntiforgeryToken();
+        api.MapGet("/transactions/{id:int}/receipt", ServeReceipt);
+    }
+
+    // Creates a manually-entered Transaction together with its Receipt, kept with it, as the Receipt
+    // scan's Save does when the Receipt is to be kept. A multipart form: the transaction field holds
+    // the JSON create's request, Bookmark included, and the receipt field the Receipt's image. It is
+    // validated as the JSON create is, along with the Receipt, and answered as the JSON create is.
+    // Any failure saves nothing. The form is read by hand, as at reading a Receipt, so that a missing
+    // or oversized Receipt gets the same validation problem.
+    private static async Task<IResult> CreateTransactionWithReceipt(
+        HttpRequest request, AppDbContext db, IOptions<Microsoft.AspNetCore.Http.Json.JsonOptions> jsonOptions)
+    {
+        IFormCollection? form;
+        try
+        {
+            form = request.HasFormContentType ? await request.ReadFormAsync() : null;
+        }
+        catch (BadHttpRequestException e) when (e.StatusCode == StatusCodes.Status413PayloadTooLarge)
+        {
+            // Kestrel's own request size limit (30 MB) was hit while reading the form.
+            return ReceiptProblem("The Receipt is larger than 10 MB.");
+        }
+
+        var errors = new Dictionary<string, string[]>();
+
+        var (image, receiptError) = await KeptImageOf(form?.Files.GetFile("receipt"));
+        if (receiptError is not null)
+            errors["receipt"] = [receiptError];
+
+        var transaction = TransactionRequestOf(form?["transaction"], jsonOptions.Value.SerializerOptions);
+        if (transaction is null)
+            errors["transaction"] = ["The transaction is missing or is not valid JSON."];
+        else
+            foreach (var (field, messages) in await TransactionEndpoints.ValidateNew(transaction, db))
+                errors[field] = messages;
+
+        if (errors.Count > 0)
+            return Results.ValidationProblem(errors);
+
+        return await TransactionEndpoints.SaveNew(transaction!, image, db);
+    }
+
+    // The image of a Receipt to keep, or why it can't be kept. Only a JPEG is kept, told from its
+    // leading bytes since the declared type isn't trusted: every Receipt is reduced to one when picked.
+    private static async Task<(byte[]? Image, string? Error)> KeptImageOf(IFormFile? file)
+    {
+        if (file is null || file.Length == 0)
+            return (null, "Choose a Receipt to keep.");
+        if (file.Length > MaxFileBytes)
+            return (null, "The Receipt is larger than 10 MB.");
+
+        using var bytes = new MemoryStream();
+        await using (var stream = file.OpenReadStream())
+            await stream.CopyToAsync(bytes);
+        var image = bytes.ToArray();
+        return image.AsSpan().StartsWith(JpegStart) ? (image, null) : (null, "The Receipt is not a JPEG image.");
+    }
+
+    // The JSON create's request held in the form's transaction field, read as the JSON create reads
+    // its body, or null when there is none or it isn't one.
+    private static CreateTransactionRequest? TransactionRequestOf(string? json, JsonSerializerOptions options)
+    {
+        if (string.IsNullOrEmpty(json))
+            return null;
+        try
+        {
+            return JsonSerializer.Deserialize<CreateTransactionRequest>(json, options);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    // The Transaction's kept Receipt, as the JPEG it was kept as. A Transaction that doesn't exist, is
+    // another User's or has no Receipt is answered alike, so nobody can tell which. Never stored by
+    // the browser, so that whoever signs in next on a shared browser can't be shown it.
+    private static async Task<IResult> ServeReceipt(int id, AppDbContext db, HttpResponse response)
+    {
+        var image = await db.Receipts
+            .Where(r => r.TransactionId == id)
+            .Select(r => r.Image)
+            .SingleOrDefaultAsync();
+        if (image is null)
+            return Results.NotFound();
+
+        response.Headers.CacheControl = "no-store";
+        return Results.Bytes(image, "image/jpeg");
     }
 
     // Suggests a manually-entered Transaction from one Receipt's image. The form is read by hand
@@ -146,6 +238,9 @@ public static class ReceiptEndpoints
 
     private static IResult FileProblem(string message) =>
         Results.ValidationProblem(new Dictionary<string, string[]> { ["file"] = [message] });
+
+    private static IResult ReceiptProblem(string message) =>
+        Results.ValidationProblem(new Dictionary<string, string[]> { ["receipt"] = [message] });
 
     // The image's media type, told from its leading bytes since the declared type isn't trusted, or
     // null when it isn't a JPEG, PNG, WebP or GIF. The stream is rewound afterwards.

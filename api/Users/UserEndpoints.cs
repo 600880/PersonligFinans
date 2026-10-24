@@ -239,6 +239,7 @@ public static class UserEndpoints
             // Restrict, so each kind is deleted here, in an order that leaves nothing another row
             // still refers to, before the User itself.
             await db.Bookmarks.ExecuteDeleteAsync();
+            await db.Receipts.ExecuteDeleteAsync();
             await db.LastUsedFolders.ExecuteDeleteAsync();
             await db.Folders.ExecuteDeleteAsync();
             await db.Transactions.ExecuteDeleteAsync();

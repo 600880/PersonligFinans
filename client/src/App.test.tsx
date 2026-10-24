@@ -389,6 +389,12 @@ describe('App', () => {
     expect(screen.getByLabelText(/category/i)).toHaveValue('')
   })
 
+  it('offers no Keep the receipt, since a Receipt only ever comes from a Receipt scan', async () => {
+    await openModal()
+
+    expect(screen.queryByRole('checkbox', { name: 'Keep the receipt' })).not.toBeInTheDocument()
+  })
+
   it('offers the categories loaded from the API', async () => {
     await openModal()
 
@@ -6124,10 +6130,17 @@ describe('Scan receipts', () => {
   let releasedUrls: string[]
   // The picked files the browser can't decode.
   let undecodable: File[]
+  // The Receipt and the antiforgery token sent with each create with a Receipt, in the order they
+  // were sent. Its transaction field holds the JSON create's request, so handlePost answers both
+  // creates, and only these tell them apart.
+  let keptReceipts: File[]
+  let keptTokens: (string | undefined)[]
 
   beforeEach(() => {
     readRequests = []
     readTokens = []
+    keptReceipts = []
+    keptTokens = []
     handleReadReceipt = () => Response.json(unavailable)
     releasedUrls = []
     undecodable = []
@@ -6145,6 +6158,12 @@ describe('Scan receipts', () => {
           readRequests.push((body.get('file') as File).name)
           readTokens.push((init.headers as Record<string, string> | undefined)?.['X-CSRF-TOKEN'])
           return handleReadReceipt(body)
+        }
+        if (url === '/api/transactions/with-receipt' && init?.method === 'POST') {
+          const body = init.body as FormData
+          keptReceipts.push(body.get('receipt') as File)
+          keptTokens.push((init.headers as Record<string, string> | undefined)?.['X-CSRF-TOKEN'])
+          return handlePost(JSON.parse(body.get('transaction') as string))
         }
         return fetchMock(url, init)
       }),
@@ -6539,6 +6558,121 @@ describe('Scan receipts', () => {
     await user.upload(screen.getByLabelText(/^receipts$/i), [kiwi])
 
     expect(screen.getByRole('dialog', { name: 'Receipt 1 of 1' })).toBeInTheDocument()
+  })
+
+  describe('keeping the Receipt', () => {
+    function keepTheReceipt() {
+      return within(screen.getByRole('dialog')).getByRole('checkbox', { name: 'Keep the receipt' })
+    }
+
+    it.each(['read', 'unreadable', 'unavailable', 'limitReached'])(
+      'offers Keep the receipt, ticked, when the Receipt was answered %s',
+      async (outcome) => {
+        handleReadReceipt = () =>
+          Response.json(
+            outcome === 'read'
+              ? { outcome, date: '2026-10-12', description: 'Kiwi', amount: -249.9, categoryId: 1 }
+              : { ...unavailable, outcome },
+          )
+
+        await scanUntilFormIsReady([kiwi])
+
+        expect(keepTheReceipt()).toBeChecked()
+      },
+    )
+
+    it('starts every Receipt ticked, even after the one before was unticked', async () => {
+      const user = await scanUntilFormIsReady([kiwi, rema, narvesen])
+      await user.click(keepTheReceipt())
+      expect(keepTheReceipt()).not.toBeChecked()
+
+      await user.click(screen.getByRole('button', { name: 'Skip' }))
+      await formIsReady('Receipt 2 of 3')
+      expect(keepTheReceipt()).toBeChecked()
+
+      await user.click(keepTheReceipt())
+      await fillValidForm(user)
+      await user.click(screen.getByRole('button', { name: /^save$/i }))
+      await formIsReady('Receipt 3 of 3')
+      expect(keepTheReceipt()).toBeChecked()
+    })
+
+    it('saves the Transaction with its reduced Receipt when ticked, in one create with the antiforgery token', async () => {
+      const posted: unknown[] = []
+      handlePost = (body) => {
+        posted.push(body)
+        return Response.json({ id: 1 }, { status: 201 })
+      }
+      const user = await scanUntilFormIsReady([rema])
+      await fillValidForm(user)
+
+      await user.click(screen.getByRole('button', { name: /^save$/i }))
+
+      expect(posted).toEqual([
+        { date: todayIsoDate(), description: 'Rema 1000', amount: -249.9, note: null, categoryId: 1 },
+      ])
+      expect(keptReceipts).toHaveLength(1)
+      expect(keptReceipts[0].type).toBe('image/jpeg')
+      expect(await keptReceipts[0].text()).toBe('reduced rema.png')
+      expect(keptTokens).toEqual(['token-1'])
+      expect(screen.getByRole('status')).toHaveTextContent('1 transaction saved')
+    })
+
+    it('saves only the Transaction, with the create Add transaction uses, when unticked', async () => {
+      const posted: unknown[] = []
+      handlePost = (body) => {
+        posted.push(body)
+        return Response.json({ id: 1 }, { status: 201 })
+      }
+      const user = await scanUntilFormIsReady([kiwi])
+      await fillValidForm(user)
+      await user.click(keepTheReceipt())
+
+      await user.click(screen.getByRole('button', { name: /^save$/i }))
+
+      expect(posted).toEqual([
+        { date: todayIsoDate(), description: 'Rema 1000', amount: -249.9, note: null, categoryId: 1 },
+      ])
+      expect(keptReceipts).toEqual([])
+      expect(screen.getByRole('status')).toHaveTextContent('1 transaction saved')
+    })
+
+    it('keeps nothing when the Receipt is skipped, ticked or not', async () => {
+      const user = await scanUntilFormIsReady([kiwi])
+      await fillValidForm(user)
+
+      await user.click(screen.getByRole('button', { name: 'Skip' }))
+
+      expect(keptReceipts).toEqual([])
+      expect(screen.getByRole('status')).toHaveTextContent('No transactions saved')
+    })
+
+    it.each([true, false])('keeps the box as it was left after a refused Save, ticked: %s', async (ticked) => {
+      handlePost = () => Response.json({ errors: { description: ['Description is required.'] } }, { status: 400 })
+      const user = await scanUntilFormIsReady([kiwi, rema])
+      await fillValidForm(user)
+      if (!ticked) await user.click(keepTheReceipt())
+
+      await user.click(screen.getByRole('button', { name: /^save$/i }))
+
+      expect(await within(screen.getByRole('dialog')).findByText('Description is required.')).toBeInTheDocument()
+      expect(screen.getByRole('dialog', { name: 'Receipt 1 of 2' })).toBeInTheDocument()
+      if (ticked) expect(keepTheReceipt()).toBeChecked()
+      else expect(keepTheReceipt()).not.toBeChecked()
+    })
+
+    it('shows a refused Receipt as an error for the whole form, keeping the input', async () => {
+      handlePost = () => Response.json({ errors: { receipt: ['The Receipt is not a JPEG image.'] } }, { status: 400 })
+      const user = await scanUntilFormIsReady([kiwi])
+      await fillValidForm(user)
+
+      await user.click(screen.getByRole('button', { name: /^save$/i }))
+
+      const dialog = screen.getByRole('dialog', { name: 'Receipt 1 of 1' })
+      expect(await within(dialog).findByRole('alert')).toHaveTextContent('The Receipt is not a JPEG image.')
+      expect(within(dialog).getByLabelText(/^out$/i)).toHaveValue(249.9)
+      expect(keepTheReceipt()).toBeChecked()
+    })
   })
 
   describe('pre-filled from what was read', () => {
