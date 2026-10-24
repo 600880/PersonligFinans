@@ -53,7 +53,7 @@ One pick of one or more Bank Statements to import together. Each Bank Statement 
 _Avoid_: Batch, import, file upload
 
 **Receipt**:
-A photo of the slip from one purchase, read by the LLM to suggest a manually-entered Transaction that the user confirms or edits before it is saved; it becomes one Transaction with one Category, or is skipped. It is never kept: once its Transaction is saved or it is skipped, it is gone. Meant for purchases that never reach an uploaded Bank Statement, such as cash or another bank's card.
+A photo of the slip from one purchase, read by the LLM to suggest a manually-entered Transaction that the user confirms or edits before it is saved; it becomes one Transaction with one Category, or is skipped. A saved Receipt is kept with its Transaction unless the user chooses not to keep it, and a skipped one is gone. A Transaction has at most one Receipt, which can never be added afterwards or removed on its own; it goes only when its Transaction is deleted. Meant for purchases that never reach an uploaded Bank Statement, such as cash or another bank's card.
 _Avoid_: Kvittering, slip, receipt image
 
 **Receipt scan**:
