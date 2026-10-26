@@ -1,6 +1,8 @@
+using PersonligFinans.Api.CategorizationRules;
+
 namespace PersonligFinans.Api.Data;
 
-public class CategorizationRule
+public class CategorizationRule : ICategorizationRule
 {
     public int Id { get; set; }
 

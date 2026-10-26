@@ -34,13 +34,22 @@ public static class Categorizer
 
     // The rule whose keyword the description contains, ignoring case. The longest keyword wins, so
     // a specific rule overrides a general one; between equally long keywords the oldest rule wins.
-    public static CategorizationRule? ChooseRule(string description, IEnumerable<CategorizationRule> rules) =>
+    public static TRule? ChooseRule<TRule>(string description, IEnumerable<TRule> rules)
+        where TRule : class, ICategorizationRule =>
         rules
             .Where(r => description.Contains(r.Keyword, StringComparison.OrdinalIgnoreCase))
             .OrderByDescending(r => r.Keyword.Length)
             .ThenBy(r => r.CreatedAt)
             .ThenBy(r => r.Id)
             .FirstOrDefault();
+
+    // What the rules make of each rule-eligible Transaction: the Category of its best-matching rule,
+    // or Uncategorized when none matches. It touches neither the Transactions nor the database, so a
+    // rule set only proposed, held in memory, gets exactly what saving it would give.
+    public static List<Categorized<TRule>> Categorize<TRule>(
+        IEnumerable<Transaction> eligible, IReadOnlyCollection<TRule> rules)
+        where TRule : class, ICategorizationRule =>
+        eligible.Select(t => new Categorized<TRule>(t, ChooseRule(t.Description, rules))).ToList();
 
     // Saves the rule change tracked by db together with the re-match it causes, in one database
     // transaction, and returns how many Transactions changed Category. The rules table is locked
@@ -159,9 +168,8 @@ public static class Categorizer
         eligible = eligible.Union(db.Transactions.Local.Where(IsRuleEligibleInMemory)).ToList();
 
         var changed = new List<Transaction>();
-        foreach (var transaction in eligible)
+        foreach (var (transaction, rule) in Categorize(eligible, rules))
         {
-            var rule = ChooseRule(transaction.Description, rules);
             var categoryId = rule?.CategoryId;
             if (transaction.CategoryId != categoryId)
                 changed.Add(transaction);
@@ -225,4 +233,23 @@ public static class Categorizer
 
     private static Task<List<CategorizationRule>> RulesOf(AppDbContext db, int categoryId) =>
         db.CategorizationRules.Where(r => r.CategoryId == categoryId).ToListAsync();
+}
+
+// What choosing a Categorization Rule needs of one: its keyword and Category, and when it was
+// created and its id, which break ties. A saved rule has them, and so does one only proposed.
+public interface ICategorizationRule
+{
+    int Id { get; }
+    string Keyword { get; }
+    int CategoryId { get; }
+    DateTimeOffset CreatedAt { get; }
+}
+
+// A rule-eligible Transaction and the rule that categorizes it, or null when it is Uncategorized.
+// Categorizing leaves the Transaction as it was, with the Category it had.
+public sealed record Categorized<TRule>(Transaction Transaction, TRule? Rule)
+    where TRule : class, ICategorizationRule
+{
+    // The Category the rules give it: its rule's, or null meaning Uncategorized.
+    public int? CategoryId => Rule?.CategoryId;
 }
