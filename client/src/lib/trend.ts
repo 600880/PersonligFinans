@@ -1,4 +1,4 @@
-import type { MonthSpending } from './api'
+import type { MonthSpending, SpendingSlice } from './api'
 import { groupMonths } from './grouping'
 import { percent } from './percent'
 import type { Granularity, Period } from './period'
@@ -23,37 +23,61 @@ export interface TrendPoint {
   values: Record<string, number>
 }
 
-// The Categories of a Span's trend: those with Spending somewhere in it, null for Uncategorized,
-// largest Spending over the Span first, then Savings and Income, each when it has a figure there.
-export function trendCategories(monthly: MonthSpending[]): (number | null)[] {
-  const sums = new Map<number | null, number>()
-  for (const { slices } of monthly) {
-    for (const { categoryId, amount } of slices) sums.set(categoryId, (sums.get(categoryId) ?? 0) + amount)
+// The figures of a point's months, by Category: what each cost, and beside them what Savings put
+// aside and Income received, each its months netted together. Only positive figures are kept, so a
+// Category, Savings or Income that nets the other way or to zero over the months has none.
+interface NetFigures {
+  spending: Map<number | null, number>
+  savings: Map<number | null, number>
+  income: Map<number | null, number>
+}
+
+function netFigures(months: MonthSpending[]): NetFigures {
+  const net = (slices: (SpendingSlice | null)[]) => {
+    const sums = new Map<number | null, number>()
+    for (const slice of slices) {
+      if (slice) sums.set(slice.categoryId, (sums.get(slice.categoryId) ?? 0) + slice.amount)
+    }
+    return new Map([...sums].filter(([, amount]) => amount > 0))
   }
-  const besides = [monthly.find((m) => m.savings)?.savings, monthly.find((m) => m.income)?.income]
-  return [
-    ...[...sums].sort(([, a], [, b]) => b - a).map(([categoryId]) => categoryId),
-    ...besides.flatMap((slice) => (slice ? [slice.categoryId] : [])),
-  ]
+  return {
+    spending: net(months.flatMap((month) => month.slices)),
+    savings: net(months.map((month) => month.savings)),
+    income: net(months.map((month) => month.income)),
+  }
+}
+
+// The Categories of a Span's trend at a granularity: those with Spending in some point, null for
+// Uncategorized, largest Spending summed over the points first, then Savings and Income, each when it
+// has a figure in some point.
+export function trendCategories(monthly: MonthSpending[], granularity: Granularity): (number | null)[] {
+  const points = groupMonths(monthly, granularity).map((group) => netFigures(group.months))
+  const sums = new Map<number | null, number>()
+  for (const { spending } of points) {
+    for (const [categoryId, amount] of spending) sums.set(categoryId, (sums.get(categoryId) ?? 0) + amount)
+  }
+  const besides = new Set(points.flatMap(({ savings }) => [...savings.keys()]))
+  for (const { income } of points) for (const categoryId of income.keys()) besides.add(categoryId)
+  return [...[...sums].sort(([, a], [, b]) => b - a).map(([categoryId]) => categoryId), ...besides]
 }
 
 // The trend's points for a Span's monthly Spending, one per Period of the granularity, in order.
-// Each point has a value for Total and every Category in the Span, 0 when it had no figure there.
-// Total is the Spending alone, never the Savings or Income beside it. Each value is divided by the
-// months the point covers, so that partial points at the Span's edges compare with full ones.
+// Each point has a value for Total and every Category of the trend, 0 when it had no figure there.
+// Each Category is netted over the point's months, so a refund reduces the Spending of its Period
+// whichever month it lands in. Total is the sum of the Categories' Spending, never the Savings or
+// Income beside it. Each value is divided by the months the point covers, so that partial points at
+// the Span's edges compare with full ones.
 export function trendPoints(monthly: MonthSpending[], granularity: Granularity): TrendPoint[] {
-  const rows = [TOTAL_ROW, ...trendCategories(monthly).map(categoryRow)]
+  const categories = trendCategories(monthly, granularity)
   return groupMonths(monthly, granularity).map((group) => {
     const monthsCovered = group.months.length
-    const sums: Record<string, number> = Object.fromEntries(rows.map((row) => [row, 0]))
-    for (const { categoryId, amount } of group.months.flatMap((month) => month.slices)) {
-      sums[categoryRow(categoryId)] += amount
-      sums[TOTAL_ROW] += amount
+    const { spending, savings, income } = netFigures(group.months)
+    const total = [...spending.values()].reduce((sum, amount) => sum + amount, 0)
+    const values: Record<string, number> = { [TOTAL_ROW]: total / monthsCovered }
+    for (const categoryId of categories) {
+      const figure = spending.get(categoryId) ?? savings.get(categoryId) ?? income.get(categoryId) ?? 0
+      values[categoryRow(categoryId)] = figure / monthsCovered
     }
-    for (const beside of group.months.flatMap((month) => [month.savings, month.income])) {
-      if (beside) sums[categoryRow(beside.categoryId)] += beside.amount
-    }
-    const values = Object.fromEntries(rows.map((row) => [row, sums[row] / monthsCovered]))
     const { period, key, label, monthsInPeriod } = group
     return { period, key, label, monthsCovered, monthsInPeriod, values }
   })

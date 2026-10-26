@@ -9,9 +9,10 @@ public record SpendingSliceResponse(int? CategoryId, decimal Amount);
 
 public record SpendingResponse(decimal Total, IReadOnlyList<SpendingSliceResponse> Slices);
 
-// One month of a Span's Spending: one slice per group with Spending, largest first, never Savings.
-// Beside it, what the month put aside in Savings and received in Income, each null when its
-// Category's Amounts that month net the other way or to zero.
+// One month of a Span's Spending: one slice per group whose Amounts that month don't net to zero,
+// largest first, never Savings, negative when the group nets the other way. Beside it, what the month
+// put aside in Savings and received in Income, negative when its Category's Amounts that month net the
+// other way, and null when they net to zero. The client nets them over the Periods of its trend.
 public record MonthlySpendingResponse(
     int Year,
     int Month,
@@ -34,8 +35,8 @@ public static class SpendingEndpoints
         app.MapGet("/api/spending/monthly", MonthlySpendingOfSpan);
     }
 
-    // A Period's Spending: one slice per group with Spending in any of its months, the sum of its
-    // months' Spending, largest first. The Period is a year with a quarter, a year with a month, or a
+    // A Period's Spending: one slice per group with Spending in it, its Amounts over the whole Period
+    // netted together, largest first. The Period is a year with a quarter, a year with a month, or a
     // year alone for the whole year.
     private static async Task<IResult> SpendingOfPeriod(
         int? year, int? quarter, int? month, AppDbContext db, bool includeSavings = false)
@@ -45,9 +46,10 @@ public static class SpendingEndpoints
             return Results.ValidationProblem(errors);
 
         var (first, next) = Bounds(year!.Value, quarter, month);
-        var slices = await MonthlySlices(db, first, next, includeSavings)
-            .GroupBy(s => s.CategoryId)
-            .Select(g => new { CategoryId = g.Key, Amount = g.Sum(s => s.Amount) })
+        var slices = await SpendingTransactions(db, first, next, includeSavings)
+            .GroupBy(t => t.CategoryId)
+            .Select(g => new { CategoryId = g.Key, Amount = -g.Sum(t => t.Amount) })
+            .Where(s => s.Amount > 0)
             .OrderByDescending(s => s.Amount)
             .Select(s => new SpendingSliceResponse(s.CategoryId, s.Amount))
             .ToListAsync();
@@ -56,9 +58,9 @@ public static class SpendingEndpoints
     }
 
     // A Span's Spending month by month: one entry per month from From to To, both included and in
-    // order, with no slices for a month without Spending, and its Savings and Income beside them. The
-    // client groups the months into the points of its trend, which therefore match the Spending of
-    // their Periods.
+    // order, with no slices for a month without Amounts that can be Spending, and its Savings and
+    // Income beside them. The client groups the months into the points of its trend and nets them
+    // there, so those points match the Spending of their Periods.
     private static async Task<IResult> MonthlySpendingOfSpan(
         int? fromYear, int? fromMonth, int? toYear, int? toMonth, AppDbContext db)
     {
@@ -84,11 +86,11 @@ public static class SpendingEndpoints
                     .Select(s => new SpendingSliceResponse(s.CategoryId, s.Amount))
                     .ToList(),
                 inMonth
-                    .Where(b => b.CategoryName == SavingsCategoryName && b.Net < 0)
+                    .Where(b => b.CategoryName == SavingsCategoryName && b.Net != 0)
                     .Select(b => new SpendingSliceResponse(b.CategoryId, -b.Net))
                     .SingleOrDefault(),
                 inMonth
-                    .Where(b => b.CategoryName == IncomeCategoryName && b.Net > 0)
+                    .Where(b => b.CategoryName == IncomeCategoryName && b.Net != 0)
                     .Select(b => new SpendingSliceResponse(b.CategoryId, b.Net))
                     .SingleOrDefault()));
         }
@@ -111,15 +113,22 @@ public static class SpendingEndpoints
                 Net = g.Sum(t => t.Amount),
             });
 
-    // The Spending of each group in each month from the first day up to, but not including, the next:
-    // the group's Amounts that month netted together as a positive figure, with no slice when they net
-    // to zero or more. Income is never Spending, and Savings only when includeSavings is set.
-    private static IQueryable<MonthSlice> MonthlySlices(
+    // The Transactions from the first day up to, but not including, the next that can be Spending:
+    // never Income, and Savings only when includeSavings is set.
+    private static IQueryable<Transaction> SpendingTransactions(
         AppDbContext db, DateOnly first, DateOnly next, bool includeSavings) =>
         db.Transactions
             .Where(t => t.PostedDate >= first && t.PostedDate < next)
             .Where(t => t.Category == null || t.Category.Name != IncomeCategoryName)
-            .Where(t => includeSavings || t.Category == null || t.Category.Name != SavingsCategoryName)
+            .Where(t => includeSavings || t.Category == null || t.Category.Name != SavingsCategoryName);
+
+    // The Spending of each group in each month from the first day up to, but not including, the next:
+    // the group's Amounts that month netted together, positive when it cost and negative when it nets
+    // the other way, with no slice when they net to zero. Income is never Spending, and Savings only
+    // when includeSavings is set.
+    private static IQueryable<MonthSlice> MonthlySlices(
+        AppDbContext db, DateOnly first, DateOnly next, bool includeSavings) =>
+        SpendingTransactions(db, first, next, includeSavings)
             .GroupBy(t => new { t.PostedDate.Year, t.PostedDate.Month, t.CategoryId })
             .Select(g => new MonthSlice
             {
@@ -128,7 +137,7 @@ public static class SpendingEndpoints
                 CategoryId = g.Key.CategoryId,
                 Amount = -g.Sum(t => t.Amount),
             })
-            .Where(s => s.Amount > 0);
+            .Where(s => s.Amount != 0);
 
     // Built with an initializer rather than a constructor so that EF can filter and group on it.
     private class MonthSlice

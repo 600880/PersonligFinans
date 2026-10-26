@@ -113,7 +113,7 @@ The state of a Transaction whose Category the Categorization Rules will never ch
 _Avoid_: Pinned, frozen, edited, manual
 
 **Spending**:
-What each Category cost during a Period, shown as a positive figure (Uncategorized Transactions count as their own group). Amounts are netted within each month, so a refund reduces the Spending of the Category it lands in only in the month it is posted; a Category whose Amounts in a month net to zero or more has no Spending that month. A longer Period's Spending is the sum of its months', and its total is the sum of its Categories'. The Income Category is never Spending, and the Savings Category is left out unless the user chooses to include it, since moving money between the user's own accounts is not spending.
+What each Category cost during a Period, shown as a positive figure (Uncategorized Transactions count as their own group). Each Category's Amounts are netted over the whole Period, so a refund reduces the Spending of the Category it lands in for any Period containing the month it is posted; a Category whose Amounts in a Period net to zero or more has no Spending in it. A quarter's or year's Spending is therefore not always the sum of its months': -500 in January and +700 in February is Spending of 500 in January but none in that quarter. A Period's total is the sum of its Categories' Spending, so one Category's refund never reduces another's. The Income Category is never Spending, and the Savings Category is left out unless the user chooses to include it, since moving money between the user's own accounts is not spending.
 _Avoid_: Outgoing, expenses, costs
 
 **Period**:
@@ -129,5 +129,5 @@ A run of consecutive whole months, from a start month to an end month, both incl
 _Avoid_: Interval, range, Period
 
 **Dashboard**:
-The view summarizing Spending by Category over a chosen Period, and how Spending, Savings and Income changed over a chosen Span. Savings and Income are shown beside Spending, never as part of it: each is its Category's Amounts netted within each month as a positive figure, what was put aside or received, with nothing for a month that nets the other way. Each Category's Spending in a Period leads to that Category's Transactions in the Period; since Transactions are listed by month or year, a quarter leads to its first month where the Category has Transactions.
+The view summarizing Spending by Category over a chosen Period, and how Spending, Savings and Income changed over a chosen Span. Savings and Income are shown beside Spending, never as part of it: each is its Category's Amounts netted over a Period as a positive figure, what was put aside or received, with nothing for a Period that nets the other way. Each Category's Spending in a Period leads to that Category's Transactions in the Period; since Transactions are listed by month or year, a quarter leads to its first month where the Category has Transactions.
 _Avoid_: Report, overview

@@ -100,10 +100,15 @@ function YAxisInverseScale({ onScale }: { onScale: (scale: InverseScaleFunction 
   return null
 }
 
-// The Total row, then one per Category with Spending in the Span, largest first, then Savings and
-// Income when they have a figure there. The Categories wait for their names, so a Category is never
+// The Total row, then one per Category with Spending in some point of the trend at the granularity,
+// largest first, then Savings and Income when they have a figure in some point. The Categories wait for their names, so a Category is never
 // shown without its name.
-function trendRows(monthly: MonthSpending[], categories: Category[] | null, dark: boolean): TrendRow[] {
+function trendRows(
+  monthly: MonthSpending[],
+  granularity: Granularity,
+  categories: Category[] | null,
+  dark: boolean,
+): TrendRow[] {
   const total = {
     key: TOTAL_ROW,
     categoryId: 'all' as const,
@@ -113,7 +118,7 @@ function trendRows(monthly: MonthSpending[], categories: Category[] | null, dark
   if (!categories) return [total]
   return [
     total,
-    ...trendCategories(monthly).map((categoryId) => ({
+    ...trendCategories(monthly, granularity).map((categoryId) => ({
       key: categoryRow(categoryId),
       categoryId,
       name: categoryName(categoryId, categories),
@@ -177,7 +182,7 @@ export function SpendingTrend({
   const points = current?.monthly ? trendPoints(current.monthly, granularity) : []
   const first = points[0]
   const last = points[points.length - 1]
-  const rows = current?.monthly ? trendRows(current.monthly, categories, dark) : []
+  const rows = current?.monthly ? trendRows(current.monthly, granularity, categories, dark) : []
   const drawn = rows.filter((row) => switchedOn.has(row.key))
   const yValueAt = useRef<InverseScaleFunction | undefined>(undefined)
 
