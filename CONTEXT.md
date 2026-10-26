@@ -81,11 +81,11 @@ A named group a User creates to file Bookmarks in, such as "Tax deductible". Has
 _Avoid_: Bookmark folder, list, collection
 
 **Category**:
-A label classifying a Transaction by type of spending (e.g. "Restaurants", "Groceries"), used to group spending on the Dashboard. Has a name unique among the User's Categories (ignoring case) and a short description of what belongs in it, which the LLM also reads when creating AI-generated rules. Each User manages their own list (adding, editing and deleting Categories), which starts from a seeded set. Deleting a Category that is in use means choosing either a replacement Category, which its Transactions and Categorization Rules move to (each Transaction keeping whether it was categorized manually or by a rule), or to delete its Categorization Rules, after which its Transactions are matched against the remaining rules like any rule change, and those left without a Category become Uncategorized.
+A label classifying a Transaction by type of spending (e.g. "Restaurants", "Groceries"), used to group spending on the Dashboard. Has a name unique among the User's Categories (ignoring case) and a short description of what belongs in it, which the LLM also reads when creating AI-generated rules, and a colour the Dashboard draws it in, chosen from a fixed palette: a new Category gets the first palette colour no other Category has, or a neutral slate once every one is taken, and the user may then pick any palette colour, even one another Category has. No Category is ever drawn in Uncategorized's grey. Each User manages their own list (adding, editing and deleting Categories), which starts from a seeded set. Deleting a Category that is in use means choosing either a replacement Category, which its Transactions and Categorization Rules move to (each Transaction keeping whether it was categorized manually or by a rule), or to delete its Categorization Rules, after which its Transactions are matched against the remaining rules like any rule change, and those left without a Category become Uncategorized.
 _Avoid_: Tag, type, bucket
 
 **Built-in Category**:
-One of the seven Categories the app depends on and the user can never rename or delete, only re-describe: Housing, Groceries, Clothing, Transport, Other, Income and Savings.
+One of the seven Categories the app depends on and the user can never rename or delete, only re-describe or recolour: Housing, Groceries, Clothing, Transport, Other, Income and Savings.
 _Avoid_: Fixed, protected, system category
 
 **Uncategorized**:
