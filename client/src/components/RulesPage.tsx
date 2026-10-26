@@ -20,6 +20,12 @@ function byKeyword(a: CategorizationRule, b: CategorizationRule) {
   return a.keyword.localeCompare(b.keyword)
 }
 
+// Whether the keyword contains the search text, ignoring case and the text's surrounding spaces, the
+// same as the search on Transactions. Æ, Ø and Å are letters of their own, so "o" never matches "ø".
+function matchesSearch(rule: CategorizationRule, search: string) {
+  return rule.keyword.toLowerCase().includes(search.trim().toLowerCase())
+}
+
 // The rule being edited inline, with the input as typed so far.
 interface RuleEdit {
   id: number
@@ -43,6 +49,7 @@ export function RulesPage() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [edit, setEdit] = useState<RuleEdit | null>(null)
   const [newOnly, setNewOnly] = useState(false)
+  const [search, setSearch] = useState('')
 
   useEffect(() => {
     let ignore = false
@@ -62,7 +69,7 @@ export function RulesPage() {
 
   const categoryName = (id: number) => categories.find((c) => c.id === id)?.name ?? ''
   const hasNewRules = rules.some((r) => r.isNew)
-  const shownRules = newOnly && hasNewRules ? rules.filter((r) => r.isNew) : rules
+  const shownRules = rules.filter((r) => (!newOnly || !hasNewRules || r.isNew) && matchesSearch(r, search))
 
   async function handleAdd(event: FormEvent) {
     event.preventDefault()
@@ -96,6 +103,13 @@ export function RulesPage() {
   function cancelEdit() {
     setEdit(null)
     setErrorMessage(null)
+  }
+
+  // Changing the search may hide the rule being edited, so any open edit is cancelled, as on Transactions.
+  // With no edit open, an error from an earlier add or delete stays.
+  function chooseSearch(value: string) {
+    if (edit) cancelEdit()
+    setSearch(value)
   }
 
   async function handleSave(current: RuleEdit) {
@@ -197,131 +211,156 @@ export function RulesPage() {
         <StatusMessage message={statusMessage} className="mt-3" />
       )}
 
-      <label
-        title={hasNewRules ? undefined : 'The last upload added no rules'}
-        className={`mt-2 inline-flex items-center gap-2 text-sm ${hasNewRules ? 'text-slate-700 dark:text-slate-300' : 'text-slate-400 dark:text-slate-600'}`}
-      >
-        <input
-          type="checkbox"
-          checked={newOnly && hasNewRules}
-          disabled={!hasNewRules}
-          onChange={(event) => setNewOnly(event.target.checked)}
-        />
-        Show only new
-      </label>
-
-      {/* On a phone the table scrolls sideways on its own, so the page never runs wider than the screen.
-          Relative, so the hidden column label scrolls with it rather than widening the page. */}
-      <div className="mt-2 max-sm:relative max-sm:overflow-x-auto">
-        <table className="w-full text-left text-sm">
-          <thead className="text-slate-500 dark:text-slate-400">
-            <tr>
-              <th className="py-2 font-medium">Keyword</th>
-              <th className="py-2 font-medium">Category</th>
-              <th className="py-2">
-                <span className="sr-only">Actions</span>
-              </th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-200 dark:divide-slate-800 text-slate-900 dark:text-slate-100">
-            {shownRules.map((rule) =>
-              edit?.id === rule.id ? (
-                <tr key={rule.id} className="align-top">
-                  <td className="py-2 pr-3">
-                    <div className="flex flex-col gap-1">
-                      <input
-                        aria-label="Keyword"
-                        value={edit.keyword}
-                        onChange={(event) => setEdit({ ...edit, keyword: event.target.value })}
-                        aria-describedby={`rule-${rule.id}-keyword-error`}
-                        className={inputClass}
-                      />
-                      <span id={`rule-${rule.id}-keyword-error`} className="text-xs text-red-600 dark:text-red-300">
-                        {edit.fieldErrors.keyword}
-                      </span>
-                    </div>
-                  </td>
-                  <td className="py-2 pr-3">
-                    <div className="flex flex-col gap-1">
-                      <select
-                        aria-label="Category"
-                        value={edit.categoryId}
-                        onChange={(event) => setEdit({ ...edit, categoryId: event.target.value })}
-                        aria-describedby={`rule-${rule.id}-category-error`}
-                        className={inputClass}
-                      >
-                        {categories.map((category) => (
-                          <option key={category.id} value={category.id}>
-                            {category.name}
-                          </option>
-                        ))}
-                      </select>
-                      <span id={`rule-${rule.id}-category-error`} className="text-xs text-red-600 dark:text-red-300">
-                        {edit.fieldErrors.categoryId}
-                      </span>
-                    </div>
-                  </td>
-                  <td className="py-2 text-right whitespace-nowrap">
-                    <button
-                      type="button"
-                      disabled={isSaving}
-                      onClick={() => handleSave(edit)}
-                      className={smallButtonClass}
-                    >
-                      Save
-                    </button>
-                    <button type="button" onClick={cancelEdit} className={smallButtonClass}>
-                      Cancel
-                    </button>
-                  </td>
-                </tr>
-              ) : (
-                <tr key={rule.id}>
-                  <td className="py-2">
-                    {rule.keyword}
-                    {rule.aiGenerated && (
-                      <>
-                        {' '}
-                        <span
-                          title="AI-generated rule"
-                          className="ml-1 rounded bg-violet-100 dark:bg-violet-950/40 px-1.5 py-0.5 text-xs font-medium text-violet-700 dark:text-violet-300"
-                        >
-                          AI
-                        </span>
-                      </>
-                    )}
-                    {rule.isNew && (
-                      <>
-                        {' '}
-                        <span
-                          title="Added by the last upload"
-                          className="ml-1 rounded bg-emerald-100 dark:bg-emerald-950/40 px-1.5 py-0.5 text-xs font-medium text-emerald-700 dark:text-emerald-300"
-                        >
-                          New
-                        </span>
-                      </>
-                    )}
-                  </td>
-                  <td className="py-2">{categoryName(rule.categoryId)}</td>
-                  <td className="py-2 text-right whitespace-nowrap">
-                    <button type="button" onClick={() => startEdit(rule)} className={smallButtonClass}>
-                      Edit
-                    </button>
-                    <button
-                      type="button"
-                      disabled={isSaving}
-                      onClick={() => handleDelete(rule)}
-                      className={smallButtonClass}
-                    >
-                      Delete
-                    </button>
-                  </td>
-                </tr>
-              ),
-            )}
-          </tbody>
-        </table>
+      {/* A toolbar for the table below, smaller than the add form so the two never read as one form. */}
+      <div className="mt-2 flex items-center gap-3">
+        <div className="relative min-w-0 flex-1 sm:max-w-xs">
+          <svg
+            viewBox="0 0 16 16"
+            fill="currentColor"
+            aria-hidden="true"
+            className="pointer-events-none absolute top-1/2 left-2.5 h-4 w-4 -translate-y-1/2 text-slate-400 dark:text-slate-500"
+          >
+            <path d="M10.68 11.74a6 6 0 1 1 1.06-1.06l3.04 3.04a.75.75 0 1 1-1.06 1.06ZM11.5 7a4.5 4.5 0 1 0-9 0 4.5 4.5 0 0 0 9 0Z" />
+          </svg>
+          <input
+            type="search"
+            aria-label="Search"
+            placeholder="Search keywords"
+            value={search}
+            onChange={(event) => chooseSearch(event.target.value)}
+            className="w-full rounded-lg border border-slate-300 dark:border-slate-700 py-1.5 pr-3 pl-8 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500"
+          />
+        </div>
+        <label
+          title={hasNewRules ? undefined : 'The last upload added no rules'}
+          className={`ml-auto inline-flex shrink-0 items-center gap-2 text-sm ${hasNewRules ? 'text-slate-700 dark:text-slate-300' : 'text-slate-400 dark:text-slate-600'}`}
+        >
+          <input
+            type="checkbox"
+            checked={newOnly && hasNewRules}
+            disabled={!hasNewRules}
+            onChange={(event) => setNewOnly(event.target.checked)}
+          />
+          Show only new
+        </label>
       </div>
+
+      {search.trim() !== '' && shownRules.length === 0 ? (
+        <p className="mt-6 text-sm text-slate-500 dark:text-slate-400">No rules match</p>
+      ) : (
+        /* On a phone the table scrolls sideways on its own, so the page never runs wider than the screen.
+           Relative, so the hidden column label scrolls with it rather than widening the page. */
+        <div className="mt-2 max-sm:relative max-sm:overflow-x-auto">
+          <table className="w-full text-left text-sm">
+            <thead className="text-slate-500 dark:text-slate-400">
+              <tr>
+                <th className="py-2 font-medium">Keyword</th>
+                <th className="py-2 font-medium">Category</th>
+                <th className="py-2">
+                  <span className="sr-only">Actions</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-200 dark:divide-slate-800 text-slate-900 dark:text-slate-100">
+              {shownRules.map((rule) =>
+                edit?.id === rule.id ? (
+                  <tr key={rule.id} className="align-top">
+                    <td className="py-2 pr-3">
+                      <div className="flex flex-col gap-1">
+                        <input
+                          aria-label="Keyword"
+                          value={edit.keyword}
+                          onChange={(event) => setEdit({ ...edit, keyword: event.target.value })}
+                          aria-describedby={`rule-${rule.id}-keyword-error`}
+                          className={inputClass}
+                        />
+                        <span id={`rule-${rule.id}-keyword-error`} className="text-xs text-red-600 dark:text-red-300">
+                          {edit.fieldErrors.keyword}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="py-2 pr-3">
+                      <div className="flex flex-col gap-1">
+                        <select
+                          aria-label="Category"
+                          value={edit.categoryId}
+                          onChange={(event) => setEdit({ ...edit, categoryId: event.target.value })}
+                          aria-describedby={`rule-${rule.id}-category-error`}
+                          className={inputClass}
+                        >
+                          {categories.map((category) => (
+                            <option key={category.id} value={category.id}>
+                              {category.name}
+                            </option>
+                          ))}
+                        </select>
+                        <span id={`rule-${rule.id}-category-error`} className="text-xs text-red-600 dark:text-red-300">
+                          {edit.fieldErrors.categoryId}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="py-2 text-right whitespace-nowrap">
+                      <button
+                        type="button"
+                        disabled={isSaving}
+                        onClick={() => handleSave(edit)}
+                        className={smallButtonClass}
+                      >
+                        Save
+                      </button>
+                      <button type="button" onClick={cancelEdit} className={smallButtonClass}>
+                        Cancel
+                      </button>
+                    </td>
+                  </tr>
+                ) : (
+                  <tr key={rule.id}>
+                    <td className="py-2">
+                      {rule.keyword}
+                      {rule.aiGenerated && (
+                        <>
+                          {' '}
+                          <span
+                            title="AI-generated rule"
+                            className="ml-1 rounded bg-violet-100 dark:bg-violet-950/40 px-1.5 py-0.5 text-xs font-medium text-violet-700 dark:text-violet-300"
+                          >
+                            AI
+                          </span>
+                        </>
+                      )}
+                      {rule.isNew && (
+                        <>
+                          {' '}
+                          <span
+                            title="Added by the last upload"
+                            className="ml-1 rounded bg-emerald-100 dark:bg-emerald-950/40 px-1.5 py-0.5 text-xs font-medium text-emerald-700 dark:text-emerald-300"
+                          >
+                            New
+                          </span>
+                        </>
+                      )}
+                    </td>
+                    <td className="py-2">{categoryName(rule.categoryId)}</td>
+                    <td className="py-2 text-right whitespace-nowrap">
+                      <button type="button" onClick={() => startEdit(rule)} className={smallButtonClass}>
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        disabled={isSaving}
+                        onClick={() => handleDelete(rule)}
+                        className={smallButtonClass}
+                      >
+                        Delete
+                      </button>
+                    </td>
+                  </tr>
+                ),
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
     </section>
   )
 }

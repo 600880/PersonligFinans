@@ -2086,6 +2086,106 @@ describe('Rules page', () => {
 
     expect(keywords()).toEqual(['bakeriet', 'kiwi', 'nille AI'])
   })
+
+  describe('searching', () => {
+    it('narrows the rules to matching keywords as the search is typed, ignoring case and surrounding spaces', async () => {
+      rules = [
+        { id: 3, keyword: 'bøker og blader', categoryId: 13, aiGenerated: false, isNew: false },
+        { id: 1, keyword: 'kiwi', categoryId: 1, aiGenerated: false, isNew: false },
+        { id: 4, keyword: 'rema 1000', categoryId: 1, aiGenerated: false, isNew: false },
+      ]
+      const user = await openRulesPage()
+      const search = screen.getByRole('searchbox', { name: 'Search' })
+
+      await user.type(search, 'e')
+      expect(keywords()).toEqual(['bøker og blader', 'rema 1000'])
+      await user.type(search, 'm')
+      expect(keywords()).toEqual(['rema 1000'])
+
+      await user.clear(search)
+      await user.type(search, '  KIWI ')
+      expect(keywords()).toEqual(['kiwi'])
+
+      await user.clear(search)
+      await user.type(search, 'boker')
+      expect(screen.getByText('No rules match')).toBeInTheDocument()
+
+      await user.clear(search)
+      await user.type(search, 'groceries')
+      expect(screen.queryByRole('cell', { name: 'kiwi' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('cell', { name: 'rema 1000' })).not.toBeInTheDocument()
+    })
+
+    it('leaves out a rule added with a keyword the search leaves out, still saying it was added', async () => {
+      handleAddRule = () =>
+        Response.json(
+          { id: 3, keyword: 'rema', categoryId: 1, aiGenerated: false, isNew: false, transactionsChanged: 2 },
+          { status: 201 },
+        )
+      const user = await openRulesPage()
+      await user.type(screen.getByRole('searchbox', { name: 'Search' }), 'kiwi')
+
+      await user.type(screen.getByLabelText('Keyword'), 'rema')
+      await user.selectOptions(screen.getByLabelText('Category'), 'Groceries')
+      await user.click(screen.getByRole('button', { name: 'Add rule' }))
+
+      expect(await screen.findByRole('status')).toHaveTextContent('Rule added. 2 transactions changed category.')
+      expect(keywords()).toEqual(['kiwi'])
+    })
+
+    it('shows only the new rules that match when Show only new is also checked', async () => {
+      rules = [
+        { id: 3, keyword: 'café løkka', categoryId: 13, aiGenerated: true, isNew: true },
+        { id: 1, keyword: 'kiwi', categoryId: 1, aiGenerated: false, isNew: false },
+        { id: 5, keyword: 'kiwi minipris', categoryId: 1, aiGenerated: false, isNew: true },
+      ]
+      const user = await openRulesPage()
+
+      await user.type(screen.getByRole('searchbox', { name: 'Search' }), 'kiwi')
+      await user.click(screen.getByRole('checkbox', { name: 'Show only new' }))
+
+      expect(keywords()).toEqual(['kiwi minipris New'])
+    })
+
+    it('cancels an open edit once the search changes, even when the rule still matches', async () => {
+      const user = await openRulesPage()
+
+      const row = await startEditingKiwi(user)
+      await user.type(row.getByLabelText('Keyword'), ' extra')
+      await user.type(screen.getByRole('searchbox', { name: 'Search' }), 'k')
+
+      expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument()
+      expect(ruleRow('kiwi')).toHaveTextContent('kiwiGroceries')
+    })
+
+    it('drops a rule from the list once it is saved with a keyword the search leaves out', async () => {
+      rules = [
+        { id: 1, keyword: 'kiwi', categoryId: 1, aiGenerated: false, isNew: false },
+        { id: 5, keyword: 'kiwi minipris', categoryId: 1, aiGenerated: false, isNew: false },
+      ]
+      handleEditRule = (id) =>
+        Response.json({ id, keyword: 'meny', categoryId: 1, aiGenerated: false, isNew: false, transactionsChanged: 0 })
+      const user = await openRulesPage()
+      await user.type(screen.getByRole('searchbox', { name: 'Search' }), 'kiwi')
+
+      const row = await startEditingKiwi(user)
+      await user.clear(row.getByLabelText('Keyword'))
+      await user.type(row.getByLabelText('Keyword'), 'meny')
+      await user.click(row.getByRole('button', { name: 'Save' }))
+
+      expect(await screen.findByRole('status')).toHaveTextContent('Rule updated. 0 transactions changed category.')
+      expect(keywords()).toEqual(['kiwi minipris'])
+    })
+
+    it('says no rules match when the search leaves none', async () => {
+      const user = await openRulesPage()
+
+      await user.type(screen.getByRole('searchbox', { name: 'Search' }), 'xyz')
+
+      expect(screen.getByText('No rules match')).toBeInTheDocument()
+      expect(screen.queryByRole('table')).not.toBeInTheDocument()
+    })
+  })
 })
 
 describe('Header', () => {
