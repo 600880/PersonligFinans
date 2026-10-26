@@ -106,7 +106,7 @@ public class BankStatementEndpointsTests : IAsyncLifetime
             ],
             stored.Select(t => (t.PostedDate, t.Description, t.Amount)));
         // Seeded rules categorize the merchants they know; the rest stay Uncategorized.
-        Assert.Equal([null, null, _categories.Groceries, _categories.Transfers, null], stored.Select(t => t.CategoryId));
+        Assert.Equal([null, null, _categories.Groceries, _categories.Savings, null], stored.Select(t => t.CategoryId));
         Assert.All(stored, t => Assert.Null(t.Note));
     }
 
@@ -339,7 +339,7 @@ public class BankStatementEndpointsTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Post_PaymentToABareAccountNumber_IsCategorizedAsTransfersBySeededRule()
+    public async Task Post_PaymentToABareAccountNumber_IsCategorizedAsSavingsBySeededRule()
     {
         var pdf = StatementPdf.Create(
             StatementPdf.UniqueAccountNumber(),
@@ -351,7 +351,7 @@ public class BankStatementEndpointsTests : IAsyncLifetime
         var created = await Created(await Upload(pdf));
 
         var stored = (await StoredTransactions(created.Id)).Single();
-        Assert.Equal(("Overføring til konto 9999.88.77777", (int?)_categories.Transfers), (stored.Description, stored.CategoryId));
+        Assert.Equal(("Overføring til konto 9999.88.77777", (int?)_categories.Savings), (stored.Description, stored.CategoryId));
     }
 
     [Fact]

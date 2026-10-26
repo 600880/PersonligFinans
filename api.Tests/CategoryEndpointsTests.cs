@@ -72,7 +72,7 @@ public class CategoryEndpointsTests : IAsyncLifetime
                 ["Groceries"] = ("All groceries.", true),
                 ["Clothing"] = ("All clothing, including sportswear.", true),
                 ["Income"] = ("All income.", true),
-                ["Transfers"] = ("All bank transfers.", true),
+                ["Savings"] = ("Money moved between own accounts.", true),
                 ["Transport"] = ("All expenses related to car and public transport.", true),
                 ["Other"] = ("Costs that don't belong in any other category.", true),
             },
@@ -91,7 +91,7 @@ public class CategoryEndpointsTests : IAsyncLifetime
                 ["Transport"] = "#1baf7a",
                 ["Housing"] = "#eda100",
                 ["Income"] = "#8a5a1c",
-                ["Transfers"] = "#0f766e",
+                ["Savings"] = "#0f766e",
                 ["Other"] = "#9085e9",
                 ["Clothing"] = "#b8336a",
             },
@@ -106,7 +106,7 @@ public class CategoryEndpointsTests : IAsyncLifetime
         string[] created = ["Åa", "Zzz", "øa", "zzy", "Æa"];
         foreach (var name in created)
             await CreateCategory(name);
-        string[] builtIns = ["Housing", "Groceries", "Clothing", "Transport", "Other", "Income", "Transfers"];
+        string[] builtIns = ["Housing", "Groceries", "Clothing", "Transport", "Other", "Income", "Savings"];
 
         var categories = await ListCategories();
 

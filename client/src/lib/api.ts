@@ -581,27 +581,28 @@ export interface Spending {
   slices: SpendingSlice[]
 }
 
-// Transactions in the Transfers Category count only when includeTransfers is set.
-export async function fetchSpending(period: Period, includeTransfers: boolean): Promise<Spending> {
-  const transfers = includeTransfers ? '&includeTransfers=true' : ''
-  const response = await apiFetch(`/api/spending?${periodQuery(period)}${transfers}`)
+// Transactions in the Savings Category count only when includeSavings is set.
+export async function fetchSpending(period: Period, includeSavings: boolean): Promise<Spending> {
+  const savings = includeSavings ? '&includeSavings=true' : ''
+  const response = await apiFetch(`/api/spending?${periodQuery(period)}${savings}`)
   if (!response.ok) throw new Error(`Loading spending failed (${response.status})`)
   return (await response.json()) as Spending
 }
 
-// One month of a Span's Spending: one slice per group with Spending, largest first, and none for a
-// month without Spending.
+// One month of a Span's Spending: one slice per group with Spending, largest first, never Savings,
+// and none for a month without Spending. Beside it, what the month put aside in Savings and received
+// in Income, each null when its Category's Amounts that month net the other way or to zero.
 export interface MonthSpending {
   year: number
   month: number
   slices: SpendingSlice[]
+  savings: SpendingSlice | null
+  income: SpendingSlice | null
 }
 
-// A Span's Spending month by month, one entry per month of the Span in order. Transactions in the
-// Transfers Category count only when includeTransfers is set.
-export async function fetchMonthlySpending(span: Span, includeTransfers: boolean): Promise<MonthSpending[]> {
-  const transfers = includeTransfers ? '&includeTransfers=true' : ''
-  const response = await apiFetch(`/api/spending/monthly?${spanQuery(span)}${transfers}`)
+// A Span's Spending month by month, one entry per month of the Span in order.
+export async function fetchMonthlySpending(span: Span): Promise<MonthSpending[]> {
+  const response = await apiFetch(`/api/spending/monthly?${spanQuery(span)}`)
   if (!response.ok) throw new Error(`Loading monthly spending failed (${response.status})`)
   return (await response.json()) as MonthSpending[]
 }

@@ -77,11 +77,9 @@ const CHART_COLOURS = {
 
 const wholeKroner = new Intl.NumberFormat('nb-NO', { maximumFractionDigits: 0 })
 
-// A Span's monthly Spending, remembered with the Span and Include transfers setting it was loaded
-// for; null when loading failed.
+// A Span's monthly Spending, remembered with the Span it was loaded for; null when loading failed.
 interface LoadedTrend {
   span: Span
-  includeTransfers: boolean
   monthly: MonthSpending[] | null
 }
 
@@ -102,8 +100,9 @@ function YAxisInverseScale({ onScale }: { onScale: (scale: InverseScaleFunction 
   return null
 }
 
-// The Total row, then one per Category with Spending in the Span, largest first. The Categories wait
-// for their names, so a Category is never shown without its name.
+// The Total row, then one per Category with Spending in the Span, largest first, then Savings and
+// Income when they have a figure there. The Categories wait for their names, so a Category is never
+// shown without its name.
 function trendRows(monthly: MonthSpending[], categories: Category[] | null, dark: boolean): TrendRow[] {
   const total = {
     key: TOTAL_ROW,
@@ -123,16 +122,15 @@ function trendRows(monthly: MonthSpending[], categories: Category[] | null, dark
   ]
 }
 
-// How Spending changed over a Span, as lines with a point per Period of its own Granularity, Month
-// at first, and a table of the first and last points for Total and each Category. Each row switches
-// its line on and off; Total starts on and the Categories off, and they stay as switched when the
-// Span changes. `months` are the months with Transactions, newest first, which decide the months
+// How Spending, Savings and Income changed over a Span, as lines with a point per Period of its own
+// Granularity, Month at first, and a table of the first and last points for Total and each Category,
+// Savings and Income after the Spending ones and never in Total. Each row switches its line on and
+// off; Total starts on and the Categories off, and they stay as switched when the Span changes. `months` are the months with Transactions, newest first, which decide the months
 // offered. Opens on the 12 months ending at the latest of them. When they are reloaded, after
 // Transactions are saved or on coming back to home, it fetches its Spending again, keeping the Span
-// if both its ends are still offered and otherwise going back to the 12 months; its Granularity,
-// Include transfers and switched-on lines are kept. Has its own Include transfers, off at first and
-// apart from the donut's. Clicking the chart opens the Transactions of the line nearest the click,
-// in the Period of the point clicked.
+// if both its ends are still offered and otherwise going back to the 12 months; its Granularity and
+// switched-on lines are kept. Clicking the chart opens the Transactions of the line nearest the
+// click, in the Period of the point clicked.
 export function SpendingTrend({
   months,
   categories,
@@ -155,7 +153,6 @@ export function SpendingTrend({
   }))
   if (shown.months !== months) setShown({ months, span: reloadedSpan(shown.span, offered, granularity) })
   const span = shown.span
-  const [includeTransfers, setIncludeTransfers] = useState(false)
   const [loaded, setLoaded] = useState<LoadedTrend | null>(null)
   // The rows whose lines are drawn, by key. Kept for rows missing from the current Span, so they are
   // drawn again when a later Span includes them.
@@ -164,19 +161,19 @@ export function SpendingTrend({
   useEffect(() => {
     if (!span) return
     let ignore = false
-    fetchMonthlySpending(span, includeTransfers)
+    fetchMonthlySpending(span)
       .then((monthly) => {
-        if (!ignore) setLoaded({ span, includeTransfers, monthly })
+        if (!ignore) setLoaded({ span, monthly })
       })
       .catch(() => {
-        if (!ignore) setLoaded({ span, includeTransfers, monthly: null })
+        if (!ignore) setLoaded({ span, monthly: null })
       })
     return () => {
       ignore = true
     }
-  }, [span, includeTransfers])
+  }, [span])
 
-  const current = loaded && loaded.span === span && loaded.includeTransfers === includeTransfers ? loaded : null
+  const current = loaded && loaded.span === span ? loaded : null
   const points = current?.monthly ? trendPoints(current.monthly, granularity) : []
   const first = points[0]
   const last = points[points.length - 1]
@@ -265,17 +262,6 @@ export function SpendingTrend({
 
       {span && (
         <>
-
-          <label className="mt-3 flex w-fit items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-300">
-            <input
-              type="checkbox"
-              checked={includeTransfers}
-              onChange={(event) => setIncludeTransfers(event.target.checked)}
-              className="size-4 rounded border-slate-300 dark:border-slate-700"
-            />
-            Include transfers
-          </label>
-
           {current && !current.monthly && <ErrorMessage className="mt-3">{LOAD_ERROR}</ErrorMessage>}
 
           {first && last && (

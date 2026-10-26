@@ -15,7 +15,7 @@ public sealed record TestCategories(
     int Shopping,
     int Travel,
     int Income,
-    int Transfers,
+    int Savings,
     int Other,
     int Clothing,
     int Electronics)
@@ -49,7 +49,7 @@ public sealed record TestCategories(
             ids["Shopping"],
             ids["Travel"],
             ids["Income"],
-            ids["Transfers"],
+            ids["Savings"],
             ids["Other"],
             ids["Clothing"],
             ids["Electronics"]);

@@ -36,12 +36,16 @@ type ServedCategory = { id: number; name: string } & Partial<(typeof categories)
 
 type Month = { year: number; month: number }
 
+type Slice = { categoryId: number | null; amount: number }
+
 // Every month from `from` to `to`, both included, as the monthly Spending endpoint returns them:
-// with the slices given for "year-month" and none for the other months.
+// with the slices, and the Savings and Income beside them, given for "year-month", and none for the
+// other months.
 function monthlySpending(
   from: Month,
   to: Month,
-  slices: Record<string, { categoryId: number | null; amount: number }[]> = {},
+  slices: Record<string, Slice[]> = {},
+  besides: Record<string, { savings?: Slice; income?: Slice }> = {},
 ) {
   const entries = []
   // Steps through calendar months with Date, rather than the month arithmetic the app uses.
@@ -49,7 +53,14 @@ function monthlySpending(
   for (const date = new Date(from.year, from.month - 1); date <= last; date.setMonth(date.getMonth() + 1)) {
     const year = date.getFullYear()
     const month = date.getMonth() + 1
-    entries.push({ year, month, slices: slices[`${year}-${month}`] ?? [] })
+    const key = `${year}-${month}`
+    entries.push({
+      year,
+      month,
+      slices: slices[key] ?? [],
+      savings: besides[key]?.savings ?? null,
+      income: besides[key]?.income ?? null,
+    })
   }
   return entries
 }
@@ -105,9 +116,9 @@ let handleDeleteFolder: (id: number) => Response | Promise<Response>
 // What the categories endpoint returns: `categories` unless a test adds to it or makes it fail.
 let categoriesServed: ServedCategory[] | Response
 // The month or quarter is undefined when the Spending of a whole year, or of a quarter, is asked for.
-let handleSpending: (year: number, month: number | undefined, quarter: number | undefined, includeTransfers: boolean) => Response
+let handleSpending: (year: number, month: number | undefined, quarter: number | undefined, includeSavings: boolean) => Response
 // The Spending of each month of the Span from `from` to `to`.
-let handleMonthlySpending: (from: Month, to: Month, includeTransfers: boolean) => Response
+let handleMonthlySpending: (from: Month, to: Month) => Response
 // Who is signed in: signed in as a User unless a test signs out, or keeps the answer waiting.
 let currentUser: { email: string; isGuest: boolean } | Response | Promise<Response>
 let handleSignIn: PostHandler
@@ -146,23 +157,22 @@ const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
   if (url === '/api/user/delete' && init?.method === 'POST') return handleDeleteYourUser(JSON.parse(init.body as string))
   if (url === '/api/antiforgery-token') return Response.json({ token: `token-${++antiforgeryTokensGiven}` })
   const monthlyUrl =
-    /^\/api\/spending\/monthly\?fromYear=(\d+)&fromMonth=(\d+)&toYear=(\d+)&toMonth=(\d+)(&includeTransfers=true)?$/.exec(url)
+    /^\/api\/spending\/monthly\?fromYear=(\d+)&fromMonth=(\d+)&toYear=(\d+)&toMonth=(\d+)$/.exec(url)
   if (monthlyUrl) {
-    const [, fromYear, fromMonth, toYear, toMonth, transfers] = monthlyUrl
+    const [, fromYear, fromMonth, toYear, toMonth] = monthlyUrl
     return handleMonthlySpending(
       { year: Number(fromYear), month: Number(fromMonth) },
       { year: Number(toYear), month: Number(toMonth) },
-      transfers !== undefined,
     )
   }
-  const spendingUrl = /^\/api\/spending\?year=(\d+)(?:&quarter=(\d+))?(?:&month=(\d+))?(&includeTransfers=true)?$/.exec(url)
+  const spendingUrl = /^\/api\/spending\?year=(\d+)(?:&quarter=(\d+))?(?:&month=(\d+))?(&includeSavings=true)?$/.exec(url)
   if (spendingUrl) {
-    const [, year, quarter, month, transfers] = spendingUrl
+    const [, year, quarter, month, savings] = spendingUrl
     return handleSpending(
       Number(year),
       month ? Number(month) : undefined,
       quarter ? Number(quarter) : undefined,
-      transfers !== undefined,
+      savings !== undefined,
     )
   }
   const periodUrl = /^\/api\/transactions\?year=(\d+)(?:&month=(\d+))?$/.exec(url)
@@ -4497,12 +4507,12 @@ describe('Dashboard', () => {
     expect(swatchColour('Uncategorized')).toBe('rgb(148, 163, 184)')
   })
 
-  it('adds a Transfers slice, counted in the total and percentages, while Include transfers is on', async () => {
-    categoriesServed = [...categories, { id: 12, name: 'Transfers' }]
+  it('adds a Savings slice, counted in the total and percentages, while Include savings is on', async () => {
+    categoriesServed = [...categories, { id: 12, name: 'Savings' }]
     months = [{ year: 2026, month: 9 }]
-    handleSpending = (_year, _month, _quarter, includeTransfers) =>
+    handleSpending = (_year, _month, _quarter, includeSavings) =>
       Response.json(
-        includeTransfers
+        includeSavings
           ? {
               total: 2000,
               slices: [
@@ -4515,14 +4525,14 @@ describe('Dashboard', () => {
     const user = userEvent.setup()
     await renderApp()
     await waitFor(() => expect(legendRows()).toEqual([['Groceries', '500,00 kr', '100,0 %']]))
-    const toggle = within(dashboard()).getByRole('checkbox', { name: 'Include transfers' })
+    const toggle = within(dashboard()).getByRole('checkbox', { name: 'Include savings' })
     expect(toggle).not.toBeChecked()
 
     await user.click(toggle)
 
     await waitFor(() =>
       expect(legendRows()).toEqual([
-        ['Transfers', '1 500,00 kr', '75,0 %'],
+        ['Savings', '1 500,00 kr', '75,0 %'],
         ['Groceries', '500,00 kr', '25,0 %'],
       ]),
     )
@@ -4534,17 +4544,17 @@ describe('Dashboard', () => {
     expect(centreTotal()).toBe('Total 500,00 kr')
     expect(requestedSpending()).toEqual([
       '/api/spending?year=2026&month=9',
-      '/api/spending?year=2026&month=9&includeTransfers=true',
+      '/api/spending?year=2026&month=9&includeSavings=true',
       '/api/spending?year=2026&month=9',
     ])
   })
 
-  it('shows an empty chart with a total of 0 and no hint when the Period has only Transfers', async () => {
-    categoriesServed = [...categories, { id: 12, name: 'Transfers' }]
+  it('shows an empty chart with a total of 0 and no hint when the Period has only Savings', async () => {
+    categoriesServed = [...categories, { id: 12, name: 'Savings' }]
     months = [{ year: 2026, month: 9 }]
-    handleSpending = (_year, _month, _quarter, includeTransfers) =>
+    handleSpending = (_year, _month, _quarter, includeSavings) =>
       Response.json(
-        includeTransfers
+        includeSavings
           ? { total: 1500, slices: [{ categoryId: 12, amount: 1500 }] }
           : { total: 0, slices: [] },
       )
@@ -4554,7 +4564,7 @@ describe('Dashboard', () => {
     await waitFor(() => expect(centreTotal()).toBe('Total 0,00 kr'))
     expect(legendRows()).toEqual([])
     expect(within(dashboard()).queryByRole('alert')).not.toBeInTheDocument()
-    expect(within(dashboard()).queryByText(/transfer/i, { ignore: 'label, option' })).toBeNull()
+    expect(within(dashboard()).queryByText(/savings/i, { ignore: 'label, option' })).toBeNull()
   })
 
   it('says when the Spending could not be loaded', async () => {
@@ -4586,7 +4596,7 @@ describe('Dashboard', () => {
     expect(screen.getByLabelText('Period')).toHaveValue('2026-9')
   })
 
-  it('keeps the Period and Include transfers when reloading after an upload', async () => {
+  it('keeps the Period and Include savings when reloading after an upload', async () => {
     months = [
       { year: 2026, month: 9 },
       { year: 2026, month: 8 },
@@ -4595,15 +4605,15 @@ describe('Dashboard', () => {
     await renderApp()
     await waitFor(() => expect(centreTotal()).toBe('Total 0,00 kr'))
     await user.selectOptions(screen.getByLabelText('Period'), 'August 2026')
-    await user.click(within(dashboard()).getByRole('checkbox', { name: 'Include transfers' }))
+    await user.click(within(dashboard()).getByRole('checkbox', { name: 'Include savings' }))
     handleSpending = () => Response.json(septemberSpending)
 
     await user.upload(screen.getByLabelText(/bank statement pdf/i), statementPdf)
 
     await waitFor(() => expect(centreTotal()).toBe('Total 1 570,50 kr'))
     expect(screen.getByLabelText('Period')).toHaveValue('2026-8')
-    expect(within(dashboard()).getByRole('checkbox', { name: 'Include transfers' })).toBeChecked()
-    expect(requestedSpending().at(-1)).toBe('/api/spending?year=2026&month=8&includeTransfers=true')
+    expect(within(dashboard()).getByRole('checkbox', { name: 'Include savings' })).toBeChecked()
+    expect(requestedSpending().at(-1)).toBe('/api/spending?year=2026&month=8&includeSavings=true')
   })
 
   it('reloads after a Transaction is added', async () => {
@@ -4619,7 +4629,7 @@ describe('Dashboard', () => {
   })
 
   describe('coming back to the home view', () => {
-    it('keeps the Granularity, Period and Include transfers, and fetches the Spending again', async () => {
+    it('keeps the Granularity, Period and Include savings, and fetches the Spending again', async () => {
       months = [
         { year: 2026, month: 9 },
         { year: 2026, month: 8 },
@@ -4630,7 +4640,7 @@ describe('Dashboard', () => {
       await waitFor(() => expect(centreTotal()).toBe('Total 0,00 kr'))
       await user.selectOptions(within(dashboard()).getByLabelText('Granularity'), 'Quarter')
       await user.selectOptions(screen.getByLabelText('Period'), 'Q1 2026')
-      await user.click(within(dashboard()).getByRole('checkbox', { name: 'Include transfers' }))
+      await user.click(within(dashboard()).getByRole('checkbox', { name: 'Include savings' }))
       await user.click(screen.getByRole('button', { name: 'Transactions' }))
       const requestsBefore = requestedSpending().length
       handleSpending = () => Response.json(septemberSpending)
@@ -4640,13 +4650,13 @@ describe('Dashboard', () => {
       await waitFor(() => expect(centreTotal()).toBe('Total 1 570,50 kr'))
       expect(within(dashboard()).getByLabelText('Granularity')).toHaveDisplayValue('Quarter')
       expect(screen.getByLabelText('Period')).toHaveValue('2026-Q1')
-      expect(within(dashboard()).getByRole('checkbox', { name: 'Include transfers' })).toBeChecked()
+      expect(within(dashboard()).getByRole('checkbox', { name: 'Include savings' })).toBeChecked()
       expect(requestedSpending().slice(requestsBefore)).toEqual([
-        '/api/spending?year=2026&quarter=1&includeTransfers=true',
+        '/api/spending?year=2026&quarter=1&includeSavings=true',
       ])
     })
 
-    it('keeps the Granularity, Period and Include transfers after a visit to the User page', async () => {
+    it('keeps the Granularity, Period and Include savings after a visit to the User page', async () => {
       months = [
         { year: 2026, month: 9 },
         { year: 2026, month: 3 },
@@ -4656,16 +4666,16 @@ describe('Dashboard', () => {
       await waitFor(() => expect(centreTotal()).toBe('Total 0,00 kr'))
       await user.selectOptions(within(dashboard()).getByLabelText('Granularity'), 'Quarter')
       await user.selectOptions(screen.getByLabelText('Period'), 'Q1 2026')
-      await user.click(within(dashboard()).getByRole('checkbox', { name: 'Include transfers' }))
+      await user.click(within(dashboard()).getByRole('checkbox', { name: 'Include savings' }))
       await user.click(screen.getByRole('button', { name: 'User' }))
 
       await user.click(screen.getByRole('button', { name: 'PersonligFinans' }))
 
       expect(within(dashboard()).getByLabelText('Granularity')).toHaveDisplayValue('Quarter')
       expect(screen.getByLabelText('Period')).toHaveValue('2026-Q1')
-      expect(within(dashboard()).getByRole('checkbox', { name: 'Include transfers' })).toBeChecked()
+      expect(within(dashboard()).getByRole('checkbox', { name: 'Include savings' })).toBeChecked()
       await waitFor(() =>
-        expect(requestedSpending().at(-1)).toBe('/api/spending?year=2026&quarter=1&includeTransfers=true'),
+        expect(requestedSpending().at(-1)).toBe('/api/spending?year=2026&quarter=1&includeSavings=true'),
       )
     })
 
@@ -4737,7 +4747,7 @@ describe('Dashboard', () => {
       await waitFor(() => expect(centreTotal()).toBe('Total 0,00 kr'))
       await user.selectOptions(within(dashboard()).getByLabelText('Granularity'), 'Year')
       await user.selectOptions(screen.getByLabelText('Period'), '2025')
-      await user.click(within(dashboard()).getByRole('checkbox', { name: 'Include transfers' }))
+      await user.click(within(dashboard()).getByRole('checkbox', { name: 'Include savings' }))
       await user.click(screen.getByRole('button', { name: 'Transactions' }))
       months = [
         { year: 2026, month: 9 },
@@ -4749,9 +4759,9 @@ describe('Dashboard', () => {
       await waitFor(() => expect(screen.getByLabelText('Period')).toHaveValue('2026-9'))
       expect(within(dashboard()).getByLabelText('Granularity')).toHaveDisplayValue('Month')
       expect(monthOptions()).toEqual(['September 2026', 'August 2026'])
-      expect(within(dashboard()).getByRole('checkbox', { name: 'Include transfers' })).toBeChecked()
+      expect(within(dashboard()).getByRole('checkbox', { name: 'Include savings' })).toBeChecked()
       await waitFor(() =>
-        expect(requestedSpending().at(-1)).toBe('/api/spending?year=2026&month=9&includeTransfers=true'),
+        expect(requestedSpending().at(-1)).toBe('/api/spending?year=2026&month=9&includeSavings=true'),
       )
     })
   })
@@ -4876,20 +4886,20 @@ describe('Dashboard', () => {
       )
     })
 
-    it('keeps Include transfers on when the Period or granularity changes', async () => {
+    it('keeps Include savings on when the Period or granularity changes', async () => {
       const user = await openDashboard()
-      await user.click(within(dashboard()).getByRole('checkbox', { name: 'Include transfers' }))
+      await user.click(within(dashboard()).getByRole('checkbox', { name: 'Include savings' }))
 
       await choosePeriod(user, 'April 2026')
       await chooseGranularity(user, 'Quarter')
 
-      expect(within(dashboard()).getByRole('checkbox', { name: 'Include transfers' })).toBeChecked()
+      expect(within(dashboard()).getByRole('checkbox', { name: 'Include savings' })).toBeChecked()
       await waitFor(() =>
         expect(requestedSpending()).toEqual([
           '/api/spending?year=2026&month=9',
-          '/api/spending?year=2026&month=9&includeTransfers=true',
-          '/api/spending?year=2026&month=4&includeTransfers=true',
-          '/api/spending?year=2026&quarter=2&includeTransfers=true',
+          '/api/spending?year=2026&month=9&includeSavings=true',
+          '/api/spending?year=2026&month=4&includeSavings=true',
+          '/api/spending?year=2026&quarter=2&includeSavings=true',
         ]),
       )
     })
@@ -5632,19 +5642,17 @@ describe('Dashboard', () => {
           .map((checkbox) => checkbox.closest('tr')!.firstElementChild!.textContent)
       }
 
-      // Waits for the trend, then chooses March to June 2025, Include transfers, and Groceries in
-      // place of Total.
+      // Waits for the trend, then chooses March to June 2025, and Groceries in place of Total.
       async function chooseView(user: ReturnType<typeof userEvent.setup>) {
         await waitFor(() => expect(trendTable()).toHaveLength(2))
         await user.selectOptions(within(trend()).getByLabelText('From'), '03.2025')
         await user.selectOptions(within(trend()).getByLabelText('To'), '06.2025')
-        await user.click(within(trend()).getByRole('checkbox', { name: 'Include transfers' }))
         await waitFor(() => expect(trendTable()).toHaveLength(3))
         await user.click(within(trend()).getByRole('checkbox', { name: 'Total' }))
         await user.click(within(trend()).getByRole('checkbox', { name: 'Groceries' }))
       }
 
-      it('keeps the Span, Include transfers and switched-on lines after a Transaction is added, and fetches the Spending again', async () => {
+      it('keeps the Span and switched-on lines after a Transaction is added, and fetches the Spending again', async () => {
         const user = userEvent.setup()
         await renderApp()
         await chooseView(user)
@@ -5675,10 +5683,9 @@ describe('Dashboard', () => {
         )
         expect(selectedMonth('From')).toBe('03.2025')
         expect(selectedMonth('To')).toBe('06.2025')
-        expect(within(trend()).getByRole('checkbox', { name: 'Include transfers' })).toBeChecked()
         expect(switchedOn()).toEqual(['Groceries'])
         expect(requestedMonthlySpending().slice(requestsBefore)).toEqual([
-          '/api/spending/monthly?fromYear=2025&fromMonth=3&toYear=2025&toMonth=6&includeTransfers=true',
+          '/api/spending/monthly?fromYear=2025&fromMonth=3&toYear=2025&toMonth=6',
         ])
       })
 
@@ -5696,7 +5703,7 @@ describe('Dashboard', () => {
         expect(selectedMonth('From')).toBe('03.2025')
         expect(selectedMonth('To')).toBe('06.2025')
         expect(requestedMonthlySpending().slice(requestsBefore)).toEqual([
-          '/api/spending/monthly?fromYear=2025&fromMonth=3&toYear=2025&toMonth=6&includeTransfers=true',
+          '/api/spending/monthly?fromYear=2025&fromMonth=3&toYear=2025&toMonth=6',
         ])
       })
 
@@ -5735,13 +5742,12 @@ describe('Dashboard', () => {
         expect(selectedMonth('From')).toBe('11.2025')
         expect(selectedMonth('To')).toBe('10.2026')
         expect(spanOptions('From')[0]).toBe('04.2025')
-        expect(within(trend()).getByRole('checkbox', { name: 'Include transfers' })).toBeChecked()
         expect(requestedMonthlySpending().at(-1)).toBe(
-          '/api/spending/monthly?fromYear=2025&fromMonth=11&toYear=2026&toMonth=10&includeTransfers=true',
+          '/api/spending/monthly?fromYear=2025&fromMonth=11&toYear=2026&toMonth=10',
         )
       })
 
-      it('keeps the Granularity, Span, Include transfers and switched-on lines when coming back to the home view, and fetches the Spending again', async () => {
+      it('keeps the Granularity, Span and switched-on lines when coming back to the home view, and fetches the Spending again', async () => {
         const user = userEvent.setup()
         await renderApp()
         await chooseView(user)
@@ -5769,10 +5775,9 @@ describe('Dashboard', () => {
         expect(within(trend()).getByLabelText('Granularity')).toHaveDisplayValue('Quarter')
         expect(selectedMonth('From')).toBe('03.2025')
         expect(selectedMonth('To')).toBe('06.2025')
-        expect(within(trend()).getByRole('checkbox', { name: 'Include transfers' })).toBeChecked()
         expect(switchedOn()).toEqual(['Groceries'])
         expect(requestedMonthlySpending().slice(requestsBefore)).toEqual([
-          '/api/spending/monthly?fromYear=2025&fromMonth=3&toYear=2025&toMonth=6&includeTransfers=true',
+          '/api/spending/monthly?fromYear=2025&fromMonth=3&toYear=2025&toMonth=6',
         ])
       })
 
@@ -5791,10 +5796,9 @@ describe('Dashboard', () => {
         await waitFor(() => expect(trendTable()[0]).toEqual(['', 'January 2025', 'May 2025', 'Change']))
         expect(selectedMonth('From')).toBe('01.2025')
         expect(selectedMonth('To')).toBe('05.2025')
-        expect(within(trend()).getByRole('checkbox', { name: 'Include transfers' })).toBeChecked()
         expect(switchedOn()).toEqual(['Groceries'])
         expect(requestedMonthlySpending().at(-1)).toBe(
-          '/api/spending/monthly?fromYear=2025&fromMonth=1&toYear=2025&toMonth=5&includeTransfers=true',
+          '/api/spending/monthly?fromYear=2025&fromMonth=1&toYear=2025&toMonth=5',
         )
       })
     })
@@ -6014,144 +6018,77 @@ describe('Dashboard', () => {
         await waitFor(() => expect(trendTable()).toHaveLength(4))
         expect(switchedOn()).toEqual(['Other'])
       })
-
-      it('keeps rows switched on when Include transfers changes', async () => {
-        categoriesServed = [...categories, { id: 12, name: 'Transfers' }]
-        months = [
-          { year: 2026, month: 9 },
-          { year: 2026, month: 8 },
-        ]
-        handleMonthlySpending = (from, to, includeTransfers) =>
-          Response.json(
-            monthlySpending(from, to, {
-              '2026-8': [{ categoryId: 1, amount: 400 }],
-              '2026-9': includeTransfers
-                ? [
-                    { categoryId: 12, amount: 1500 },
-                    { categoryId: 1, amount: 500 },
-                  ]
-                : [{ categoryId: 1, amount: 500 }],
-            }),
-          )
-        const user = userEvent.setup()
-        await renderApp()
-        await waitFor(() => expect(trendTable()).toHaveLength(3))
-        await user.click(toggle('Groceries'))
-
-        await user.click(toggle('Include transfers'))
-        await waitFor(() => expect(trendTable()).toHaveLength(4))
-        expect(switchedOn()).toEqual(['Total', 'Groceries'])
-        await user.click(toggle('Transfers'))
-
-        await user.click(toggle('Include transfers'))
-        await waitFor(() => expect(trendTable()).toHaveLength(3))
-        expect(switchedOn()).toEqual(['Total', 'Groceries'])
-
-        await user.click(toggle('Include transfers'))
-        await waitFor(() => expect(trendTable()).toHaveLength(4))
-        expect(switchedOn()).toEqual(['Total', 'Transfers', 'Groceries'])
-      })
     })
 
-    describe('Include transfers', () => {
-      // August and September 2026, with Transfers in September that count only while included.
+    describe('Savings and Income', () => {
+      // August and September 2026, with Groceries and Income in both, and Savings in September.
       beforeEach(() => {
-        categoriesServed = [...categories, { id: 12, name: 'Transfers' }]
+        categoriesServed = [...categories, { id: 12, name: 'Savings' }, { id: 14, name: 'Income' }]
         months = [
           { year: 2026, month: 9 },
           { year: 2026, month: 8 },
         ]
-        handleMonthlySpending = (from, to, includeTransfers) =>
+        handleMonthlySpending = (from, to) =>
           Response.json(
-            monthlySpending(from, to, {
-              '2026-8': [{ categoryId: 1, amount: 400 }],
-              '2026-9': includeTransfers
-                ? [
-                    { categoryId: 12, amount: 1500 },
-                    { categoryId: 1, amount: 500 },
-                  ]
-                : [{ categoryId: 1, amount: 500 }],
-            }),
+            monthlySpending(
+              from,
+              to,
+              {
+                '2026-8': [{ categoryId: 1, amount: 400 }],
+                '2026-9': [{ categoryId: 1, amount: 500 }],
+              },
+              {
+                '2026-8': { income: { categoryId: 14, amount: 30000 } },
+                '2026-9': { savings: { categoryId: 12, amount: 1500 }, income: { categoryId: 14, amount: 31000 } },
+              },
+            ),
           )
       })
 
-      function trendToggle() {
-        return within(trend()).getByRole('checkbox', { name: 'Include transfers' })
+      function toggle(name: string) {
+        return within(trend()).getByRole('checkbox', { name }) as HTMLInputElement
       }
 
-      function donutToggle() {
-        return within(dashboard()).getByRole('checkbox', { name: 'Include transfers' })
-      }
-
-      it('counts Transfers in the Total for the same Span while ticked', async () => {
-        const user = userEvent.setup()
+      it('lists Savings, then Income, after the Categories with Spending, switched off and never in Total', async () => {
         await renderApp()
-        await waitFor(() => expect(trendTable()[1]).toEqual(['Total', '400,00 kr', '500,00 kr', '▲ +25,0 %']))
-        expect(trendToggle()).not.toBeChecked()
 
-        await user.click(trendToggle())
-
-        await waitFor(() => expect(trendTable()[1]).toEqual(['Total', '400,00 kr', '2 000,00 kr', '▲ +400,0 %']))
-        expect(trendTable().map(([name]) => name)).toEqual(['', 'Total', 'Transfers', 'Groceries'])
-
-        await user.click(trendToggle())
-
-        await waitFor(() => expect(trendTable()[1]).toEqual(['Total', '400,00 kr', '500,00 kr', '▲ +25,0 %']))
-        expect(requestedMonthlySpending()).toEqual([
-          '/api/spending/monthly?fromYear=2026&fromMonth=8&toYear=2026&toMonth=9',
-          '/api/spending/monthly?fromYear=2026&fromMonth=8&toYear=2026&toMonth=9&includeTransfers=true',
-          '/api/spending/monthly?fromYear=2026&fromMonth=8&toYear=2026&toMonth=9',
-        ])
-      })
-
-      it('keeps Include transfers when the Span changes', async () => {
-        months = [
-          { year: 2026, month: 9 },
-          { year: 2026, month: 7 },
-        ]
-        const user = userEvent.setup()
-        await renderApp()
-        await waitFor(() => expect(trendTable()).toHaveLength(3))
-        await user.click(trendToggle())
-        await waitFor(() => expect(trendTable()[1][2]).toBe('2 000,00 kr'))
-
-        await user.selectOptions(within(trend()).getByLabelText('From'), '08.2026')
-
-        await waitFor(() => expect(trendTable()[1]).toEqual(['Total', '400,00 kr', '2 000,00 kr', '▲ +400,0 %']))
-        expect(trendToggle()).toBeChecked()
-        expect(requestedMonthlySpending().at(-1)).toBe(
-          '/api/spending/monthly?fromYear=2026&fromMonth=8&toYear=2026&toMonth=9&includeTransfers=true',
+        await waitFor(() =>
+          expect(trendTable()).toEqual([
+            ['', 'August 2026', 'September 2026', 'Change'],
+            ['Total', '400,00 kr', '500,00 kr', '▲ +25,0 %'],
+            ['Groceries', '400,00 kr', '500,00 kr', '▲ +25,0 %'],
+            ['Savings', '0,00 kr', '1 500,00 kr', 'New'],
+            ['Income', '30 000,00 kr', '31 000,00 kr', '▲ +3,3 %'],
+          ]),
         )
+        expect(toggle('Savings')).not.toBeChecked()
+        expect(toggle('Income')).not.toBeChecked()
       })
 
-      it("is left alone by the donut's Include transfers", async () => {
+      it('leaves out Savings and Income when they have no figure in the Span', async () => {
+        handleMonthlySpending = (from, to) =>
+          Response.json(monthlySpending(from, to, { '2026-9': [{ categoryId: 1, amount: 500 }] }))
+
+        await renderApp()
+
+        await waitFor(() => expect(trendTable().map(([name]) => name)).toEqual(['', 'Total', 'Groceries']))
+      })
+
+      it("has no Include savings of its own, and is left alone by the donut's", async () => {
         const user = userEvent.setup()
         await renderApp()
-        await waitFor(() => expect(trendTable()).toHaveLength(3))
+        await waitFor(() => expect(trendTable()).toHaveLength(5))
         await waitFor(() => expect(requestedSpending()).toHaveLength(1))
+        expect(within(trend()).queryByRole('checkbox', { name: 'Include savings' })).toBeNull()
 
-        await user.click(donutToggle())
+        await user.click(within(dashboard()).getByRole('checkbox', { name: 'Include savings' }))
 
         await waitFor(() => expect(requestedSpending()).toHaveLength(2))
-        expect(requestedSpending()[1]).toBe('/api/spending?year=2026&month=9&includeTransfers=true')
-        expect(trendToggle()).not.toBeChecked()
+        expect(requestedSpending()[1]).toBe('/api/spending?year=2026&month=9&includeSavings=true')
         expect(trendTable()[1]).toEqual(['Total', '400,00 kr', '500,00 kr', '▲ +25,0 %'])
         expect(requestedMonthlySpending()).toEqual([
           '/api/spending/monthly?fromYear=2026&fromMonth=8&toYear=2026&toMonth=9',
         ])
-      })
-
-      it("leaves the donut's Include transfers alone", async () => {
-        const user = userEvent.setup()
-        await renderApp()
-        await waitFor(() => expect(trendTable()).toHaveLength(3))
-        await waitFor(() => expect(requestedSpending()).toHaveLength(1))
-
-        await user.click(trendToggle())
-
-        await waitFor(() => expect(trendTable()[1][2]).toBe('2 000,00 kr'))
-        expect(donutToggle()).not.toBeChecked()
-        expect(requestedSpending()).toEqual(['/api/spending?year=2026&month=9'])
       })
     })
 

@@ -85,7 +85,7 @@ A label classifying a Transaction by type of spending (e.g. "Restaurants", "Groc
 _Avoid_: Tag, type, bucket
 
 **Built-in Category**:
-One of the seven Categories the app depends on and the user can never rename or delete, only re-describe: Housing, Groceries, Clothing, Transport, Other, Income and Transfers.
+One of the seven Categories the app depends on and the user can never rename or delete, only re-describe: Housing, Groceries, Clothing, Transport, Other, Income and Savings.
 _Avoid_: Fixed, protected, system category
 
 **Uncategorized**:
@@ -113,7 +113,7 @@ The state of a Transaction whose Category the Categorization Rules will never ch
 _Avoid_: Pinned, frozen, edited, manual
 
 **Spending**:
-What each Category cost during a Period, shown as a positive figure (Uncategorized Transactions count as their own group). Amounts are netted within each month, so a refund reduces the Spending of the Category it lands in only in the month it is posted; a Category whose Amounts in a month net to zero or more has no Spending that month. A longer Period's Spending is the sum of its months', and its total is the sum of its Categories'. The Income Category is never Spending, and the Transfers Category is left out unless the user chooses to include it, since moving money between the user's own accounts is not spending.
+What each Category cost during a Period, shown as a positive figure (Uncategorized Transactions count as their own group). Amounts are netted within each month, so a refund reduces the Spending of the Category it lands in only in the month it is posted; a Category whose Amounts in a month net to zero or more has no Spending that month. A longer Period's Spending is the sum of its months', and its total is the sum of its Categories'. The Income Category is never Spending, and the Savings Category is left out unless the user chooses to include it, since moving money between the user's own accounts is not spending.
 _Avoid_: Outgoing, expenses, costs
 
 **Period**:
@@ -121,7 +121,7 @@ A specific calendar year, quarter (Q1–Q4) or month that Spending is summarized
 _Avoid_: Range, interval, timeframe
 
 **Granularity**:
-The length of a Period: Year, Quarter or Month. The Dashboard has one for the Period it summarizes, where changing it keeps the user in the same stretch of time, moving to the Period that contains the current one or to the latest one with Transactions inside it. It has another, chosen separately, for how Spending changed over a Span, shown one Period of that Granularity at a time.
+The length of a Period: Year, Quarter or Month. The Dashboard has one for the Period it summarizes, where changing it keeps the user in the same stretch of time, moving to the Period that contains the current one or to the latest one with Transactions inside it. It has another, chosen separately, for how Spending, Savings and Income changed over a Span, shown one Period of that Granularity at a time.
 _Avoid_: Resolution, period type, interval
 
 **Span**:
@@ -129,5 +129,5 @@ A run of consecutive whole months, from a start month to an end month, both incl
 _Avoid_: Interval, range, Period
 
 **Dashboard**:
-The view summarizing Spending by Category over a chosen Period, and how Spending changed over a chosen Span. Each Category's Spending in a Period leads to that Category's Transactions in the Period; since Transactions are listed by month or year, a quarter leads to its first month where the Category has Transactions.
+The view summarizing Spending by Category over a chosen Period, and how Spending, Savings and Income changed over a chosen Span. Savings and Income are shown beside Spending, never as part of it: each is its Category's Amounts netted within each month as a positive figure, what was put aside or received, with nothing for a month that nets the other way. Each Category's Spending in a Period leads to that Category's Transactions in the Period; since Transactions are listed by month or year, a quarter leads to its first month where the Category has Transactions.
 _Avoid_: Report, overview

@@ -71,7 +71,7 @@ public class CategorizationRuleEndpointsTests : IAsyncLifetime
 
         var categoryByKeyword = rules!.ToDictionary(r => r.Keyword, r => r.CategoryId);
         Assert.Equal(_categories.Groceries, categoryByKeyword["rema"]);
-        Assert.Equal(_categories.Transfers, categoryByKeyword["overføring mellom egne kontoer"]);
+        Assert.Equal(_categories.Savings, categoryByKeyword["overføring mellom egne kontoer"]);
         Assert.Equal(_categories.Transport, categoryByKeyword["ruter"]);
     }
 

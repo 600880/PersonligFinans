@@ -51,10 +51,10 @@ interface SliceView {
   colour: string
 }
 
-// A Period's Spending, remembered with the Period and Include transfers setting it was loaded for.
+// A Period's Spending, remembered with the Period and Include savings setting it was loaded for.
 interface LoadedSpending {
   period: Period
-  includeTransfers: boolean
+  includeSavings: boolean
   spending: Spending
 }
 
@@ -70,9 +70,9 @@ function toSliceViews(spending: Spending, categories: Category[], dark: boolean)
 }
 
 // Spending by Category for one Period, with the Spending trend over a Span below it. Opens on the
-// latest month with Transactions and the Transfers Category left out. A new version, after
+// latest month with Transactions and the Savings Category left out. A new version, after
 // Transactions are saved or on coming back to home, reloads it in place, keeping the chosen Period
-// and Include transfers. Its choices last until the browser reloads, never longer. Clicking a slice
+// and Include savings. Its choices last until the browser reloads, never longer. Clicking a slice
 // or its legend row opens that Category's Transactions in the Period, as a trend dot does for its
 // point.
 export function Dashboard({
@@ -93,7 +93,7 @@ export function Dashboard({
   // Null until the months are loaded, which decide the Period the Dashboard opens on: the latest
   // month with Transactions.
   const [selected, setSelected] = useState<Period | null>(null)
-  const [includeTransfers, setIncludeTransfers] = useState(false)
+  const [includeSavings, setIncludeSavings] = useState(false)
   const [loaded, setLoaded] = useState<LoadedSpending | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   // The version last loaded. A new one starts afresh, so an error from an earlier load doesn't
@@ -139,9 +139,9 @@ export function Dashboard({
   useEffect(() => {
     if (!selected) return
     let ignore = false
-    fetchSpending(selected, includeTransfers)
+    fetchSpending(selected, includeSavings)
       .then((spending) => {
-        if (!ignore) setLoaded({ period: selected, includeTransfers, spending })
+        if (!ignore) setLoaded({ period: selected, includeSavings, spending })
       })
       .catch(() => {
         if (!ignore) setErrorMessage(LOAD_ERROR)
@@ -149,10 +149,10 @@ export function Dashboard({
     return () => {
       ignore = true
     }
-  }, [selected, includeTransfers])
+  }, [selected, includeSavings])
 
   const spending =
-    categories && loaded && selected && loaded.period === selected && loaded.includeTransfers === includeTransfers
+    categories && loaded && selected && loaded.period === selected && loaded.includeSavings === includeSavings
       ? loaded.spending
       : null
   const slices = spending && categories ? toSliceViews(spending, categories, dark) : []
@@ -170,9 +170,9 @@ export function Dashboard({
     setSelected(period)
   }
 
-  function chooseIncludeTransfers(include: boolean) {
+  function chooseIncludeSavings(include: boolean) {
     setErrorMessage(null)
-    setIncludeTransfers(include)
+    setIncludeSavings(include)
   }
 
   return (
@@ -210,11 +210,11 @@ export function Dashboard({
         <label className="mt-3 flex w-fit items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-300">
           <input
             type="checkbox"
-            checked={includeTransfers}
-            onChange={(event) => chooseIncludeTransfers(event.target.checked)}
+            checked={includeSavings}
+            onChange={(event) => chooseIncludeSavings(event.target.checked)}
             className="size-4 rounded border-slate-300 dark:border-slate-700"
           />
-          Include transfers
+          Include savings
         </label>
 
         {errorMessage && <ErrorMessage className="mt-3">{errorMessage}</ErrorMessage>}

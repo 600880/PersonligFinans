@@ -13,7 +13,7 @@ public static class Seeds
         new("Transport", "All expenses related to car and public transport.", "#1baf7a", BuiltIn: true),
         new("Housing", "Mortgage, common costs and insurance.", "#eda100", BuiltIn: true),
         new("Income", "All income.", "#8a5a1c", BuiltIn: true),
-        new("Transfers", "All bank transfers.", "#0f766e", BuiltIn: true),
+        new("Savings", "Money moved between own accounts.", "#0f766e", BuiltIn: true),
         new("Other", "Costs that don't belong in any other category.", "#9085e9", BuiltIn: true),
         new("Clothing", "All clothing, including sportswear.", "#b8336a", BuiltIn: true),
     ];
@@ -25,12 +25,12 @@ public static class Seeds
         ("joker", "Groceries"), ("bunnpris", "Groceries"),
         ("vy", "Transport"), ("skyss", "Transport"), ("ruter", "Transport"),
         ("cubus", "Clothing"), ("dressmann", "Clothing"), ("h&m", "Clothing"),
-        ("overføring mellom egne kontoer", "Transfers"), ("overføring til konto", "Transfers"),
+        ("overføring mellom egne kontoer", "Savings"), ("overføring til konto", "Savings"),
     ];
 
     // The order the Built-in Categories are listed in, ahead of every other Category.
     public static readonly string[] BuiltInOrder =
-        ["Housing", "Groceries", "Clothing", "Transport", "Other", "Income", "Transfers"];
+        ["Housing", "Groceries", "Clothing", "Transport", "Other", "Income", "Savings"];
 
     // Adds copies of the seeded Categories and Categorization Rules owned by the User, each rule with
     // that User's Category of its name. Nothing is saved.

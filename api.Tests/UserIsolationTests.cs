@@ -132,7 +132,7 @@ public class UserIsolationTests : IAsyncLifetime
         var rules = await Rules(fresh);
 
         Assert.Equal(
-            ["Housing", "Groceries", "Clothing", "Transport", "Other", "Income", "Transfers"],
+            ["Housing", "Groceries", "Clothing", "Transport", "Other", "Income", "Savings"],
             categories.Select(c => c.Name));
         Assert.All(categories, c => Assert.True(c.BuiltIn));
         Assert.All(categories, c => Assert.Equal(0, c.TransactionCount));
@@ -143,7 +143,7 @@ public class UserIsolationTests : IAsyncLifetime
         Assert.Equal(categoryByName["Groceries"], categoryByKeyword["rema"]);
         Assert.Equal(categoryByName["Clothing"], categoryByKeyword["cubus"]);
         Assert.Equal(categoryByName["Transport"], categoryByKeyword["ruter"]);
-        Assert.Equal(categoryByName["Transfers"], categoryByKeyword["overføring til konto"]);
+        Assert.Equal(categoryByName["Savings"], categoryByKeyword["overføring til konto"]);
 
         // Another User's seeds are copies, not the same rows.
         Assert.NotEqual(_categoriesA.Groceries, categoryByName["Groceries"]);
