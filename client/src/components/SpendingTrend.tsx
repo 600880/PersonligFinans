@@ -101,8 +101,8 @@ function YAxisInverseScale({ onScale }: { onScale: (scale: InverseScaleFunction 
 }
 
 // The Total row, then one per Category with Spending in some point of the trend at the granularity,
-// largest first, then Savings and Income when they have a figure in some point. The Categories wait for their names, so a Category is never
-// shown without its name.
+// largest first, then Savings and Income when they have a figure in some point. The Categories wait
+// for their names, so a Category is never shown without its name.
 function trendRows(
   monthly: MonthSpending[],
   granularity: Granularity,

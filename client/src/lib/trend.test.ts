@@ -7,13 +7,14 @@ const SHOPPING = 2
 const SAVINGS = 3
 const INCOME = 4
 
-// A month of 2026 as the monthly Spending endpoint returns it, with each group's net Spending.
-function month(month: number, slices: SpendingSlice[] = []): MonthSpending {
-  return { year: 2026, month, slices, savings: null, income: null }
+// A month of 2026 as the monthly Spending endpoint returns it, with each group's Amounts netted as
+// what it cost, negative when it nets the other way.
+function month(number: number, slices: SpendingSlice[] = []): MonthSpending {
+  return { year: 2026, month: number, slices, savings: null, income: null }
 }
 
 describe('trendPoints', () => {
-  it("nets a Category over a quarter's months, so a refund reduces an earlier month's Spending", () => {
+  it("nets a Category over a quarter's months, so a refund in a later month reduces the quarter's Spending", () => {
     const monthly = [
       month(1, [{ categoryId: SHOPPING, amount: 500 }, { categoryId: GROCERIES, amount: 300 }]),
       month(2, [{ categoryId: SHOPPING, amount: -700 }]),
@@ -39,6 +40,15 @@ describe('trendPoints', () => {
     expect(q1.values[String(SAVINGS)]).toBe(1000)
     expect(q1.values[String(INCOME)] ?? 0).toBe(0)
     expect(q1.values.total).toBe(0)
+  })
+
+  it('nets only the months inside the Span for a point at its edge, divided by the months it covers', () => {
+    const monthly = [month(2, [{ categoryId: SHOPPING, amount: 500 }]), month(3, [{ categoryId: SHOPPING, amount: -200 }])]
+
+    const [q1] = trendPoints(monthly, 'quarter')
+
+    expect(q1.monthsCovered).toBe(2)
+    expect(q1.values[String(SHOPPING)]).toBe(150)
   })
 
   it('leaves out a month that nets the other way, at Month granularity', () => {

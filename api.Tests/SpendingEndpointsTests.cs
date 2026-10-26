@@ -253,7 +253,7 @@ public class SpendingEndpointsTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Get_SpendingOfQuarter_NetsEachCategoryOverTheWholeQuarter_SoARefundReducesAnEarlierMonthsSpending()
+    public async Task Get_SpendingOfQuarter_NetsEachCategoryOverTheWholeQuarter_SoARefundReducesTheQuartersSpendingButNotAnEarlierMonths()
     {
         await AddManualTransaction("2075-07-10", -500m, _categories.Shopping);
         await AddManualTransaction("2075-08-03", 700m, _categories.Shopping);

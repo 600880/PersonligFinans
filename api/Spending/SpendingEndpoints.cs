@@ -58,8 +58,8 @@ public static class SpendingEndpoints
     }
 
     // A Span's Spending month by month: one entry per month from From to To, both included and in
-    // order, with no slices for a month without Amounts that can be Spending, and its Savings and
-    // Income beside them. The client groups the months into the points of its trend and nets them
+    // order, with no slices for a month whose groups all net to zero, and its Savings and Income
+    // beside them. The client groups the months into the points of its trend and nets them
     // there, so those points match the Spending of their Periods.
     private static async Task<IResult> MonthlySpendingOfSpan(
         int? fromYear, int? fromMonth, int? toYear, int? toMonth, AppDbContext db)
@@ -70,7 +70,7 @@ public static class SpendingEndpoints
 
         var from = new DateOnly(fromYear!.Value, fromMonth!.Value, 1);
         var to = new DateOnly(toYear!.Value, toMonth!.Value, 1);
-        var slices = await MonthlySlices(db, from, to.AddMonths(1), includeSavings: false).ToListAsync();
+        var slices = await MonthlySlices(db, from, to.AddMonths(1)).ToListAsync();
         var besides = await MonthlyBesides(db, from, to.AddMonths(1)).ToListAsync();
 
         var months = new List<MonthlySpendingResponse>();
@@ -122,13 +122,11 @@ public static class SpendingEndpoints
             .Where(t => t.Category == null || t.Category.Name != IncomeCategoryName)
             .Where(t => includeSavings || t.Category == null || t.Category.Name != SavingsCategoryName);
 
-    // The Spending of each group in each month from the first day up to, but not including, the next:
-    // the group's Amounts that month netted together, positive when it cost and negative when it nets
-    // the other way, with no slice when they net to zero. Income is never Spending, and Savings only
-    // when includeSavings is set.
-    private static IQueryable<MonthSlice> MonthlySlices(
-        AppDbContext db, DateOnly first, DateOnly next, bool includeSavings) =>
-        SpendingTransactions(db, first, next, includeSavings)
+    // Each group's Amounts in each month from the first day up to, but not including, the next, netted
+    // together as what it cost: negative when it nets the other way, with no slice when it nets to
+    // zero. Never Income or Savings.
+    private static IQueryable<MonthSlice> MonthlySlices(AppDbContext db, DateOnly first, DateOnly next) =>
+        SpendingTransactions(db, first, next, includeSavings: false)
             .GroupBy(t => new { t.PostedDate.Year, t.PostedDate.Month, t.CategoryId })
             .Select(g => new MonthSlice
             {

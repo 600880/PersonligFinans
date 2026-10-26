@@ -11,8 +11,8 @@ export function categoryRow(categoryId: number | null): string {
   return categoryId === null ? 'uncategorized' : String(categoryId)
 }
 
-// One point of the trend: a Period of the Span, with the Spending of Total and of each Category in the
-// Span, and the Savings and Income beside it, as NOK per month, keyed by row. `monthsCovered` is how
+// One point of the trend: a Period of the Span, with the Spending of Total and of each Category of the
+// trend, and the Savings and Income beside it, as NOK per month, keyed by row. `monthsCovered` is how
 // many of the `monthsInPeriod` months of its Period fall inside the Span.
 export interface TrendPoint {
   period: Period
@@ -33,7 +33,7 @@ interface NetFigures {
 }
 
 function netFigures(months: MonthSpending[]): NetFigures {
-  const net = (slices: (SpendingSlice | null)[]) => {
+  const positiveNets = (slices: (SpendingSlice | null)[]) => {
     const sums = new Map<number | null, number>()
     for (const slice of slices) {
       if (slice) sums.set(slice.categoryId, (sums.get(slice.categoryId) ?? 0) + slice.amount)
@@ -41,9 +41,9 @@ function netFigures(months: MonthSpending[]): NetFigures {
     return new Map([...sums].filter(([, amount]) => amount > 0))
   }
   return {
-    spending: net(months.flatMap((month) => month.slices)),
-    savings: net(months.map((month) => month.savings)),
-    income: net(months.map((month) => month.income)),
+    spending: positiveNets(months.flatMap((month) => month.slices)),
+    savings: positiveNets(months.map((month) => month.savings)),
+    income: positiveNets(months.map((month) => month.income)),
   }
 }
 
@@ -56,8 +56,10 @@ export function trendCategories(monthly: MonthSpending[], granularity: Granulari
   for (const { spending } of points) {
     for (const [categoryId, amount] of spending) sums.set(categoryId, (sums.get(categoryId) ?? 0) + amount)
   }
-  const besides = new Set(points.flatMap(({ savings }) => [...savings.keys()]))
-  for (const { income } of points) for (const categoryId of income.keys()) besides.add(categoryId)
+  const besides = new Set([
+    ...points.flatMap(({ savings }) => [...savings.keys()]),
+    ...points.flatMap(({ income }) => [...income.keys()]),
+  ])
   return [...[...sums].sort(([, a], [, b]) => b - a).map(([categoryId]) => categoryId), ...besides]
 }
 
