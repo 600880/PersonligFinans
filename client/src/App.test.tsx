@@ -587,6 +587,44 @@ describe('App', () => {
     expect(screen.getByLabelText(/description/i)).toHaveValue('')
   })
 
+  it('moves the focus into the modal when it opens', async () => {
+    await openModal()
+
+    expect(screen.getByRole('dialog', { name: 'Add transaction' })).toContainElement(document.activeElement as HTMLElement)
+  })
+
+  it('closes and discards input on Escape, as Cancel does', async () => {
+    const user = await openModal()
+    await user.type(screen.getByLabelText(/description/i), 'Groceries')
+
+    await user.keyboard('{Escape}')
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Add transaction' }))
+    expect(screen.getByLabelText(/description/i)).toHaveValue('')
+  })
+
+  it('gives the focus back to Add transaction once closed, by Cancel or by Escape', async () => {
+    const user = await openModal()
+    await user.click(screen.getByRole('button', { name: /cancel/i }))
+    expect(screen.getByRole('button', { name: 'Add transaction' })).toHaveFocus()
+
+    await user.click(screen.getByRole('button', { name: 'Add transaction' }))
+    await user.type(screen.getByLabelText(/description/i), 'Rema')
+    await user.keyboard('{Escape}')
+    expect(screen.getByRole('button', { name: 'Add transaction' })).toHaveFocus()
+  })
+
+  it('gives the focus back to Add transaction once saved', async () => {
+    const user = await openModal()
+    await fillValidForm(user)
+
+    await user.click(screen.getByRole('button', { name: /^save$/i }))
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(screen.getByRole('button', { name: 'Add transaction' })).toHaveFocus()
+  })
+
   it('shows Upload transactions to the left of Add transaction', async () => {
     await renderApp()
 
@@ -6494,6 +6532,14 @@ describe('Scan receipts', () => {
     expect(within(dialog).getByLabelText(/category/i)).toHaveValue('')
   })
 
+  it('moves the focus into the window when it opens', async () => {
+    await scan([kiwi])
+
+    expect(await screen.findByRole('dialog', { name: 'Receipt 1 of 1' })).toContainElement(
+      document.activeElement as HTMLElement,
+    )
+  })
+
   it('sends every Receipt to be read at once, one request each, before any has been answered', async () => {
     handleReadReceipt = () => new Promise(() => {})
 
@@ -7132,6 +7178,20 @@ describe('Scan receipts', () => {
       expect(screen.getByRole('status')).toHaveTextContent('No transactions saved')
       expect(monthsRequests()).toBe(before)
       expect(releasedUrls).toEqual(['blob:reduced-kiwi.jpg', 'blob:reduced-rema.png'])
+    })
+
+    it('asks on Escape too, and a second Escape keeps going with the Receipt as it was', async () => {
+      const user = await scanUntilFormIsReady([kiwi, rema])
+      await user.type(screen.getByLabelText(/description/i), 'Kiwi')
+
+      await user.keyboard('{Escape}')
+      expect(screen.getByRole('alertdialog', { name: 'Discard the remaining 2 receipts?' })).toBeInTheDocument()
+
+      await user.keyboard('{Escape}')
+      expect(confirmation()).not.toBeInTheDocument()
+      const dialog = screen.getByRole('dialog', { name: 'Receipt 1 of 2' })
+      expect(within(dialog).getByLabelText(/description/i)).toHaveValue('Kiwi')
+      expect(within(dialog).getByRole('button', { name: 'Close' })).toHaveFocus()
     })
 
     it('asks about the last Receipt in the singular', async () => {

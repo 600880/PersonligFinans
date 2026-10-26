@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import type { ReceiptSuggestion } from '../lib/api'
 import { emptyTransactionForm, suggestedTransactionForm } from '../lib/transactionForm'
+import { Dialog, DialogHeading } from './Dialog'
 import { ZoomableReceipt } from './ZoomableReceipt'
 import { TransactionForm } from './TransactionForm'
 
@@ -31,7 +32,6 @@ interface ReceiptScanModalProps {
 // skipped. There is no going back. Closing partway, once confirmed, discards the remaining
 // Receipts and keeps the Transactions already saved.
 export function ReceiptScanModal({ receipts, onSaved, onClosed }: ReceiptScanModalProps) {
-  const headingId = useId()
   const confirmationId = useId()
   const [position, setPosition] = useState(0)
   // Whether closing is waiting for the discard of the remaining Receipts to be confirmed. The step
@@ -64,70 +64,62 @@ export function ReceiptScanModal({ receipts, onSaved, onClosed }: ReceiptScanMod
   }
 
   return (
-    <div className="fixed inset-0 flex items-center justify-center bg-slate-900/40 dark:bg-slate-950/70 p-4">
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={headingId}
-        className="flex max-h-[calc(100vh-2rem)] w-full max-w-4xl flex-col rounded-xl bg-white dark:bg-slate-900 shadow-xl"
-      >
-        <div className="flex justify-end px-3 pt-3">
-          <button
-            ref={closeButtonRef}
-            type="button"
-            aria-label="Close"
-            onClick={() => setIsConfirmingClose(true)}
-            className="rounded p-1 text-slate-400 dark:text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-700 dark:hover:text-slate-300"
-          >
-            <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" className="h-5 w-5">
-              <path d="M3.72 3.72a.75.75 0 0 1 1.06 0L8 6.94l3.22-3.22a.75.75 0 1 1 1.06 1.06L9.06 8l3.22 3.22a.75.75 0 1 1-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 0 1-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 0 1 0-1.06Z" />
-            </svg>
+    // Escape asks before discarding, as Close does, and once asked, keeps going.
+    <Dialog width="4xl" onCancel={isConfirmingClose ? keepGoing : () => setIsConfirmingClose(true)}>
+      <div className="flex justify-end px-3 pt-3">
+        <button
+          ref={closeButtonRef}
+          type="button"
+          aria-label="Close"
+          onClick={() => setIsConfirmingClose(true)}
+          className="rounded p-1 text-slate-400 dark:text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-700 dark:hover:text-slate-300"
+        >
+          <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" className="h-5 w-5">
+            <path d="M3.72 3.72a.75.75 0 0 1 1.06 0L8 6.94l3.22-3.22a.75.75 0 1 1 1.06 1.06L9.06 8l3.22 3.22a.75.75 0 1 1-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 0 1-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 0 1 0-1.06Z" />
+          </svg>
+        </button>
+      </div>
+
+      {isConfirmingClose && (
+        <div
+          role="alertdialog"
+          aria-labelledby={confirmationId}
+          className="mx-6 flex flex-wrap items-center justify-end gap-2 rounded-lg bg-red-50 dark:bg-red-950/40 px-3 py-2 text-sm"
+        >
+          <span id={confirmationId} className="mr-auto text-red-800 dark:text-red-300">
+            Discard the remaining {remaining} receipt{remaining === 1 ? '' : 's'}?
+          </span>
+          <button type="button" onClick={discard} className={smallButtonClass}>
+            Discard
+          </button>
+          <button type="button" autoFocus onClick={keepGoing} className={smallButtonClass}>
+            Keep going
           </button>
         </div>
+      )}
 
-        {isConfirmingClose && (
-          <div
-            role="alertdialog"
-            aria-labelledby={confirmationId}
-            className="mx-6 flex flex-wrap items-center justify-end gap-2 rounded-lg bg-red-50 dark:bg-red-950/40 px-3 py-2 text-sm"
-          >
-            <span id={confirmationId} className="mr-auto text-red-800 dark:text-red-300">
-              Discard the remaining {remaining} receipt{remaining === 1 ? '' : 's'}?
-            </span>
-            <button type="button" onClick={discard} className={smallButtonClass}>
-              Discard
-            </button>
-            <button type="button" autoFocus onClick={keepGoing} className={smallButtonClass}>
-              Keep going
-            </button>
-          </div>
-        )}
-
-        {/* The form with the Receipt to its right, or below the breakpoint the Receipt above it, the
-            two scrolling together. Out of reach while closing waits for its confirmation. */}
-        <div
-          inert={isConfirmingClose}
-          className="flex min-h-0 flex-col gap-6 overflow-y-auto px-6 pt-2 pb-6 md:flex-row"
-        >
-          <ReceiptStep
-            // A new step for each Receipt, so its form starts over.
-            key={position}
-            receipt={receipts[position]}
-            heading={`Receipt ${position + 1} of ${receipts.length}`}
-            headingId={headingId}
-            onSaved={onSaved}
-            onDone={moveOn}
-          />
-        </div>
+      {/* The form with the Receipt to its right, or below the breakpoint the Receipt above it, the
+          two scrolling together. Out of reach while closing waits for its confirmation. */}
+      <div
+        inert={isConfirmingClose}
+        className="flex min-h-0 flex-col gap-6 overflow-y-auto px-6 pt-2 pb-6 md:flex-row"
+      >
+        <ReceiptStep
+          // A new step for each Receipt, so its form starts over.
+          key={position}
+          receipt={receipts[position]}
+          heading={`Receipt ${position + 1} of ${receipts.length}`}
+          onSaved={onSaved}
+          onDone={moveOn}
+        />
       </div>
-    </div>
+    </Dialog>
   )
 }
 
 interface ReceiptStepProps {
   receipt: Receipt
   heading: string
-  headingId: string
   onSaved: () => void
   onDone: () => void
 }
@@ -136,7 +128,7 @@ interface ReceiptStepProps {
 // then it starts over from what was read. onDone is called once, on the first Save or Skip, which
 // also releases the preview: a Save that finishes after Skip is still reported to onSaved, but
 // doesn't move the scan on again.
-function ReceiptStep({ receipt, heading, headingId, onSaved, onDone }: ReceiptStepProps) {
+function ReceiptStep({ receipt, heading, onSaved, onDone }: ReceiptStepProps) {
   const isDone = useRef(false)
   // null while the Receipt is still being read.
   const [suggestion, setSuggestion] = useState<ReceiptSuggestion | null>(null)
@@ -162,9 +154,7 @@ function ReceiptStep({ receipt, heading, headingId, onSaved, onDone }: ReceiptSt
   return (
     <>
       <div className="w-full max-w-md shrink-0 overflow-y-auto">
-        <h2 id={headingId} className="text-lg font-semibold text-slate-900 dark:text-slate-100">
-          {heading}
-        </h2>
+        <DialogHeading>{heading}</DialogHeading>
 
         {suggestion === null && <p className="mt-3 text-sm text-slate-500 dark:text-slate-400">Reading…</p>}
         {suggestion?.outcome === 'unreadable' && (
