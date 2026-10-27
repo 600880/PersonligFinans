@@ -120,6 +120,8 @@ let handleDeleteFolder: (id: number) => Response | Promise<Response>
 let categoriesServed: ServedCategory[] | Response
 // The colours a Category can be given, as the palette endpoint serves them: a few of the real ones.
 let palette: string[] | Response
+// How many Transactions the Uncategorized count endpoint says are Uncategorized.
+let uncategorizedCount: number | Response
 // The month or quarter is undefined when the Spending of a whole year, or of a quarter, is asked for.
 let handleSpending: (year: number, month: number | undefined, quarter: number | undefined, includeSavings: boolean) => Response
 // The Spending of each month of the Span from `from` to `to`.
@@ -219,6 +221,9 @@ const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
   }
   if (ruleUrl && init?.method === 'DELETE') return handleDeleteRule(Number(ruleUrl[1]))
   if (url === '/api/categories/palette') return palette instanceof Response ? palette : Response.json(palette)
+  if (url === '/api/categories/uncategorized-count') {
+    return uncategorizedCount instanceof Response ? uncategorizedCount : Response.json({ count: uncategorizedCount })
+  }
   const categoryUrlMatch = /^\/api\/categories\/(\d+)(?:\?(.*))?$/.exec(url)
   if (categoryUrlMatch && init?.method === 'PUT') {
     return handleEditCategory(Number(categoryUrlMatch[1]), JSON.parse(init.body as string))
@@ -302,6 +307,7 @@ beforeEach(() => {
   handleMonthlySpending = (from, to) => Response.json(monthlySpending(from, to))
   categoriesServed = categories
   palette = ['#2a78d6', '#eb6834', '#9085e9', '#1baf7a']
+  uncategorizedCount = 0
   currentUser = { email: 'me@example.com', isGuest: false }
   handleSignIn = (body) => Response.json({ email: (body as { email: string }).email, isGuest: false })
   handleSignUp = (body) => Response.json({ email: (body as { email: string }).email, isGuest: false })
@@ -1573,6 +1579,44 @@ describe('Categories page', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Could not load the categories.')
   })
 
+  describe('Uncategorized line', () => {
+    it('says under the list, never as a row in it, how many transactions are Uncategorized', async () => {
+      uncategorizedCount = 1032
+      await openCategoriesPage()
+      await listedRows()
+
+      // The thousands apart as nb-NO writes them, with a non-breaking space.
+      const line = await screen.findByRole('button', { name: '1 032 transactions are Uncategorized' })
+      expect(screen.getByRole('table')).not.toContainElement(line)
+      expect(screen.getByRole('table').compareDocumentPosition(line)).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+      expect(screen.queryByRole('row', { name: /Uncategorized/ })).not.toBeInTheDocument()
+    })
+
+    it('says is for a single Uncategorized transaction', async () => {
+      uncategorizedCount = 1
+      await openCategoriesPage()
+
+      expect(await screen.findByRole('button', { name: '1 transaction is Uncategorized' })).toBeInTheDocument()
+    })
+
+    it('is hidden when no transaction is Uncategorized', async () => {
+      await openCategoriesPage()
+      await listedRows()
+
+      expect(fetchMock).toHaveBeenCalledWith('/api/categories/uncategorized-count', undefined)
+      expect(screen.queryByText(/Uncategorized/)).not.toBeInTheDocument()
+    })
+
+    it('is hidden, saying nothing, when the count could not be loaded', async () => {
+      uncategorizedCount = new Response(null, { status: 500 })
+      await openCategoriesPage()
+      await listedRows()
+
+      expect(screen.queryByText(/Uncategorized/)).not.toBeInTheDocument()
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    })
+  })
+
   describe('deleting', () => {
     const health = { id: 7, name: 'Health', description: 'Pharmacy etc.', builtIn: false, transactionCount: 0, ruleCount: 0 }
 
@@ -1727,6 +1771,29 @@ describe('Categories page', () => {
           ['Other Built-in', "Costs that don't belong in any other category.", '1 transaction', '0 rules'],
         ]),
       )
+    })
+
+    it('counts the Uncategorized transactions again after deleting its rules, showing the line once there are some', async () => {
+      categoriesServed = [categories[0], { ...health, transactionCount: 2, ruleCount: 1 }, categories[1]]
+      handleDeleteCategory = () => {
+        // A remaining Groceries rule picked up one of its Transactions; the other is Uncategorized.
+        categoriesServed = [{ ...categories[0], transactionCount: 13 }, categories[1]]
+        uncategorizedCount = 1
+        return Response.json({ transactionsChanged: 2 })
+      }
+      const user = await openCategoriesPage()
+      await listedRows()
+      expect(screen.queryByText(/is Uncategorized/)).not.toBeInTheDocument()
+
+      const dialog = await openDeleteDialog(user, 'Health')
+      await user.click(
+        dialog.getByRole('radio', {
+          name: 'Delete its rules and leave its transactions Uncategorized unless another rule matches them',
+        }),
+      )
+      await user.click(dialog.getByRole('button', { name: 'Confirm delete' }))
+
+      expect(await screen.findByRole('button', { name: '1 transaction is Uncategorized' })).toBeInTheDocument()
     })
 
     it("shows the server's reason in the dialog when the replacement is refused, keeping the choice to change", async () => {
@@ -5774,6 +5841,19 @@ describe("Transactions page from a Category's Transactions count", () => {
     expect(listedDescriptions()).toEqual(['Elkjøp'])
     expect(chosenFilters()).toEqual(['2024', 'All months', 'Other'])
     expect(requestedPeriods()).not.toContain('/api/transactions?year=2023')
+  })
+
+  it('opens Transactions filtered to Uncategorized, on the latest year with Uncategorized Transactions, from the line under the list', async () => {
+    uncategorizedCount = 1
+    const user = await openCategoriesPage()
+
+    await user.click(await screen.findByRole('button', { name: '1 transaction is Uncategorized' }))
+
+    expect(await screen.findByRole('cell', { name: 'Ukjent butikk' })).toBeInTheDocument()
+    expect(listedDescriptions()).toEqual(['Ukjent butikk'])
+    expect(chosenFilters()).toEqual(['2025', 'All months', 'Uncategorized'])
+    expect(requestedPeriods()).not.toContain('/api/transactions?year=2024')
+    expect(screen.getByRole('button', { name: 'Transactions' })).toHaveAttribute('aria-current', 'page')
   })
 
   it('opens from the header on the latest month with all Categories, after following a count', async () => {

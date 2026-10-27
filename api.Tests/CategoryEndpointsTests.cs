@@ -703,6 +703,48 @@ public class CategoryEndpointsTests : IAsyncLifetime
         Assert.Equal(id, (await Rule(ruleId)).CategoryId);
     }
 
+    private async Task<int> UncategorizedCount() =>
+        (await _client.GetFromJsonAsync<UncategorizedCountResponse>("/api/categories/uncategorized-count"))!.Count;
+
+    [Fact]
+    public async Task GetUncategorizedCount_CountsTheImportedTransactionsWithoutACategory()
+    {
+        await Imported("Ukjent butikk", "Plantasjen Oslo", "Mester Grønn");
+        await AddedRuleId("plantasjen", _categories.Groceries);
+        await ManuallyEntered("Felleskjøpet", _categories.Groceries);
+
+        Assert.Equal(2, await UncategorizedCount());
+    }
+
+    [Fact]
+    public async Task GetUncategorizedCount_AfterDeletingACategoryWithItsRules_CountsTheTransactionsItLeftUncategorized()
+    {
+        var id = await CreateCategory("Garden");
+        var otherCategoryId = await CreateCategory("Home");
+        await AddedRuleId("plant", otherCategoryId);
+        await Imported("Plantasjen Oslo", "Mester Grønn", "Plant Shop");
+        await AddedRuleId("plantasjen", id);
+        await AddedRuleId("mester", id);
+        await ManuallyEntered("Felleskjøpet", id);
+        await ManuallyEntered("Hageland", _categories.Groceries);
+        var before = await UncategorizedCount();
+
+        await TransactionsChangedByDeletingWithItsRules(id);
+
+        // Plantasjen Oslo goes to the shorter remaining rule; Mester Grønn and the manually-entered
+        // Felleskjøpet are left Uncategorized.
+        Assert.Equal(0, before);
+        Assert.Equal(2, await UncategorizedCount());
+    }
+
+    [Fact]
+    public async Task GetUncategorizedCount_SignedOut_IsUnauthorized()
+    {
+        var response = await _factory.CreateClient().GetAsync("/api/categories/uncategorized-count");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
     // Leaving the colour out sends none, so the Category keeps its own.
     private async Task<HttpResponseMessage> EditCategory(int id, string? name, string? description, string? colour = null) =>
         await _client.PutAsJsonAsync($"/api/categories/{id}", new { name, description, colour });

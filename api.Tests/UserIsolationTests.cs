@@ -176,6 +176,19 @@ public class UserIsolationTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Users_CountOnlyTheirOwnUncategorizedTransactions()
+    {
+        // Deleting a Category with its rules leaves the Transaction entered in it Uncategorized.
+        var hobbies = await AddCategory(_a, "Hobbies");
+        await AddTransaction(_a, hobbies);
+        Assert.Equal(HttpStatusCode.OK, (await _a.DeleteAsync($"/api/categories/{hobbies}?deleteRules=true")).StatusCode);
+        await AddTransaction(_b, _categoriesB.Other);
+
+        Assert.Equal(1, (await _a.GetFromJsonAsync<UncategorizedCountResponse>("/api/categories/uncategorized-count"))!.Count);
+        Assert.Equal(0, (await _b.GetFromJsonAsync<UncategorizedCountResponse>("/api/categories/uncategorized-count"))!.Count);
+    }
+
+    [Fact]
     public async Task AnotherUsersIds_GiveNotFound()
     {
         var transactionId = await AddTransaction(_a, _categoriesA.Other);

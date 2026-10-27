@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
-import { fetchCategories, fetchPalette, type Category } from '../lib/api'
+import { fetchCategories, fetchPalette, fetchUncategorizedCount, type Category } from '../lib/api'
 import { useIsDark } from '../lib/appearance'
 import { categoryColour } from '../lib/categoryColours'
-import { formatCount } from '../lib/count'
+import { formatCount, plural } from '../lib/count'
 import { CategoryDeleteDialog, type CategoryDeleted } from './CategoryDeleteDialog'
 import { CategoryDialog } from './CategoryDialog'
 import { CategorySwatch } from './CategorySwatch'
@@ -73,7 +73,8 @@ function changedMessage(action: string, transactionsChanged: number) {
 // Every Category in the order the API lists them, Built-in ones first, with what uses it, and a button
 // that adds one in a dialog. Each can be edited in the same dialog, and one that isn't Built-in can be
 // deleted in a dialog of its own, which asks first; a Built-in one shows Delete disabled.
-// A nonzero Transactions count opens the Transactions page on that Category's latest year.
+// A nonzero Transactions count opens the Transactions page on that Category's latest year. Under the
+// list, a line says how many Transactions are Uncategorized, unless none are, and opens them the same way.
 export function CategoriesPage({ onOpenTransactions }: { onOpenTransactions: (target: TransactionsTarget) => void }) {
   const dark = useIsDark()
   const [categories, setCategories] = useState<Category[]>([])
@@ -81,6 +82,8 @@ export function CategoriesPage({ onOpenTransactions }: { onOpenTransactions: (ta
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [dialog, setDialog] = useState<OpenDialog | null>(null)
   const [palette, setPalette] = useState<Palette>('loading')
+  // Zero until loaded, and if loading fails, so the Uncategorized line stays hidden.
+  const [uncategorizedCount, setUncategorizedCount] = useState(0)
 
   useEffect(() => {
     let ignore = false
@@ -99,6 +102,11 @@ export function CategoriesPage({ onOpenTransactions }: { onOpenTransactions: (ta
       .catch(() => {
         if (!ignore) setPalette('failed')
       })
+    fetchUncategorizedCount()
+      .then((loaded) => {
+        if (!ignore) setUncategorizedCount(loaded)
+      })
+      .catch(() => {})
     return () => {
       ignore = true
     }
@@ -148,11 +156,15 @@ export function CategoriesPage({ onOpenTransactions }: { onOpenTransactions: (ta
     setStatusMessage(
       alreadyDeleted ? 'The category was already deleted.' : changedMessage('Category deleted.', transactionsChanged),
     )
-    // The remaining rules may have given its Transactions to other Categories, so the counts are
-    // reloaded. Until then, or if that fails, the list just lacks the deleted Category.
+    // The remaining rules may have given its Transactions to other Categories, or left them
+    // Uncategorized, so the counts and the Uncategorized count are reloaded. Until then, or if that
+    // fails, the list just lacks the deleted Category and the line keeps its count.
     if (choice.kind === 'deleteRules' && !alreadyDeleted) {
       fetchCategories()
         .then(setCategories)
+        .catch(() => {})
+      fetchUncategorizedCount()
+        .then(setUncategorizedCount)
         .catch(() => {})
     }
   }
@@ -262,6 +274,20 @@ export function CategoriesPage({ onOpenTransactions }: { onOpenTransactions: (ta
             </tbody>
           </table>
         </div>
+      )}
+
+      {/* Apart from the list, never a row in it, since Uncategorized is no Category to edit. */}
+      {uncategorizedCount > 0 && (
+        <p className="mt-3 text-sm text-slate-600 dark:text-slate-400">
+          <button
+            type="button"
+            onClick={() => onOpenTransactions({ period: 'latestYearWithTransactions', categoryId: null })}
+            className="font-medium underline decoration-slate-300 dark:decoration-slate-600 underline-offset-2 hover:decoration-current"
+          >
+            {formatCount(uncategorizedCount)} {plural(uncategorizedCount, 'transaction')}{' '}
+            {uncategorizedCount === 1 ? 'is' : 'are'} Uncategorized
+          </button>
+        </p>
       )}
     </section>
   )

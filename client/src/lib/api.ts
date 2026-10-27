@@ -359,6 +359,13 @@ export async function fetchPalette(): Promise<string[]> {
   return (await response.json()) as string[]
 }
 
+// How many of the User's Transactions are Uncategorized, imported and manually-entered alike.
+export async function fetchUncategorizedCount(): Promise<number> {
+  const response = await apiFetch('/api/categories/uncategorized-count')
+  if (!response.ok) throw new Error(`Loading the Uncategorized count failed (${response.status})`)
+  return ((await response.json()) as { count: number }).count
+}
+
 // alreadyDeleted: the Category was gone before this delete, so nothing changed.
 export type DeleteCategoryResult =
   | { ok: true; alreadyDeleted: boolean; transactionsChanged: number }

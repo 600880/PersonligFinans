@@ -25,6 +25,9 @@ public record CategoryDeletion(int? ReplacementCategoryId, bool? DeleteRules);
 
 public record DeletedCategoryResponse(int TransactionsChanged);
 
+// How many of the User's Transactions are Uncategorized, imported and manually-entered alike.
+public record UncategorizedCountResponse(int Count);
+
 public static class CategoryEndpoints
 {
     public static void MapCategoryEndpoints(this IEndpointRouteBuilder app)
@@ -51,6 +54,10 @@ public static class CategoryEndpoints
         // The colours a Category can be given, in palette order, so the client never copies them.
         // Neither the fallback nor Uncategorized's grey is one of them.
         api.MapGet("/palette", () => CategoryColours.Palette);
+
+        // Imported and manually-entered alike, whatever left them Uncategorized.
+        api.MapGet("/uncategorized-count", async (AppDbContext db) =>
+            new UncategorizedCountResponse(await db.Transactions.CountAsync(t => t.CategoryId == null)));
 
         api.MapPost("/", AddCategory);
         api.MapPut("/{id:int}", EditCategory);
