@@ -168,9 +168,10 @@ public static class Categorizer
         eligible = eligible.Union(db.Transactions.Local.Where(IsRuleEligibleInMemory)).ToList();
 
         var changed = new List<Transaction>();
-        foreach (var (transaction, rule) in Categorize(eligible, rules))
+        foreach (var categorized in Categorize(eligible, rules))
         {
-            var categoryId = rule?.CategoryId;
+            var (transaction, rule) = categorized;
+            var categoryId = categorized.CategoryId;
             if (transaction.CategoryId != categoryId)
                 changed.Add(transaction);
             transaction.CategoryId = categoryId;

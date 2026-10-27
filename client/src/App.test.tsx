@@ -1,6 +1,6 @@
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import App from './App'
 import { todayIsoDate } from './lib/date'
 import { monthOfDate } from './lib/month'
@@ -1295,7 +1295,7 @@ describe('Categories page', () => {
     return user
   }
 
-  // Each listed Category's cells, in the order shown.
+  // Each listed Category's cells, in the order shown, as their text reads.
   async function listedRows() {
     await screen.findByText('All groceries.')
     return screen
@@ -1305,7 +1305,7 @@ describe('Categories page', () => {
         within(row)
           .getAllByRole('cell')
           .slice(0, 4)
-          .map((cell) => cell.textContent),
+          .map((cell) => cell.textContent.trim()),
       )
   }
 
@@ -1318,9 +1318,9 @@ describe('Categories page', () => {
     await openCategoriesPage()
 
     expect((await listedRows()).map((cells) => cells.slice(0, 4))).toEqual([
-      ['Groceries Built-in', 'All groceries.', '12', '3'],
-      ['Health', 'Pharmacy etc.', '0', '2'],
-      ['Other Built-in', "Costs that don't belong in any other category.", '1', '0'],
+      ['Groceries Built-in', 'All groceries.', '12 transactions', '3 rules'],
+      ['Health', 'Pharmacy etc.', '0 transactions', '2 rules'],
+      ['Other Built-in', "Costs that don't belong in any other category.", '1 transaction', '0 rules'],
     ])
     expect(screen.getAllByRole('columnheader').map((header) => header.textContent)).toEqual([
       'Name',
@@ -1341,6 +1341,65 @@ describe('Categories page', () => {
 
     expect(screen.getAllByText('Built-in')).toHaveLength(1)
     expect(within(screen.getByRole('row', { name: /Groceries/ })).getByText('Built-in')).toBeInTheDocument()
+  })
+
+  // The swatch in the named Category's row, found by its accessible name.
+  function swatch(name: string) {
+    const row = screen.getByRole('row', { name: new RegExp(`\\b${name}\\b`) })
+    return within(row).getByRole('img', { name: `${name} colour` })
+  }
+
+  it('shows each Category in the colour the Dashboard draws it in, as a swatch beside its name', async () => {
+    categoriesServed = [
+      { ...categories[0], colour: '#123456' },
+      { id: 7, name: 'Health', description: 'Pharmacy etc.', colour: '#abcdef', builtIn: false, transactionCount: 0, ruleCount: 0 },
+    ]
+    await openCategoriesPage()
+    await listedRows()
+
+    expect(swatch('Groceries')).toHaveStyle({ backgroundColor: 'rgb(18, 52, 86)' })
+    expect(swatch('Health')).toHaveStyle({ backgroundColor: 'rgb(171, 205, 239)' })
+  })
+
+  it('draws a swatch lighter in Dark, just as the Dashboard draws its Category', async () => {
+    localStorage.setItem('appearance', 'dark')
+    categoriesServed = [{ ...categories[0], colour: '#104281' }, categories[1]]
+    months = [{ year: 2026, month: 9 }]
+    handleSpending = () => Response.json({ total: 120, slices: [{ categoryId: 1, amount: 120 }] })
+    const user = userEvent.setup()
+    await renderApp()
+    const legendRow = await within(screen.getByRole('region', { name: 'Spending' })).findByRole('row', {
+      name: /Groceries/,
+    })
+    const onDashboard = (legendRow.querySelector('[aria-hidden="true"]') as HTMLElement).style.backgroundColor
+
+    await user.click(screen.getByRole('button', { name: 'Categories' }))
+    await listedRows()
+
+    // The sum of its red, green and blue.
+    const brightness = (colour: string) => colour.match(/\d+/g)!.reduce((sum, channel) => sum + Number(channel), 0)
+    expect(swatch('Groceries').style.backgroundColor).toBe(onDashboard)
+    expect(brightness(onDashboard)).toBeGreaterThan(brightness('rgb(16, 66, 129)'))
+  })
+
+  it('lays each Category out as a stacked card on a phone, with its counts named and its actions, never scrolling sideways', async () => {
+    await openCategoriesPage()
+    await listedRows()
+
+    const table = screen.getByRole('table')
+    expect(table).toHaveClass('max-sm:block')
+    expect(within(table).getAllByRole('rowgroup')[0]).toHaveClass('max-sm:hidden')
+    for (const row of within(table).getAllByRole('row').slice(1)) {
+      // Wrapping, so large counts push the actions onto a line of their own rather than off the screen.
+      expect(row).toHaveClass('max-sm:flex', 'max-sm:flex-wrap')
+      // With the column headers hidden, the counts say what they count.
+      expect(within(row).getByText(/^transactions?$/)).not.toHaveClass('sr-only')
+      expect(within(row).getByText('rules')).not.toHaveClass('sr-only')
+      expect(within(row).getByRole('button', { name: 'Edit' })).toBeInTheDocument()
+      expect(within(row).getByRole('button', { name: 'Delete' })).toBeInTheDocument()
+    }
+    const page = screen.getByRole('heading', { name: 'Categories' }).closest('section')!
+    expect(page.querySelector('[class*="overflow-x-auto"], [class*="min-w-"]:not([class*="min-w-0"])')).toBeNull()
   })
 
   it('adds a Category, lists it by name after the Built-in Categories and offers it on the Rules page', async () => {
@@ -1371,10 +1430,10 @@ describe('Categories page', () => {
     expect(posted).toEqual({ name: 'Fitness', description: 'Gym and sports.' })
     expect(await screen.findByRole('status')).toHaveTextContent('Category added.')
     expect(await listedRows()).toEqual([
-      ['Groceries Built-in', 'All groceries.', '12', '3'],
-      ['Other Built-in', "Costs that don't belong in any other category.", '1', '0'],
-      ['Fitness', 'Gym and sports.', '0', '0'],
-      ['Health', 'Pharmacy etc.', '0', '0'],
+      ['Groceries Built-in', 'All groceries.', '12 transactions', '3 rules'],
+      ['Other Built-in', "Costs that don't belong in any other category.", '1 transaction', '0 rules'],
+      ['Fitness', 'Gym and sports.', '0 transactions', '0 rules'],
+      ['Health', 'Pharmacy etc.', '0 transactions', '0 rules'],
     ])
     expect(screen.getByLabelText('Name')).toHaveValue('')
     expect(screen.getByLabelText('Description')).toHaveValue('')
@@ -1458,7 +1517,7 @@ describe('Categories page', () => {
     const health = { id: 7, name: 'Health', description: 'Pharmacy etc.', builtIn: false, transactionCount: 0, ruleCount: 0 }
 
     function categoryRow(name: string) {
-      return screen.getByRole('row', { name: new RegExp(`^${name}`) })
+      return screen.getByRole('row', { name: new RegExp(`\\b${name}\\b`) })
     }
 
     it('offers delete only on Categories that are not Built-in, showing it disabled on the rest', async () => {
@@ -1496,7 +1555,7 @@ describe('Categories page', () => {
         'Category deleted. 0 transactions changed category.',
       )
       expect(screen.queryByRole('combobox')).not.toBeInTheDocument()
-      expect(screen.queryByRole('row', { name: /^Health/ })).not.toBeInTheDocument()
+      expect(screen.queryByRole('row', { name: /Health/ })).not.toBeInTheDocument()
     })
 
     it('asks for a replacement when the Category is in use, and moves it there', async () => {
@@ -1531,8 +1590,8 @@ describe('Categories page', () => {
         'Category deleted. 3 transactions changed category.',
       )
       expect(await listedRows()).toEqual([
-        ['Groceries Built-in', 'All groceries.', '12', '3'],
-        ['Other Built-in', "Costs that don't belong in any other category.", '4', '2'],
+        ['Groceries Built-in', 'All groceries.', '12 transactions', '3 rules'],
+        ['Other Built-in', "Costs that don't belong in any other category.", '4 transactions', '2 rules'],
       ])
     })
 
@@ -1578,8 +1637,8 @@ describe('Categories page', () => {
       // Reloaded, since the remaining rules may have given its Transactions to other Categories.
       await waitFor(async () =>
         expect(await listedRows()).toEqual([
-          ['Groceries Built-in', 'All groceries.', '13', '3'],
-          ['Other Built-in', "Costs that don't belong in any other category.", '1', '0'],
+          ['Groceries Built-in', 'All groceries.', '13 transactions', '3 rules'],
+          ['Other Built-in', "Costs that don't belong in any other category.", '1 transaction', '0 rules'],
         ]),
       )
     })
@@ -1648,7 +1707,7 @@ describe('Categories page', () => {
       await user.click(within(categoryRow('Health')).getByRole('button', { name: 'Confirm delete' }))
 
       expect(await screen.findByRole('status')).toHaveTextContent('The category was already deleted.')
-      expect(screen.queryByRole('row', { name: /^Health/ })).not.toBeInTheDocument()
+      expect(screen.queryByRole('row', { name: /Health/ })).not.toBeInTheDocument()
       expect(screen.queryByRole('alert')).not.toBeInTheDocument()
     })
 
@@ -1719,10 +1778,10 @@ describe('Categories page', () => {
       expect(edited).toEqual({ id: 7, body: { name: 'Wellness', description: 'Pharmacy, gym etc.' } })
       expect(await screen.findByRole('status')).toHaveTextContent('Category updated.')
       expect(await listedRows()).toEqual([
-        ['Groceries Built-in', 'All groceries.', '12', '3'],
-        ['Other Built-in', "Costs that don't belong in any other category.", '1', '0'],
-        ['Travel', 'All travel.', '0', '0'],
-        ['Wellness', 'Pharmacy, gym etc.', '4', '2'],
+        ['Groceries Built-in', 'All groceries.', '12 transactions', '3 rules'],
+        ['Other Built-in', "Costs that don't belong in any other category.", '1 transaction', '0 rules'],
+        ['Travel', 'All travel.', '0 transactions', '0 rules'],
+        ['Wellness', 'Pharmacy, gym etc.', '4 transactions', '2 rules'],
       ])
       expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument()
     })
@@ -1757,7 +1816,7 @@ describe('Categories page', () => {
       await user.type(row.getByLabelText('Name'), ' extra')
       await user.click(row.getByRole('button', { name: 'Cancel' }))
 
-      expect(categoryRow(/Health/)).toHaveTextContent('HealthPharmacy etc.42')
+      expect(categoryRow(/Health/)).toHaveTextContent('HealthPharmacy etc.4 transactions2 rules')
       expect(fetchMock).not.toHaveBeenCalledWith('/api/categories/7', expect.anything())
     })
 
@@ -1860,6 +1919,112 @@ describe('Rules page', () => {
       ['kiwi', 'Groceries'],
       ['overføring mellom egne kontoer', 'Other'],
     ])
+    expect(screen.getAllByRole('columnheader').map((header) => header.textContent)).toEqual([
+      'Keyword',
+      'Category',
+      'Actions',
+    ])
+  })
+
+  // The swatch beside a rule's Category, as a CSS colour.
+  function categorySwatch(keyword: string, category: string) {
+    return within(ruleRow(keyword)).getByRole('img', { name: `${category} colour` }).style.backgroundColor
+  }
+
+  it("shows each rule's Category with a swatch in the Category's colour", async () => {
+    categoriesServed = [{ ...categories[0], colour: '#123456' }, { ...categories[1], colour: '#abcdef' }]
+    await openRulesPage()
+
+    expect(categorySwatch('kiwi', 'Groceries')).toBe('rgb(18, 52, 86)')
+    expect(categorySwatch('overføring mellom egne kontoer', 'Other')).toBe('rgb(171, 205, 239)')
+  })
+
+  it('draws a dark Category lighter in Dark, in the same colour as the Dashboard draws it', async () => {
+    localStorage.setItem('appearance', 'dark')
+    categoriesServed = [{ ...categories[0], colour: '#104281' }, categories[1]]
+    months = [{ year: 2026, month: 9 }]
+    handleSpending = () => Response.json({ total: 120, slices: [{ categoryId: 1, amount: 120 }] })
+    const user = userEvent.setup()
+    await renderApp()
+    const legendRow = await within(screen.getByRole('region', { name: 'Spending' })).findByRole('row', {
+      name: /^Groceries/,
+    })
+    const onDashboard = (legendRow.querySelector('[aria-hidden="true"]') as HTMLElement).style.backgroundColor
+
+    await user.click(screen.getByRole('button', { name: 'Rules' }))
+    await screen.findByRole('cell', { name: 'kiwi' })
+
+    const brightness = (colour: string) => colour.match(/\d+/g)!.reduce((sum, channel) => sum + Number(channel), 0)
+    expect(brightness(categorySwatch('kiwi', 'Groceries'))).toBeGreaterThan(brightness('rgb(16, 66, 129)'))
+    expect(categorySwatch('kiwi', 'Groceries')).toBe(onDashboard)
+  })
+
+  it('lists the rules by keyword in the Norwegian alphabet, whatever the browser language', async () => {
+    // An English browser, which would put Å with A and Ø with O.
+    const localeCompare = String.prototype.localeCompare
+    const english = vi
+      .spyOn(String.prototype, 'localeCompare')
+      .mockImplementation(function (
+        this: string,
+        that: string,
+        locales?: Intl.LocalesArgument,
+        options?: Intl.CollatorOptions,
+      ) {
+        return localeCompare.call(this, that, locales ?? 'en', options)
+      })
+    onTestFinished(() => english.mockRestore())
+    rules = [
+      { id: 5, keyword: 'zara', categoryId: 1, aiGenerated: false, isNew: false },
+      { id: 2, keyword: 'ørn', categoryId: 13, aiGenerated: false, isNew: false },
+      { id: 1, keyword: 'kiwi', categoryId: 1, aiGenerated: false, isNew: false },
+      { id: 4, keyword: 'åpent', categoryId: 13, aiGenerated: false, isNew: false },
+    ]
+    const user = await openRulesPage()
+
+    expect(keywords()).toEqual(['kiwi', 'zara', 'ørn', 'åpent'])
+
+    await user.type(screen.getByLabelText('Keyword'), 'ark')
+    await user.selectOptions(screen.getByLabelText('Category'), 'Groceries')
+    await user.click(screen.getByRole('button', { name: 'Add rule' }))
+    await screen.findByRole('status')
+
+    expect(keywords()).toEqual(['ark', 'kiwi', 'zara', 'ørn', 'åpent'])
+
+    const row = await startEditingKiwi(user)
+    await user.clear(row.getByLabelText('Keyword'))
+    await user.type(row.getByLabelText('Keyword'), 'æble')
+    await user.click(row.getByRole('button', { name: 'Save' }))
+    await screen.findByRole('cell', { name: 'æble' })
+
+    expect(keywords()).toEqual(['ark', 'zara', 'æble', 'ørn', 'åpent'])
+  })
+
+  it('stacks each rule as a phone shows its card: keyword and badges, then its Category, then its actions', async () => {
+    rules = [{ id: 3, keyword: 'café løkka', categoryId: 13, aiGenerated: true, isNew: true }]
+    const user = userEvent.setup()
+    await renderApp()
+    await user.click(screen.getByRole('button', { name: 'Rules' }))
+    const card = await screen.findByRole('row', { name: /^café løkka/ })
+
+    // On a phone the cells stack as a card in the order they come in.
+    const [keyword, category, actions] = within(card).getAllByRole('cell')
+    expect(keyword).toHaveTextContent('café løkka AI New')
+    expect(within(category).getByRole('img', { name: 'Other colour' })).toBeInTheDocument()
+    expect(category).toHaveTextContent('Other')
+    expect(within(actions).getAllByRole('button').map((button) => button.textContent)).toEqual(['Edit', 'Delete'])
+
+    // jsdom applies no media queries, so the phone layout is checked by its classes: the table, its
+    // body and each row become blocks and a stacked card, with the column headers hidden.
+    const table = screen.getByRole('table')
+    const [head, body] = within(table).getAllByRole('rowgroup')
+    expect(table).toHaveClass('max-sm:block')
+    expect(head).toHaveClass('max-sm:hidden')
+    expect(body).toHaveClass('max-sm:block')
+    expect(card).toHaveClass('max-sm:flex', 'max-sm:flex-col')
+    for (const cell of [keyword, category]) expect(cell).toHaveClass('max-sm:block')
+    // Nothing on the page is wider than the screen or scrolls sideways.
+    const page = screen.getByRole('heading', { name: 'Categorization Rules' }).closest('section')!
+    expect(page.querySelector('[class*="overflow-x-auto"], [class*="min-w-"]:not([class*="min-w-0"])')).toBeNull()
   })
 
   it('adds a rule and says how many transactions changed category', async () => {

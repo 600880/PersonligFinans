@@ -8,6 +8,10 @@ import {
   type CategoryFieldErrors,
   type DeleteCategoryChoice,
 } from '../lib/api'
+import { useIsDark } from '../lib/appearance'
+import { categoryColour } from '../lib/categoryColours'
+import { formatCount, plural } from '../lib/count'
+import { CategorySwatch } from './CategorySwatch'
 import { ErrorMessage, StatusMessage } from './Messages'
 
 // The API's order: the Built-in Categories first, kept in the order they were served (they can't
@@ -33,16 +37,53 @@ const inputClass = 'rounded-lg border border-slate-300 dark:border-slate-700 px-
 const smallButtonClass =
   'rounded-lg px-2 py-1 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:cursor-not-allowed disabled:text-slate-300 dark:disabled:text-slate-600'
 
+// On a phone each row is laid out as a card instead: the name and badge, then the description, then
+// the counts with the actions beside them. The row wraps, so on a narrow screen with large counts
+// the actions move under the counts rather than pushing the card wider than the screen.
+const rowClass =
+  'align-top max-sm:flex max-sm:flex-wrap max-sm:items-center max-sm:gap-x-4 max-sm:gap-y-1.5 max-sm:px-4 max-sm:py-3'
+const nameCellClass = 'py-3 pr-3 pl-4 max-sm:basis-full max-sm:min-w-0 max-sm:p-0'
+const descriptionCellClass = 'py-3 pr-3 max-sm:basis-full max-sm:min-w-0 max-sm:p-0 max-sm:wrap-anywhere'
+const transactionCountCellClass = 'py-3 pl-3 text-right whitespace-nowrap tabular-nums max-sm:p-0 max-sm:text-left'
+const ruleCountCellClass = 'py-3 pl-3 text-right whitespace-nowrap tabular-nums max-sm:p-0 max-sm:text-left'
+const actionsCellClass = 'py-2 pr-4 pl-3 text-right whitespace-nowrap max-sm:ml-auto max-sm:p-0'
+// A delete waiting for its choice takes a line of its own under the counts on a phone.
+const confirmingActionsCellClass =
+  'py-2 pr-4 pl-3 text-right whitespace-nowrap max-sm:basis-full max-sm:p-0 max-sm:pt-1 max-sm:text-left max-sm:whitespace-normal'
+
 function BuiltInBadge() {
   return (
     <>
       {' '}
       <span
         title="Built-in Category: can't be renamed or deleted"
-        className="ml-1 rounded bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 text-xs font-medium text-slate-600 dark:text-slate-400"
+        className="shrink-0 rounded-md bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 text-xs font-medium text-slate-600 dark:text-slate-400"
       >
         Built-in
       </span>
+    </>
+  )
+}
+
+// The swatch, in the colour the Dashboard draws the Category in, name and Built-in badge that start
+// a Category's row. The spaces keep them apart when read out.
+function CategoryLabel({ category, colour }: { category: Category; colour: string }) {
+  return (
+    <span className="flex items-center gap-2">
+      <CategorySwatch colour={colour} name={category.name} />{' '}
+      <span className="font-medium sm:whitespace-nowrap max-sm:min-w-0 max-sm:wrap-anywhere">{category.name}</span>
+      {category.builtIn && <BuiltInBadge />}
+    </span>
+  )
+}
+
+// A count with what it counts beside it. The noun is shown on a phone, where the column headers are
+// hidden, and read out everywhere.
+function Count({ count, noun }: { count: number; noun: string }) {
+  return (
+    <>
+      {formatCount(count)}{' '}
+      <span className="text-slate-500 dark:text-slate-400 sm:sr-only">{plural(count, noun)}</span>
     </>
   )
 }
@@ -62,6 +103,7 @@ function isInUse(category: Category) {
 // Deleting one in use asks for a choice: a replacement Category, which its Transactions and rules
 // move to, or to delete its rules, leaving its Transactions to the remaining rules, or Uncategorized.
 export function CategoriesPage() {
+  const dark = useIsDark()
   const [categories, setCategories] = useState<Category[]>([])
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
@@ -265,88 +307,99 @@ export function CategoriesPage() {
         <StatusMessage message={statusMessage} className="mt-3" />
       )}
 
-      {/* On a phone the table scrolls sideways on its own, laid out no narrower than a small screen.
-          Relative, so the hidden column label scrolls with it rather than widening the page. */}
-      <div className="mt-2 max-sm:relative max-sm:overflow-x-auto">
-        <table className="w-full text-left text-sm max-sm:min-w-xl">
-          <thead className="text-slate-500 dark:text-slate-400">
-            <tr>
-              <th className="py-2 font-medium">Name</th>
-              <th className="py-2 font-medium">Description</th>
-              <th className="py-2 pl-1.25 text-right font-medium">Transactions</th>
-              <th className="py-2 pl-1.25 text-right font-medium">Rules</th>
-              <th className="py-2 pl-4">
-                <span className="sr-only">Actions</span>
-              </th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-200 dark:divide-slate-800 text-slate-900 dark:text-slate-100">
-            {categories.map((category) =>
-              edit?.id === category.id ? (
-                <tr key={category.id} className="align-top">
-                  <td className="py-2 pr-3">
-                    {category.builtIn ? (
-                      <div className="py-2 whitespace-nowrap">
-                        {category.name}
-                        <BuiltInBadge />
-                      </div>
-                    ) : (
+      {categories.length > 0 && (
+        <div className="mt-3 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm">
+          {/* On a phone each row is a card instead, its column headers hidden, so the list never runs
+              wider than the screen. */}
+          <table className="w-full text-left text-sm max-sm:block">
+            <thead className="border-b border-slate-200 dark:border-slate-800 text-xs text-slate-500 dark:text-slate-400 max-sm:hidden">
+              <tr>
+                <th className="py-2.5 pr-3 pl-4 font-medium">Name</th>
+                <th className="py-2.5 pr-3 font-medium">Description</th>
+                <th className="py-2.5 pl-3 text-right font-medium">Transactions</th>
+                <th className="py-2.5 pl-3 text-right font-medium">Rules</th>
+                <th className="py-2.5 pr-4 pl-3">
+                  <span className="sr-only">Actions</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-200 dark:divide-slate-800 text-slate-900 dark:text-slate-100 max-sm:block">
+              {categories.map((category) =>
+                edit?.id === category.id ? (
+                  <tr key={category.id} className={rowClass}>
+                    <td className={nameCellClass}>
+                      {category.builtIn ? (
+                        <div className="py-2">
+                          <CategoryLabel category={category} colour={categoryColour(category.id, categories, dark)} />
+                        </div>
+                      ) : (
+                        <div className="flex items-start gap-2">
+                          <span className="flex h-9.5 items-center">
+                            <CategorySwatch colour={categoryColour(category.id, categories, dark)} name={category.name} />
+                          </span>
+                          <div className="flex min-w-0 flex-1 flex-col gap-1">
+                            <input
+                              aria-label="Name"
+                              value={edit.name}
+                              onChange={(event) => setEdit({ ...edit, name: event.target.value })}
+                              aria-describedby={`category-${category.id}-name-error`}
+                              className={`${inputClass} w-full min-w-0`}
+                            />
+                            <span id={`category-${category.id}-name-error`} className="text-xs text-red-600 dark:text-red-300">
+                              {edit.fieldErrors.name}
+                            </span>
+                          </div>
+                        </div>
+                      )}
+                    </td>
+                    <td className={descriptionCellClass}>
                       <div className="flex flex-col gap-1">
                         <input
-                          aria-label="Name"
-                          value={edit.name}
-                          onChange={(event) => setEdit({ ...edit, name: event.target.value })}
-                          aria-describedby={`category-${category.id}-name-error`}
-                          className={inputClass}
+                          aria-label="Description"
+                          value={edit.description}
+                          onChange={(event) => setEdit({ ...edit, description: event.target.value })}
+                          aria-describedby={`category-${category.id}-description-error`}
+                          className={`${inputClass} w-full min-w-0`}
                         />
-                        <span id={`category-${category.id}-name-error`} className="text-xs text-red-600 dark:text-red-300">
-                          {edit.fieldErrors.name}
+                        <span id={`category-${category.id}-description-error`} className="text-xs text-red-600 dark:text-red-300">
+                          {edit.fieldErrors.description}
                         </span>
                       </div>
-                    )}
-                  </td>
-                  <td className="py-2 pr-3">
-                    <div className="flex flex-col gap-1">
-                      <input
-                        aria-label="Description"
-                        value={edit.description}
-                        onChange={(event) => setEdit({ ...edit, description: event.target.value })}
-                        aria-describedby={`category-${category.id}-description-error`}
-                        className={inputClass}
-                      />
-                      <span id={`category-${category.id}-description-error`} className="text-xs text-red-600 dark:text-red-300">
-                        {edit.fieldErrors.description}
-                      </span>
-                    </div>
-                  </td>
-                  <td className="py-2 pl-1.25 text-right tabular-nums">{category.transactionCount}</td>
-                  <td className="py-2 pl-1.25 text-right tabular-nums">{category.ruleCount}</td>
-                  <td className="py-2 pl-4 text-right whitespace-nowrap">
-                    <button
-                      type="button"
-                      disabled={isSaving}
-                      onClick={() => handleSave(edit)}
-                      className={smallButtonClass}
-                    >
-                      Save
-                    </button>
-                    <button type="button" onClick={cancelEdit} className={smallButtonClass}>
-                      Cancel
-                    </button>
-                  </td>
-                </tr>
-              ) : (
-                <tr key={category.id} className="align-top">
-                  <td className="py-2 pr-3 whitespace-nowrap">
-                    {category.name}
-                    {category.builtIn && <BuiltInBadge />}
-                  </td>
-                  <td className="py-2 pr-3 text-slate-600 dark:text-slate-400">{category.description}</td>
-                  <td className="py-2 pl-1.25 text-right tabular-nums">{category.transactionCount}</td>
-                  <td className="py-2 pl-1.25 text-right tabular-nums">{category.ruleCount}</td>
-                  <td className="py-2 pl-4 text-right whitespace-nowrap">
+                    </td>
+                    <td className={`${transactionCountCellClass} sm:pt-5`}>
+                      <Count count={category.transactionCount} noun="transaction" />
+                    </td>
+                    <td className={`${ruleCountCellClass} sm:pt-5`}>
+                      <Count count={category.ruleCount} noun="rule" />
+                    </td>
+                    <td className={`${actionsCellClass} sm:pt-4`}>
+                      <button
+                        type="button"
+                        disabled={isSaving}
+                        onClick={() => handleSave(edit)}
+                        className={smallButtonClass}
+                      >
+                        Save
+                      </button>
+                      <button type="button" onClick={cancelEdit} className={smallButtonClass}>
+                        Cancel
+                      </button>
+                    </td>
+                  </tr>
+                ) : (
+                  <tr key={category.id} className={rowClass}>
+                    <td className={nameCellClass}>
+                      <CategoryLabel category={category} colour={categoryColour(category.id, categories, dark)} />
+                    </td>
+                    <td className={`${descriptionCellClass} text-slate-600 dark:text-slate-400`}>{category.description}</td>
+                    <td className={transactionCountCellClass}>
+                      <Count count={category.transactionCount} noun="transaction" />
+                    </td>
+                    <td className={ruleCountCellClass}>
+                      <Count count={category.ruleCount} noun="rule" />
+                    </td>
                     {confirmingDeleteId === category.id ? (
-                      <>
+                      <td className={confirmingActionsCellClass}>
                         {isInUse(category) ? (
                           <fieldset className="mr-1 inline-flex flex-col items-start gap-1 text-left whitespace-normal text-slate-700 dark:text-slate-300">
                             <legend className="mb-1">Delete {category.name}?</legend>
@@ -368,7 +421,7 @@ export function CategoriesPage() {
                                   setReplacementId(event.target.value)
                                   setDeleteMode('moveToReplacement')
                                 }}
-                                className="rounded-lg border border-slate-300 dark:border-slate-700 px-2 py-1"
+                                className="max-w-full rounded-lg border border-slate-300 dark:border-slate-700 px-2 py-1"
                               >
                                 <option value="">Choose a category</option>
                                 {categories
@@ -404,9 +457,9 @@ export function CategoriesPage() {
                         <button type="button" onClick={() => setConfirmingDeleteId(null)} className={smallButtonClass}>
                           Cancel
                         </button>
-                      </>
+                      </td>
                     ) : (
-                      <>
+                      <td className={actionsCellClass}>
                         <button type="button" onClick={() => startEdit(category)} className={smallButtonClass}>
                           Edit
                         </button>
@@ -420,15 +473,15 @@ export function CategoriesPage() {
                         >
                           Delete
                         </button>
-                      </>
+                      </td>
                     )}
-                  </td>
-                </tr>
-              ),
-            )}
-          </tbody>
-        </table>
-      </div>
+                  </tr>
+                ),
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
     </section>
   )
 }
