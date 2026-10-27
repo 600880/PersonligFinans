@@ -31,6 +31,7 @@ import { inFolderOrder } from '../lib/folders'
 import { currentMonth, MONTH_NAMES } from '../lib/month'
 import { periodLabel, periodValue, type Period } from '../lib/period'
 import { firstMonthWithTransactions, monthsOfQuarter } from '../lib/quarter'
+import { latestYearWithTransactions } from '../lib/year'
 import { BookmarkAddedPopup } from './BookmarkAddedPopup'
 import { FolderDropdown, FolderNameForm } from './FolderDropdown'
 import { ErrorMessage, StatusMessage } from './Messages'
@@ -73,20 +74,30 @@ interface LoadedPeriod {
   transactions: Transaction[]
 }
 
-// Where the page opens when reached from the Dashboard, filtered to a Category, to Uncategorized
-// when categoryId is null, or to all Categories: a month, a whole year, or a quarter's first month
-// with Transactions in that Category. A quarter looks only at its months among `allowedMonths`, such
-// as the months inside the trend's Span, or at all three when not given.
-export interface TransactionsTarget {
-  period: Period
-  categoryId: number | null | 'all'
-  allowedMonths?: TransactionMonth[]
-}
+// Where the page opens when reached from another page, filtered to a Category, to Uncategorized
+// when categoryId is null, or to all Categories. From the Dashboard: a month, a whole year, or a
+// quarter's first month with Transactions in that Category. A quarter looks only at its months among
+// `allowedMonths`, such as the months inside the trend's Span, or at all three when not given. From a
+// Category's Transactions count: the latest whole year with Transactions in that Category.
+export type TransactionsTarget =
+  | { period: Period; categoryId: number | null | 'all'; allowedMonths?: TransactionMonth[] }
+  | { period: 'latestYearWithTransactions'; categoryId: number | null }
 
-// The month or year a target opens on; for a quarter, a month found in its year's Transactions.
-// Null without a target.
-async function openedPeriod(target?: TransactionsTarget): Promise<YearOrMonth | null> {
+// The month or year a target opens on: for a quarter, a month found in its year's Transactions; for
+// the latest year, one found in the years with Transactions, else the latest of them. Null without a
+// target.
+async function openedPeriod(
+  target: TransactionsTarget | undefined,
+  months: Promise<TransactionMonth[]>,
+): Promise<YearOrMonth | null> {
   if (!target) return null
+  if (target.period === 'latestYearWithTransactions') {
+    const withTransactions = await months
+    const found = await latestYearWithTransactions(withTransactions, categoryFilterOf(target.categoryId), (year) =>
+      fetchTransactions({ granularity: 'year', year }),
+    )
+    return { granularity: 'year', year: found ?? (withTransactions[0] ?? currentMonth()).year }
+  }
   const { period } = target
   if (period.granularity !== 'quarter') return period
   const transactions = await fetchTransactions({ granularity: 'year', year: period.year })
@@ -155,7 +166,8 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
 
   useEffect(() => {
     let ignore = false
-    Promise.all([fetchCategories(), fetchTransactionMonths(), openedPeriod(openingTarget)])
+    const months = fetchTransactionMonths()
+    Promise.all([fetchCategories(), months, openedPeriod(openingTarget, months)])
       .then(([loadedCategories, loadedMonths, opened]) => {
         if (ignore) return
         setCategories(loadedCategories)

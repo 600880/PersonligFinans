@@ -147,7 +147,8 @@ function SignedInApp({ user, onSignedOut }: SignedInAppProps) {
   // Bumped after new Transactions are saved, and on coming back to home, so the Dashboard reloads in
   // place.
   const [dashboardVersion, setDashboardVersion] = useState(0)
-  // Where the Transactions page opens when reached from the Dashboard; undefined from the header.
+  // Where the Transactions page opens when reached from the Dashboard or the Categories page;
+  // undefined from the header.
   const [transactionsTarget, setTransactionsTarget] = useState<TransactionsTarget | undefined>()
   const fileInputRef = useRef<HTMLInputElement>(null)
   const receiptInputRef = useRef<HTMLInputElement>(null)
@@ -381,7 +382,7 @@ function SignedInApp({ user, onSignedOut }: SignedInAppProps) {
         </main>
       ) : view === 'categories' ? (
         <main className="flex flex-col items-center px-6 py-10 max-sm:px-4">
-          <CategoriesPage />
+          <CategoriesPage onOpenTransactions={openTransactions} />
         </main>
       ) : view === 'rules' ? (
         <main className="flex flex-col items-center px-6 py-10 max-sm:px-4">

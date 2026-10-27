@@ -1295,6 +1295,12 @@ describe('Categories page', () => {
     return user
   }
 
+  // Opens the dialog for adding a Category, with the Add category button above the list.
+  async function openAddDialog(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(screen.getByRole('button', { name: 'Add category' }))
+    return within(screen.getByRole('dialog', { name: 'Add category' }))
+  }
+
   // Each listed Category's cells, in the order shown, as their text reads.
   async function listedRows() {
     await screen.findByText('All groceries.')
@@ -1422,21 +1428,33 @@ describe('Categories page', () => {
     }
     const user = await openCategoriesPage()
     await listedRows()
+    // Nothing to fill in on the page itself: the button opens the dialog.
+    expect(screen.queryByLabelText('Name')).not.toBeInTheDocument()
 
-    await user.type(screen.getByLabelText('Name'), '  Fitness ')
-    await user.type(screen.getByLabelText('Description'), ' Gym and sports.  ')
-    await user.click(screen.getByRole('button', { name: 'Add category' }))
+    const dialog = await openAddDialog(user)
+    expect(dialog.getByLabelText('Name')).toHaveValue('')
+    expect(dialog.getByLabelText('Name')).toHaveFocus()
+    expect(dialog.getByLabelText('Description')).toHaveValue('')
+    await user.type(dialog.getByLabelText('Name'), '  Fitness ')
+    await user.type(dialog.getByLabelText('Description'), ' Gym and sports.  ')
+    await user.click(dialog.getByRole('button', { name: 'Save' }))
 
     expect(posted).toEqual({ name: 'Fitness', description: 'Gym and sports.' })
     expect(await screen.findByRole('status')).toHaveTextContent('Category added.')
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Add category' })).toHaveFocus()
     expect(await listedRows()).toEqual([
       ['Groceries Built-in', 'All groceries.', '12 transactions', '3 rules'],
       ['Other Built-in', "Costs that don't belong in any other category.", '1 transaction', '0 rules'],
       ['Fitness', 'Gym and sports.', '0 transactions', '0 rules'],
       ['Health', 'Pharmacy etc.', '0 transactions', '0 rules'],
     ])
-    expect(screen.getByLabelText('Name')).toHaveValue('')
-    expect(screen.getByLabelText('Description')).toHaveValue('')
+
+    // The next Category starts from empty fields again.
+    const next = await openAddDialog(user)
+    expect(next.getByLabelText('Name')).toHaveValue('')
+    expect(next.getByLabelText('Description')).toHaveValue('')
+    await user.click(next.getByRole('button', { name: 'Cancel' }))
 
     await user.click(screen.getByRole('button', { name: 'Rules' }))
     expect(await screen.findByRole('option', { name: 'Fitness' })).toBeInTheDocument()
@@ -1454,9 +1472,10 @@ describe('Categories page', () => {
     const user = await openCategoriesPage()
     await listedRows()
 
-    await user.type(screen.getByLabelText('Name'), 'Ære')
-    await user.type(screen.getByLabelText('Description'), 'Gifts.')
-    await user.click(screen.getByRole('button', { name: 'Add category' }))
+    const dialog = await openAddDialog(user)
+    await user.type(dialog.getByLabelText('Name'), 'Ære')
+    await user.type(dialog.getByLabelText('Description'), 'Gifts.')
+    await user.click(dialog.getByRole('button', { name: 'Save' }))
 
     expect(await screen.findByRole('status')).toHaveTextContent('Category added.')
     expect((await listedRows()).map((cells) => cells[0])).toEqual([
@@ -1468,7 +1487,7 @@ describe('Categories page', () => {
     ])
   })
 
-  it("shows the server's field errors and keeps the input", async () => {
+  it("shows the server's field errors beside their fields, keeping the dialog open with the input", async () => {
     handleAddCategory = () =>
       Response.json(
         {
@@ -1482,28 +1501,58 @@ describe('Categories page', () => {
     const user = await openCategoriesPage()
     await listedRows()
 
-    await user.type(screen.getByLabelText('Name'), 'groceries')
-    await user.click(screen.getByRole('button', { name: 'Add category' }))
+    const dialog = await openAddDialog(user)
+    await user.type(dialog.getByLabelText('Name'), 'groceries')
+    await user.click(dialog.getByRole('button', { name: 'Save' }))
 
-    expect(await screen.findByText("A category named 'Groceries' already exists.")).toBeInTheDocument()
-    expect(screen.getByText('Description is required.')).toBeInTheDocument()
-    expect(screen.getByLabelText('Name')).toHaveValue('groceries')
+    const nameError = await dialog.findByText("A category named 'Groceries' already exists.")
+    expect(dialog.getByLabelText('Name')).toHaveAccessibleDescription(nameError.textContent!)
+    expect(dialog.getByLabelText('Description')).toHaveAccessibleDescription('Description is required.')
+    expect(dialog.getByLabelText('Name')).toHaveValue('groceries')
     expect(screen.getAllByRole('row')).toHaveLength(3)
   })
 
-  it('shows a general error when the server cannot be reached', async () => {
+  it('shows a general error in the dialog when the server cannot be reached', async () => {
     handleAddCategory = () => {
       throw new TypeError('Failed to fetch')
     }
     const user = await openCategoriesPage()
     await listedRows()
 
-    await user.type(screen.getByLabelText('Name'), 'Hobby')
-    await user.type(screen.getByLabelText('Description'), 'Hobby supplies.')
-    await user.click(screen.getByRole('button', { name: 'Add category' }))
+    const dialog = await openAddDialog(user)
+    await user.type(dialog.getByLabelText('Name'), 'Hobby')
+    await user.type(dialog.getByLabelText('Description'), 'Hobby supplies.')
+    await user.click(dialog.getByRole('button', { name: 'Save' }))
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('Could not reach the server.')
-    expect(screen.getByLabelText('Name')).toHaveValue('Hobby')
+    expect(await dialog.findByRole('alert')).toHaveTextContent('Could not reach the server.')
+    expect(dialog.getByLabelText('Name')).toHaveValue('Hobby')
+  })
+
+  it('discards what was typed, and any errors, when the dialog is closed by Cancel or by Escape', async () => {
+    handleAddCategory = () => Response.json({ errors: { name: ['Name is required.'] } }, { status: 400 })
+    const user = await openCategoriesPage()
+    await listedRows()
+
+    let dialog = await openAddDialog(user)
+    await user.type(dialog.getByLabelText('Description'), 'Hobby supplies.')
+    await user.click(dialog.getByRole('button', { name: 'Save' }))
+    await dialog.findByText('Name is required.')
+    await user.click(dialog.getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Add category' })).toHaveFocus()
+
+    dialog = await openAddDialog(user)
+    expect(dialog.getByLabelText('Description')).toHaveValue('')
+    expect(dialog.queryByText('Name is required.')).not.toBeInTheDocument()
+    await user.type(dialog.getByLabelText('Name'), 'Hobby')
+    await user.keyboard('{Escape}')
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Add category' })).toHaveFocus()
+
+    dialog = await openAddDialog(user)
+    expect(dialog.getByLabelText('Name')).toHaveValue('')
+    expect(fetchMock.mock.calls.filter(([url, init]) => url === '/api/categories' && init?.method === 'POST')).toHaveLength(1)
+    expect(screen.getAllByRole('row')).toHaveLength(3)
   })
 
   it('says when the Categories could not be loaded', async () => {
@@ -1520,6 +1569,12 @@ describe('Categories page', () => {
       return screen.getByRole('row', { name: new RegExp(`\\b${name}\\b`) })
     }
 
+    // Opens the named Category's delete dialog from its row's Delete button.
+    async function openDeleteDialog(user: ReturnType<typeof userEvent.setup>, name: string) {
+      await user.click(within(categoryRow(name)).getByRole('button', { name: 'Delete' }))
+      return within(screen.getByRole('dialog', { name: `Delete ${name}?` }))
+    }
+
     it('offers delete only on Categories that are not Built-in, showing it disabled on the rest', async () => {
       categoriesServed = [categories[0], health, categories[1]]
       await openCategoriesPage()
@@ -1533,7 +1588,7 @@ describe('Categories page', () => {
       }
     })
 
-    it('asks for confirmation, then deletes the Category and removes its row', async () => {
+    it('asks for confirmation in a dialog, then deletes the Category and removes its row', async () => {
       categoriesServed = [categories[0], health]
       let deletedId: number | undefined
       handleDeleteCategory = (id) => {
@@ -1543,19 +1598,41 @@ describe('Categories page', () => {
       const user = await openCategoriesPage()
       await listedRows()
 
-      await user.click(within(categoryRow('Health')).getByRole('button', { name: 'Delete' }))
+      const dialog = await openDeleteDialog(user, 'Health')
 
       expect(deletedId).toBeUndefined()
-      expect(within(categoryRow('Health')).getByText('Delete Health?')).toBeInTheDocument()
+      // Nothing uses it, so there is nothing to choose.
+      expect(dialog.queryByRole('radio')).not.toBeInTheDocument()
+      expect(dialog.queryByRole('combobox')).not.toBeInTheDocument()
+      expect(within(categoryRow('Health')).queryByRole('button', { name: 'Confirm delete' })).not.toBeInTheDocument()
 
-      await user.click(within(categoryRow('Health')).getByRole('button', { name: 'Confirm delete' }))
+      await user.click(dialog.getByRole('button', { name: 'Confirm delete' }))
 
       expect(deletedId).toBe(7)
       expect(await screen.findByRole('status')).toHaveTextContent(
         'Category deleted. 0 transactions changed category.',
       )
-      expect(screen.queryByRole('combobox')).not.toBeInTheDocument()
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
       expect(screen.queryByRole('row', { name: /Health/ })).not.toBeInTheDocument()
+    })
+
+    it('says how many transactions and rules a Category in use has, as the question its choices answer', async () => {
+      categoriesServed = [
+        categories[0],
+        { ...health, transactionCount: 1032, ruleCount: 1 },
+        { ...health, id: 8, name: 'Hobby', transactionCount: 0, ruleCount: 2 },
+      ]
+      const user = await openCategoriesPage()
+      await listedRows()
+
+      let dialog = await openDeleteDialog(user, 'Health')
+      // The thousands apart as nb-NO writes them, with a non-breaking space.
+      const choices = dialog.getByRole('group', { name: 'Health has 1 032 transactions and 1 rule.' })
+      expect(within(choices).getAllByRole('radio')).toHaveLength(2)
+      await user.click(dialog.getByRole('button', { name: 'Cancel' }))
+
+      dialog = await openDeleteDialog(user, 'Hobby')
+      expect(dialog.getByRole('group', { name: 'Hobby has 0 transactions and 2 rules.' })).toBeInTheDocument()
     })
 
     it('asks for a replacement when the Category is in use, and moves it there', async () => {
@@ -1568,27 +1645,27 @@ describe('Categories page', () => {
       const user = await openCategoriesPage()
       await listedRows()
 
-      await user.click(within(categoryRow('Health')).getByRole('button', { name: 'Delete' }))
+      const dialog = await openDeleteDialog(user, 'Health')
 
-      const replacement = within(categoryRow('Health')).getByRole('combobox', {
-        name: 'Move its transactions and rules to',
-      })
+      // Every other Category, never the one being deleted.
+      const replacement = dialog.getByRole('combobox', { name: 'Move its transactions and rules to' })
       expect(within(replacement).getAllByRole('option').map((option) => option.textContent)).toEqual([
         'Choose a category',
         'Groceries',
         'Other',
       ])
-      const confirm = within(categoryRow('Health')).getByRole('button', { name: 'Confirm delete' })
+      const confirm = dialog.getByRole('button', { name: 'Confirm delete' })
       expect(confirm).toBeDisabled()
 
       await user.selectOptions(replacement, 'Other')
-      expect(within(categoryRow('Health')).getByRole('radio', { name: 'Move its transactions and rules to' })).toBeChecked()
+      expect(dialog.getByRole('radio', { name: 'Move its transactions and rules to' })).toBeChecked()
       await user.click(confirm)
 
       expect(deleted).toEqual({ id: 7, query: 'replacementCategoryId=13' })
       expect(await screen.findByRole('status')).toHaveTextContent(
         'Category deleted. 3 transactions changed category.',
       )
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
       expect(await listedRows()).toEqual([
         ['Groceries Built-in', 'All groceries.', '12 transactions', '3 rules'],
         ['Other Built-in', "Costs that don't belong in any other category.", '4 transactions', '2 rules'],
@@ -1607,15 +1684,13 @@ describe('Categories page', () => {
       const user = await openCategoriesPage()
       await listedRows()
 
-      await user.click(within(categoryRow('Health')).getByRole('button', { name: 'Delete' }))
+      const dialog = await openDeleteDialog(user, 'Health')
 
-      const row = categoryRow('Health')
-      const choices = within(row).getByRole('group', { name: 'Delete Health?' })
-      const move = within(choices).getByRole('radio', { name: 'Move its transactions and rules to' })
-      const deleteRules = within(choices).getByRole('radio', {
+      const move = dialog.getByRole('radio', { name: 'Move its transactions and rules to' })
+      const deleteRules = dialog.getByRole('radio', {
         name: 'Delete its rules and leave its transactions Uncategorized unless another rule matches them',
       })
-      const confirm = within(row).getByRole('button', { name: 'Confirm delete' })
+      const confirm = dialog.getByRole('button', { name: 'Confirm delete' })
       expect(move).not.toBeChecked()
       expect(deleteRules).not.toBeChecked()
       expect(confirm).toBeDisabled()
@@ -1643,25 +1718,38 @@ describe('Categories page', () => {
       )
     })
 
-    it("shows the server's reason when the replacement is refused", async () => {
-      categoriesServed = [categories[0], { ...health, ruleCount: 1 }]
-      handleDeleteCategory = () =>
-        Response.json(
-          { status: 400, errors: { replacementCategoryId: ['The replacement Category does not exist.'] } },
-          { status: 400 },
-        )
+    it("shows the server's reason in the dialog when the replacement is refused, keeping the choice to change", async () => {
+      categoriesServed = [categories[0], { ...health, ruleCount: 1 }, categories[1]]
+      const replacements: string[] = []
+      handleDeleteCategory = (_id, query) => {
+        replacements.push(query.get('replacementCategoryId')!)
+        return replacements.length === 1
+          ? Response.json(
+              { status: 400, errors: { replacementCategoryId: ['The replacement Category does not exist.'] } },
+              { status: 400 },
+            )
+          : Response.json({ transactionsChanged: 0 })
+      }
       const user = await openCategoriesPage()
       await listedRows()
 
-      await user.click(within(categoryRow('Health')).getByRole('button', { name: 'Delete' }))
-      await user.selectOptions(within(categoryRow('Health')).getByRole('combobox'), 'Groceries')
-      await user.click(within(categoryRow('Health')).getByRole('button', { name: 'Confirm delete' }))
+      const dialog = await openDeleteDialog(user, 'Health')
+      await user.selectOptions(dialog.getByRole('combobox'), 'Groceries')
+      await user.click(dialog.getByRole('button', { name: 'Confirm delete' }))
 
-      expect(await screen.findByRole('alert')).toHaveTextContent('The replacement Category does not exist.')
-      expect(within(categoryRow('Health')).getByRole('button', { name: 'Delete' })).toBeInTheDocument()
+      expect(await dialog.findByRole('alert')).toHaveTextContent('The replacement Category does not exist.')
+      expect(dialog.getByRole('combobox')).toHaveDisplayValue('Groceries')
+      expect(categoryRow('Health')).toBeInTheDocument()
+
+      await user.selectOptions(dialog.getByRole('combobox'), 'Other')
+      await user.click(dialog.getByRole('button', { name: 'Confirm delete' }))
+
+      expect(replacements).toEqual(['1', '13'])
+      expect(await screen.findByRole('status')).toHaveTextContent('Category deleted. 0 transactions changed category.')
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
     })
 
-    it('keeps the Category when the confirmation is cancelled', async () => {
+    it('keeps the Category when the dialog is closed by Cancel or by Escape, giving the focus back to Delete', async () => {
       categoriesServed = [categories[0], health]
       let deleted = false
       handleDeleteCategory = () => {
@@ -1671,15 +1759,20 @@ describe('Categories page', () => {
       const user = await openCategoriesPage()
       await listedRows()
 
-      await user.click(within(categoryRow('Health')).getByRole('button', { name: 'Delete' }))
-      await user.click(within(categoryRow('Health')).getByRole('button', { name: 'Cancel' }))
+      const dialog = await openDeleteDialog(user, 'Health')
+      await user.click(dialog.getByRole('button', { name: 'Cancel' }))
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+      expect(within(categoryRow('Health')).getByRole('button', { name: 'Delete' })).toHaveFocus()
+
+      await openDeleteDialog(user, 'Health')
+      await user.keyboard('{Escape}')
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+      expect(within(categoryRow('Health')).getByRole('button', { name: 'Delete' })).toHaveFocus()
 
       expect(deleted).toBe(false)
-      expect(within(categoryRow('Health')).getByRole('button', { name: 'Delete' })).toBeInTheDocument()
-      expect(screen.queryByText('Delete Health?')).not.toBeInTheDocument()
     })
 
-    it("shows the server's reason and keeps the row when the delete is refused", async () => {
+    it("shows the server's reason in the dialog and keeps the row when the delete is refused", async () => {
       // Listed as unused, but something started using it since.
       categoriesServed = [categories[0], health]
       handleDeleteCategory = () =>
@@ -1690,11 +1783,13 @@ describe('Categories page', () => {
       const user = await openCategoriesPage()
       await listedRows()
 
-      await user.click(within(categoryRow('Health')).getByRole('button', { name: 'Delete' }))
-      await user.click(within(categoryRow('Health')).getByRole('button', { name: 'Confirm delete' }))
+      const dialog = await openDeleteDialog(user, 'Health')
+      await user.click(dialog.getByRole('button', { name: 'Confirm delete' }))
 
-      expect(await screen.findByRole('alert')).toHaveTextContent("Health is in use, so it can't be deleted.")
+      expect(await dialog.findByRole('alert')).toHaveTextContent("Health is in use, so it can't be deleted.")
+      await user.click(dialog.getByRole('button', { name: 'Cancel' }))
       expect(within(categoryRow('Health')).getByRole('button', { name: 'Delete' })).toBeInTheDocument()
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
     })
 
     it('removes a Category that was already deleted elsewhere', async () => {
@@ -1703,30 +1798,48 @@ describe('Categories page', () => {
       const user = await openCategoriesPage()
       await listedRows()
 
-      await user.click(within(categoryRow('Health')).getByRole('button', { name: 'Delete' }))
-      await user.click(within(categoryRow('Health')).getByRole('button', { name: 'Confirm delete' }))
+      const dialog = await openDeleteDialog(user, 'Health')
+      await user.click(dialog.getByRole('button', { name: 'Confirm delete' }))
 
       expect(await screen.findByRole('status')).toHaveTextContent('The category was already deleted.')
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
       expect(screen.queryByRole('row', { name: /Health/ })).not.toBeInTheDocument()
       expect(screen.queryByRole('alert')).not.toBeInTheDocument()
     })
 
-    it("clears the add form's errors once a delete succeeds", async () => {
-      categoriesServed = [categories[0], health]
-      handleAddCategory = () => Response.json({ errors: { name: ['Name is required.'] } }, { status: 400 })
+    it('opens afresh each time, with no choice made, no earlier error and no earlier message', async () => {
+      categoriesServed = [categories[0], { ...health, ruleCount: 1 }, { ...health, id: 8, name: 'Hobby' }]
+      handleDeleteCategory = (id) =>
+        id === 8
+          ? Response.json({ transactionsChanged: 0 })
+          : Response.json(
+              { status: 400, errors: { replacementCategoryId: ['The replacement Category does not exist.'] } },
+              { status: 400 },
+            )
       const user = await openCategoriesPage()
       await listedRows()
-      await user.click(screen.getByRole('button', { name: 'Add category' }))
-      await screen.findByText('Name is required.')
 
-      await user.click(within(categoryRow('Health')).getByRole('button', { name: 'Delete' }))
-      await user.click(within(categoryRow('Health')).getByRole('button', { name: 'Confirm delete' }))
-
+      // A message about an earlier delete goes once another starts.
+      let dialog = await openDeleteDialog(user, 'Hobby')
+      await user.click(dialog.getByRole('button', { name: 'Confirm delete' }))
       expect(await screen.findByRole('status')).toHaveTextContent('Category deleted.')
-      expect(screen.queryByText('Name is required.')).not.toBeInTheDocument()
+
+      dialog = await openDeleteDialog(user, 'Health')
+      expect(screen.getByRole('status')).toBeEmptyDOMElement()
+      await user.click(dialog.getByRole('radio', { name: /^Delete its rules/ }))
+      await user.selectOptions(dialog.getByRole('combobox'), 'Groceries')
+      await user.click(dialog.getByRole('button', { name: 'Confirm delete' }))
+      await dialog.findByRole('alert')
+      await user.click(dialog.getByRole('button', { name: 'Cancel' }))
+
+      dialog = await openDeleteDialog(user, 'Health')
+      expect(dialog.queryByRole('alert')).not.toBeInTheDocument()
+      expect(dialog.getByRole('combobox')).toHaveValue('')
+      for (const radio of dialog.getAllByRole('radio')) expect(radio).not.toBeChecked()
+      expect(dialog.getByRole('button', { name: 'Confirm delete' })).toBeDisabled()
     })
 
-    it('shows a general error when a delete cannot reach the server', async () => {
+    it('shows a general error in the dialog when a delete cannot reach the server', async () => {
       categoriesServed = [categories[0], health]
       handleDeleteCategory = () => {
         throw new TypeError('Failed to fetch')
@@ -1734,10 +1847,11 @@ describe('Categories page', () => {
       const user = await openCategoriesPage()
       await listedRows()
 
-      await user.click(within(categoryRow('Health')).getByRole('button', { name: 'Delete' }))
-      await user.click(within(categoryRow('Health')).getByRole('button', { name: 'Confirm delete' }))
+      const dialog = await openDeleteDialog(user, 'Health')
+      await user.click(dialog.getByRole('button', { name: 'Confirm delete' }))
 
-      expect(await screen.findByRole('alert')).toHaveTextContent('Could not reach the server.')
+      expect(await dialog.findByRole('alert')).toHaveTextContent('Could not reach the server.')
+      expect(dialog.getByRole('button', { name: 'Confirm delete' })).toBeEnabled()
       expect(categoryRow('Health')).toBeInTheDocument()
     })
   })
@@ -1749,13 +1863,12 @@ describe('Categories page', () => {
       return screen.getByRole('row', { name })
     }
 
-    async function startEditing(user: ReturnType<typeof userEvent.setup>, name: RegExp) {
+    async function openEditDialog(user: ReturnType<typeof userEvent.setup>, name: RegExp) {
       await user.click(within(categoryRow(name)).getByRole('button', { name: 'Edit' }))
-      const row = screen.getByRole('button', { name: 'Save' }).closest('tr')!
-      return within(row)
+      return within(screen.getByRole('dialog', { name: 'Edit category' }))
     }
 
-    it('edits a Category inline and keeps it sorted by name after the Built-in Categories', async () => {
+    it('edits a Category in the dialog, filled in, and keeps it sorted by name after the Built-in Categories', async () => {
       const travel = { id: 10, name: 'Travel', description: 'All travel.', builtIn: false, transactionCount: 0, ruleCount: 0 }
       categoriesServed = [...categories, health, travel]
       let edited: { id: number; body: unknown } | undefined
@@ -1766,27 +1879,31 @@ describe('Categories page', () => {
       const user = await openCategoriesPage()
       await listedRows()
 
-      const row = await startEditing(user, /Health/)
-      expect(row.getByLabelText('Name')).toHaveValue('Health')
-      expect(row.getByLabelText('Description')).toHaveValue('Pharmacy etc.')
-      await user.clear(row.getByLabelText('Name'))
-      await user.type(row.getByLabelText('Name'), ' Wellness ')
-      await user.clear(row.getByLabelText('Description'))
-      await user.type(row.getByLabelText('Description'), 'Pharmacy, gym etc. ')
-      await user.click(row.getByRole('button', { name: 'Save' }))
+      const dialog = await openEditDialog(user, /Health/)
+      // Nothing is edited inside the row.
+      expect(within(categoryRow(/Health/)).queryByRole('textbox')).not.toBeInTheDocument()
+      expect(dialog.getByLabelText('Name')).toHaveValue('Health')
+      expect(dialog.getByLabelText('Name')).toHaveFocus()
+      expect(dialog.getByLabelText('Description')).toHaveValue('Pharmacy etc.')
+      await user.clear(dialog.getByLabelText('Name'))
+      await user.type(dialog.getByLabelText('Name'), ' Wellness ')
+      await user.clear(dialog.getByLabelText('Description'))
+      await user.type(dialog.getByLabelText('Description'), 'Pharmacy, gym etc. ')
+      await user.click(dialog.getByRole('button', { name: 'Save' }))
 
       expect(edited).toEqual({ id: 7, body: { name: 'Wellness', description: 'Pharmacy, gym etc.' } })
       expect(await screen.findByRole('status')).toHaveTextContent('Category updated.')
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+      expect(within(categoryRow(/Wellness/)).getByRole('button', { name: 'Edit' })).toHaveFocus()
       expect(await listedRows()).toEqual([
         ['Groceries Built-in', 'All groceries.', '12 transactions', '3 rules'],
         ['Other Built-in', "Costs that don't belong in any other category.", '1 transaction', '0 rules'],
         ['Travel', 'All travel.', '0 transactions', '0 rules'],
         ['Wellness', 'Pharmacy, gym etc.', '4 transactions', '2 rules'],
       ])
-      expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument()
     })
 
-    it("edits only a Built-in Category's description, sending its name unchanged", async () => {
+    it("shows a Built-in Category's name but can't change it, editing only its description", async () => {
       let edited: unknown
       handleEditCategory = (_id, body) => {
         edited = body
@@ -1795,32 +1912,48 @@ describe('Categories page', () => {
       const user = await openCategoriesPage()
       await listedRows()
 
-      const row = await startEditing(user, /Groceries/)
-      expect(row.queryByLabelText('Name')).not.toBeInTheDocument()
-      expect(row.getByText('Groceries')).toBeInTheDocument()
-      await user.clear(row.getByLabelText('Description'))
-      await user.type(row.getByLabelText('Description'), 'Food and drink.')
-      await user.click(row.getByRole('button', { name: 'Save' }))
+      const dialog = await openEditDialog(user, /Groceries/)
+      const name = dialog.getByLabelText('Name')
+      expect(name).toHaveValue('Groceries')
+      expect(name).toHaveAttribute('readonly')
+      expect(name).toHaveAccessibleDescription("Built-in Categories can't be renamed.")
+      expect(dialog.getByLabelText('Description')).toHaveFocus()
+      await user.type(name, 'Food')
+      expect(name).toHaveValue('Groceries')
+      await user.clear(dialog.getByLabelText('Description'))
+      await user.type(dialog.getByLabelText('Description'), 'Food and drink.')
+      await user.click(dialog.getByRole('button', { name: 'Save' }))
 
       expect(edited).toEqual({ name: 'Groceries', description: 'Food and drink.' })
       expect(await screen.findByRole('status')).toHaveTextContent('Category updated.')
       expect(within(categoryRow(/Groceries/)).getByText('Food and drink.')).toBeInTheDocument()
     })
 
-    it('cancels an edit and restores the row', async () => {
+    it('closes without saving on Cancel or Escape, and opens filled in from the Category again', async () => {
       categoriesServed = [health]
       const user = await openCategoriesPage()
       await screen.findByText('Pharmacy etc.')
 
-      const row = await startEditing(user, /Health/)
-      await user.type(row.getByLabelText('Name'), ' extra')
-      await user.click(row.getByRole('button', { name: 'Cancel' }))
+      let dialog = await openEditDialog(user, /Health/)
+      await user.type(dialog.getByLabelText('Name'), ' extra')
+      await user.click(dialog.getByRole('button', { name: 'Cancel' }))
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+      expect(within(categoryRow(/Health/)).getByRole('button', { name: 'Edit' })).toHaveFocus()
 
+      dialog = await openEditDialog(user, /Health/)
+      expect(dialog.getByLabelText('Name')).toHaveValue('Health')
+      await user.clear(dialog.getByLabelText('Description'))
+      await user.keyboard('{Escape}')
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+      expect(within(categoryRow(/Health/)).getByRole('button', { name: 'Edit' })).toHaveFocus()
+
+      dialog = await openEditDialog(user, /Health/)
+      expect(dialog.getByLabelText('Description')).toHaveValue('Pharmacy etc.')
       expect(categoryRow(/Health/)).toHaveTextContent('HealthPharmacy etc.4 transactions2 rules')
       expect(fetchMock).not.toHaveBeenCalledWith('/api/categories/7', expect.anything())
     })
 
-    it("shows the server's field errors on an edit and keeps the input", async () => {
+    it("shows the server's field errors beside their fields, keeping the dialog open with the input", async () => {
       categoriesServed = [categories[0], health]
       handleEditCategory = () =>
         Response.json(
@@ -1835,19 +1968,20 @@ describe('Categories page', () => {
       const user = await openCategoriesPage()
       await listedRows()
 
-      const row = await startEditing(user, /Health/)
-      await user.clear(row.getByLabelText('Name'))
-      await user.type(row.getByLabelText('Name'), 'GROCERIES')
-      await user.clear(row.getByLabelText('Description'))
-      await user.click(row.getByRole('button', { name: 'Save' }))
+      const dialog = await openEditDialog(user, /Health/)
+      await user.clear(dialog.getByLabelText('Name'))
+      await user.type(dialog.getByLabelText('Name'), 'GROCERIES')
+      await user.clear(dialog.getByLabelText('Description'))
+      await user.click(dialog.getByRole('button', { name: 'Save' }))
 
-      const nameError = await row.findByText("A category named 'Groceries' already exists.")
-      expect(row.getByLabelText('Name')).toHaveAccessibleDescription(nameError.textContent!)
-      expect(row.getByLabelText('Description')).toHaveAccessibleDescription('Description is required.')
-      expect(row.getByLabelText('Name')).toHaveValue('GROCERIES')
+      const nameError = await dialog.findByText("A category named 'Groceries' already exists.")
+      expect(dialog.getByLabelText('Name')).toHaveAccessibleDescription(nameError.textContent!)
+      expect(dialog.getByLabelText('Description')).toHaveAccessibleDescription('Description is required.')
+      expect(dialog.getByLabelText('Name')).toHaveValue('GROCERIES')
+      expect(categoryRow(/Health/)).toHaveTextContent('HealthPharmacy etc.')
     })
 
-    it('shows a general error when an edit cannot reach the server', async () => {
+    it('shows a general error in the dialog when an edit cannot reach the server', async () => {
       categoriesServed = [health]
       handleEditCategory = () => {
         throw new TypeError('Failed to fetch')
@@ -1855,28 +1989,12 @@ describe('Categories page', () => {
       const user = await openCategoriesPage()
       await screen.findByText('Pharmacy etc.')
 
-      const row = await startEditing(user, /Health/)
-      await user.type(row.getByLabelText('Name'), ' extra')
-      await user.click(row.getByRole('button', { name: 'Save' }))
+      const dialog = await openEditDialog(user, /Health/)
+      await user.type(dialog.getByLabelText('Name'), ' extra')
+      await user.click(dialog.getByRole('button', { name: 'Save' }))
 
-      expect(await screen.findByRole('alert')).toHaveTextContent('Could not reach the server.')
-      expect(row.getByLabelText('Name')).toHaveValue('Health extra')
-    })
-
-    it("clears the add form's errors once an edit is saved", async () => {
-      categoriesServed = [categories[0], health]
-      handleAddCategory = () => Response.json({ errors: { name: ['Name is required.'] } }, { status: 400 })
-      const user = await openCategoriesPage()
-      await listedRows()
-      await user.click(screen.getByRole('button', { name: 'Add category' }))
-      await screen.findByText('Name is required.')
-
-      const row = await startEditing(user, /Health/)
-      await user.type(row.getByLabelText('Description'), ' and more')
-      await user.click(row.getByRole('button', { name: 'Save' }))
-
-      expect(await screen.findByRole('status')).toHaveTextContent('Category updated.')
-      expect(screen.queryByText('Name is required.')).not.toBeInTheDocument()
+      expect(await dialog.findByRole('alert')).toHaveTextContent('Could not reach the server.')
+      expect(dialog.getByLabelText('Name')).toHaveValue('Health extra')
     })
 
     it('keeps a cancelled edit closed when its save then fails', async () => {
@@ -1886,16 +2004,37 @@ describe('Categories page', () => {
       const user = await openCategoriesPage()
       await screen.findByText('Pharmacy etc.')
 
-      const row = await startEditing(user, /Health/)
-      await user.clear(row.getByLabelText('Name'))
-      await user.click(row.getByRole('button', { name: 'Save' }))
-      await user.click(row.getByRole('button', { name: 'Cancel' }))
-      respond(Response.json({ errors: { name: ['Name is required.'] } }, { status: 400 }))
+      const dialog = await openEditDialog(user, /Health/)
+      await user.clear(dialog.getByLabelText('Name'))
+      await user.click(dialog.getByRole('button', { name: 'Save' }))
+      expect(dialog.getByRole('button', { name: 'Saving…' })).toBeDisabled()
+      await user.click(dialog.getByRole('button', { name: 'Cancel' }))
+      await act(async () => respond(Response.json({ errors: { name: ['Name is required.'] } }, { status: 400 })))
 
-      // Delete is disabled while the save is in flight.
-      await waitFor(() => expect(within(categoryRow(/Health/)).getByRole('button', { name: 'Delete' })).toBeEnabled())
-      expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
       expect(screen.queryByText('Name is required.')).not.toBeInTheDocument()
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+      expect(categoryRow(/Health/)).toHaveTextContent('HealthPharmacy etc.')
+    })
+
+    it('lists an edit saved after its dialog was cancelled, leaving a dialog opened since alone', async () => {
+      categoriesServed = [health]
+      let respond: (response: Response) => void = () => {}
+      handleEditCategory = () => new Promise((resolve) => (respond = resolve))
+      const user = await openCategoriesPage()
+      await screen.findByText('Pharmacy etc.')
+
+      const dialog = await openEditDialog(user, /Health/)
+      await user.clear(dialog.getByLabelText('Name'))
+      await user.type(dialog.getByLabelText('Name'), 'Wellness')
+      await user.click(dialog.getByRole('button', { name: 'Save' }))
+      await user.click(dialog.getByRole('button', { name: 'Cancel' }))
+      await openAddDialog(user)
+      await act(async () => respond(Response.json({ ...health, name: 'Wellness' })))
+
+      expect(await screen.findByRole('status')).toHaveTextContent('Category updated.')
+      expect(categoryRow(/Wellness/)).toHaveTextContent('WellnessPharmacy etc.')
+      expect(screen.getByRole('dialog', { name: 'Add category' })).toBeInTheDocument()
     })
   })
 })
@@ -4638,6 +4777,108 @@ describe('Transactions page', () => {
         })
       })
     })
+  })
+})
+
+describe("Transactions page from a Category's Transactions count", () => {
+  const health = { id: 7, name: 'Health', description: 'Pharmacy etc.', builtIn: false, transactionCount: 0, ruleCount: 2 }
+
+  // Groceries in 2026, Other last in 2024 and Uncategorized in 2025, while the latest month with
+  // Transactions is in 2026.
+  const transactions = [
+    { id: 21, date: '2026-03-12', description: 'Rema 1000', categoryId: 1 },
+    { id: 22, date: '2026-01-05', description: 'Kiwi', categoryId: 1 },
+    { id: 23, date: '2025-11-20', description: 'Ukjent butikk', categoryId: null },
+    { id: 24, date: '2024-05-08', description: 'Elkjøp', categoryId: 13 },
+    { id: 25, date: '2023-02-14', description: 'Clas Ohlson', categoryId: 13 },
+  ].map((t) => ({ ...t, amount: -100, note: null, locked: false, imported: true, bookmarked: false }))
+
+  beforeEach(() => {
+    categoriesServed = [categories[0], health, categories[1]]
+    months = [
+      { year: 2026, month: 3 },
+      { year: 2026, month: 1 },
+      { year: 2025, month: 11 },
+      { year: 2024, month: 5 },
+      { year: 2023, month: 2 },
+    ]
+    handleListPeriod = (year, month) =>
+      Response.json(
+        transactions.filter(
+          (t) => monthOfDate(t.date).year === year && (month === undefined || monthOfDate(t.date).month === month),
+        ),
+      )
+  })
+
+  async function openCategoriesPage() {
+    const user = userEvent.setup()
+    await renderApp()
+    await user.click(screen.getByRole('button', { name: 'Categories' }))
+    await screen.findByText('All groceries.')
+    return user
+  }
+
+  function requestedPeriods() {
+    return fetchMock.mock.calls.map(([url]) => url).filter((url) => url.startsWith('/api/transactions?'))
+  }
+
+  function listedDescriptions() {
+    return screen
+      .getAllByRole('row')
+      .slice(1)
+      .map((row) => within(row).getAllByRole('cell')[1].textContent)
+  }
+
+  // The Transactions page's Year, Month and Category as shown.
+  function chosenFilters() {
+    return ['Year', 'Month', 'Category'].map(
+      (label) => (screen.getByLabelText(label) as HTMLSelectElement).selectedOptions[0].textContent,
+    )
+  }
+
+  it('links each nonzero count, and shows a zero count as plain text', async () => {
+    await openCategoriesPage()
+
+    expect(screen.getByRole('button', { name: 'Show transactions in Groceries (12)' })).toHaveTextContent('12')
+    expect(screen.getByRole('button', { name: 'Show transactions in Other (1)' })).toHaveTextContent('1')
+    const healthRow = screen.getByRole('row', { name: /Health/ })
+    expect(within(healthRow).queryByRole('button', { name: /Show transactions/ })).not.toBeInTheDocument()
+    expect(within(healthRow).getAllByRole('cell')[2]).toHaveTextContent('0')
+  })
+
+  it("opens Transactions filtered to the Category, on the latest year with its Transactions", async () => {
+    const user = await openCategoriesPage()
+
+    await user.click(screen.getByRole('button', { name: 'Show transactions in Groceries (12)' }))
+
+    expect(await screen.findByRole('cell', { name: 'Rema 1000' })).toBeInTheDocument()
+    expect(listedDescriptions()).toEqual(['Rema 1000', 'Kiwi'])
+    expect(chosenFilters()).toEqual(['2026', 'All months', 'Groceries'])
+    expect(screen.getByRole('button', { name: 'Transactions' })).toHaveAttribute('aria-current', 'page')
+  })
+
+  it("opens an earlier year than the latest with Transactions when that is the Category's latest, looking no further back", async () => {
+    const user = await openCategoriesPage()
+
+    await user.click(screen.getByRole('button', { name: 'Show transactions in Other (1)' }))
+
+    expect(await screen.findByRole('cell', { name: 'Elkjøp' })).toBeInTheDocument()
+    expect(listedDescriptions()).toEqual(['Elkjøp'])
+    expect(chosenFilters()).toEqual(['2024', 'All months', 'Other'])
+    expect(requestedPeriods()).not.toContain('/api/transactions?year=2023')
+  })
+
+  it('opens from the header on the latest month with all Categories, after following a count', async () => {
+    const user = await openCategoriesPage()
+    await user.click(screen.getByRole('button', { name: 'Show transactions in Other (1)' }))
+    await screen.findByRole('cell', { name: 'Elkjøp' })
+
+    await user.click(screen.getByRole('button', { name: 'Categories' }))
+    await screen.findByText('All groceries.')
+    await user.click(screen.getByRole('button', { name: 'Transactions' }))
+
+    expect(await screen.findByRole('cell', { name: 'Rema 1000' })).toBeInTheDocument()
+    expect(chosenFilters()).toEqual(['2026', 'March', 'All categories'])
   })
 })
 

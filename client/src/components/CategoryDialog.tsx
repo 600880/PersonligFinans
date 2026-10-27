@@ -1,0 +1,109 @@
+import { useId, useState, type FormEvent } from 'react'
+import { addCategory, editCategory, type Category, type CategoryFieldErrors } from '../lib/api'
+import { Dialog } from './Dialog'
+import { ErrorMessage } from './Messages'
+import { inputClassName } from './TransactionForm'
+
+interface CategoryDialogProps {
+  // The Category to edit, or none to add one.
+  category?: Category
+  onCancel: () => void
+  onSaved: (category: Category) => void
+}
+
+// Adds a Category, or edits one, by its Name and Description. The fields start empty for a new
+// Category and filled in for one being edited. A Built-in Category's name is shown but can't be
+// changed, so it is sent unchanged. Closing the dialog without saving discards what was typed.
+export function CategoryDialog({ category, onCancel, onSaved }: CategoryDialogProps) {
+  const id = useId()
+  const builtIn = category?.builtIn ?? false
+  const [name, setName] = useState(category?.name ?? '')
+  const [description, setDescription] = useState(category?.description ?? '')
+  const [isSaving, setIsSaving] = useState(false)
+  const [fieldErrors, setFieldErrors] = useState<CategoryFieldErrors>({})
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
+
+  async function handleSubmit(event: FormEvent) {
+    event.preventDefault()
+    if (isSaving) return
+
+    setIsSaving(true)
+    setFieldErrors({})
+    setErrorMessage(null)
+
+    const request = { name: name.trim(), description: description.trim() }
+    const result = await (category ? editCategory(category.id, request) : addCategory(request)).finally(() =>
+      setIsSaving(false),
+    )
+
+    if (result.ok) {
+      onSaved(result.category)
+    } else {
+      setFieldErrors(result.fieldErrors)
+      setErrorMessage(result.message)
+    }
+  }
+
+  return (
+    <Dialog title={category ? 'Edit category' : 'Add category'} onCancel={onCancel}>
+      {errorMessage && <ErrorMessage className="mt-3">{errorMessage}</ErrorMessage>}
+
+      <form className="mt-4 flex flex-col gap-4" onSubmit={handleSubmit}>
+        <div className="flex flex-col gap-1">
+          <label className="flex flex-col gap-1 text-sm font-medium text-slate-700 dark:text-slate-300">
+            Name
+            <input
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              readOnly={builtIn}
+              autoFocus={!builtIn}
+              aria-describedby={builtIn ? `${id}-name-hint` : `${id}-name-error`}
+              className={`${inputClassName} read-only:bg-slate-50 dark:read-only:bg-slate-800/50 read-only:text-slate-500 dark:read-only:text-slate-400`}
+            />
+          </label>
+          {builtIn ? (
+            <span id={`${id}-name-hint`} className="text-xs text-slate-500 dark:text-slate-400">
+              Built-in Categories can't be renamed.
+            </span>
+          ) : (
+            <span id={`${id}-name-error`} className="text-xs text-red-600 dark:text-red-300">
+              {fieldErrors.name}
+            </span>
+          )}
+        </div>
+        <div className="flex flex-col gap-1">
+          <label className="flex flex-col gap-1 text-sm font-medium text-slate-700 dark:text-slate-300">
+            Description
+            <input
+              value={description}
+              onChange={(event) => setDescription(event.target.value)}
+              autoFocus={builtIn}
+              aria-describedby={`${id}-description-error`}
+              className={inputClassName}
+            />
+          </label>
+          <span id={`${id}-description-error`} className="text-xs text-red-600 dark:text-red-300">
+            {fieldErrors.description}
+          </span>
+        </div>
+
+        <div className="mt-2 flex justify-end gap-3">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="rounded-lg px-4 py-2 text-sm font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={isSaving}
+            className="rounded-lg bg-slate-900 dark:bg-slate-100 px-4 py-2 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-700 dark:hover:bg-slate-300 disabled:cursor-not-allowed disabled:bg-slate-300 dark:disabled:bg-slate-800 dark:disabled:text-slate-500"
+          >
+            {isSaving ? 'Saving…' : 'Save'}
+          </button>
+        </div>
+      </form>
+    </Dialog>
+  )
+}
