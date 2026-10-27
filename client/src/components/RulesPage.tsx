@@ -145,38 +145,6 @@ function SortableHeading({
   )
 }
 
-// A toggle in the toolbar that, while pressed, shows only the rules it names; aria-pressed says whether it is.
-function FilterChip({
-  pressed,
-  onToggle,
-  disabled = false,
-  title,
-  children,
-}: {
-  pressed: boolean
-  onToggle: () => void
-  disabled?: boolean
-  title?: string
-  children: string
-}) {
-  return (
-    <button
-      type="button"
-      aria-pressed={pressed}
-      disabled={disabled}
-      title={title}
-      onClick={onToggle}
-      className={`rounded-full px-3 py-1 text-sm font-medium ring-1 ring-inset disabled:cursor-not-allowed disabled:text-slate-300 dark:disabled:text-slate-600 disabled:ring-slate-200 dark:disabled:ring-slate-800 ${
-        pressed
-          ? 'bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 ring-slate-900 dark:ring-slate-100'
-          : 'text-slate-700 dark:text-slate-300 ring-slate-300 dark:ring-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800'
-      }`}
-    >
-      {children}
-    </button>
-  )
-}
-
 // A rule's Category: a swatch, in the colour the Dashboard draws it in, and its name.
 function RuleCategory({ name, colour }: { name: string; colour: string }) {
   return (
@@ -210,7 +178,6 @@ export function RulesPage({ target }: { target?: RulesTarget }) {
   // The rule whose delete is being confirmed, or null while none is.
   const [deleting, setDeleting] = useState<CategorizationRule | null>(null)
   const [newOnly, setNewOnly] = useState(false)
-  const [aiOnly, setAiOnly] = useState(false)
   const [search, setSearch] = useState('')
   const [sort, setSort] = useState<RuleSort>({ column: 'keyword', direction: 'ascending' })
   // Which recount is the latest, so an earlier one that answers late is ignored.
@@ -249,18 +216,13 @@ export function RulesPage({ target }: { target?: RulesTarget }) {
   )
   const categoryName = (id: number) => categories.find((c) => c.id === id)?.name ?? ''
   const hasNewRules = rules.some((r) => r.isNew)
-  // The New chip does nothing while it is disabled, so a New filter left on once no rule is New is off.
+  // "Show only new" does nothing while it is disabled, so once no rule is New it is off, even if it was
+  // ticked before.
   const isNewOnly = newOnly && hasNewRules
-  const isFiltering = search.trim() !== '' || categoryFilter !== '' || isNewOnly || aiOnly
+  const isFiltering = search.trim() !== '' || categoryFilter !== '' || isNewOnly
   // Sorted as shown rather than as kept, so a rule added or edited lands where the sort puts it.
   const shownRules = sortedRules(
-    rules.filter(
-      (r) =>
-        (!isNewOnly || r.isNew) &&
-        (!aiOnly || r.aiGenerated) &&
-        matchesSearch(r, search) &&
-        matchesCategory(r, categoryFilter),
-    ),
+    rules.filter((r) => (!isNewOnly || r.isNew) && matchesSearch(r, search) && matchesCategory(r, categoryFilter)),
     sort,
     categoryName,
   )
@@ -361,29 +323,6 @@ export function RulesPage({ target }: { target?: RulesTarget }) {
     }
   }
 
-  // Keeps an AI-generated rule as it is: the edit, with its keyword and Category unchanged, which
-  // removes its AI mark and leaves its New mark.
-  async function handleKeep(rule: CategorizationRule) {
-    if (isSaving) return
-
-    setIsSaving(true)
-    setStatusMessage(null)
-    setErrorMessage(null)
-
-    const result = await editRule(rule.id, { keyword: rule.keyword, categoryId: rule.categoryId }).finally(() =>
-      setIsSaving(false),
-    )
-
-    if (result.ok) {
-      setRules((rules) => rules.map((r) => (r.id === result.rule.id ? result.rule : r)))
-      setStatusMessage('Rule kept.')
-    } else {
-      // With no inline edit open to show a field error next to, as when its Category was deleted
-      // elsewhere, it is said above the table instead.
-      setErrorMessage(result.message ?? Object.values(result.fieldErrors).join(' '))
-    }
-  }
-
   // A rule that categorizes Transactions asks first, showing what deleting it would change. One that
   // categorizes none is deleted at once.
   function startDelete(rule: CategorizationRule) {
@@ -480,7 +419,7 @@ export function RulesPage({ target }: { target?: RulesTarget }) {
       )}
 
       {/* A toolbar for the table below, smaller than the add form so the two never read as one form. On
-          a phone the search takes its own line, with the Category filter and the chips under it. */}
+          a phone the search takes its own line, with the Category filter and "Show only new" under it. */}
       <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2">
         <div className="relative min-w-0 flex-1 max-sm:basis-full sm:max-w-xs">
           <svg
@@ -513,19 +452,23 @@ export function RulesPage({ target }: { target?: RulesTarget }) {
             </option>
           ))}
         </select>
-        <div className="ml-auto flex shrink-0 gap-2">
-          <FilterChip
-            pressed={isNewOnly}
-            onToggle={() => changeFilter(() => setNewOnly(!newOnly))}
+        {/* The title is on the label rather than the checkbox, so hovering the words says why it is
+            disabled too. */}
+        <label
+          title={hasNewRules ? undefined : 'The last upload added no rules'}
+          className={`ml-auto flex shrink-0 items-center gap-2 text-sm font-medium ${
+            hasNewRules ? 'text-slate-700 dark:text-slate-300' : 'cursor-not-allowed text-slate-400 dark:text-slate-600'
+          }`}
+        >
+          <input
+            type="checkbox"
+            checked={isNewOnly}
             disabled={!hasNewRules}
-            title={hasNewRules ? undefined : 'The last upload added no rules'}
-          >
-            New
-          </FilterChip>
-          <FilterChip pressed={aiOnly} onToggle={() => changeFilter(() => setAiOnly(!aiOnly))}>
-            AI-generated
-          </FilterChip>
-        </div>
+            onChange={(event) => changeFilter(() => setNewOnly(event.target.checked))}
+            className="size-4 rounded border-slate-300 dark:border-slate-700 disabled:cursor-not-allowed"
+          />
+          Show only new
+        </label>
       </div>
 
       {isFiltering && shownRules.length === 0 ? (
@@ -653,16 +596,6 @@ export function RulesPage({ target }: { target?: RulesTarget }) {
                     <Count count={rule.transactionCount} noun="transaction" />
                   </td>
                   <td className={actionsCellClass}>
-                    {rule.aiGenerated && (
-                      <button
-                        type="button"
-                        disabled={isSaving}
-                        onClick={() => handleKeep(rule)}
-                        className={smallButtonClass}
-                      >
-                        Keep
-                      </button>
-                    )}
                     <button type="button" onClick={() => startEdit(rule)} className={smallButtonClass}>
                       Edit
                     </button>
