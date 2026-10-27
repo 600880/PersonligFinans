@@ -14,7 +14,7 @@ import {
 } from '../lib/api'
 import { useIsDark } from '../lib/appearance'
 import { categoryColour } from '../lib/categoryColours'
-import { matchesCategory } from '../lib/categoryFilter'
+import { categoryFilterOf, matchesCategory } from '../lib/categoryFilter'
 import { useRulePreview } from '../lib/useRulePreview'
 import { CategorySwatch } from './CategorySwatch'
 import { Count } from './Count'
@@ -187,11 +187,21 @@ function RuleCategory({ name, colour }: { name: string; colour: string }) {
   )
 }
 
-export function RulesPage() {
+// Where the Rules page opens when reached from a Category's rule count: filtered to that Category.
+export interface RulesTarget {
+  categoryId: number
+}
+
+// Opens on all rules, or on the target's Category when given. The target is read on mount only, so the
+// filter then changes like any other.
+export function RulesPage({ target }: { target?: RulesTarget }) {
   const [categories, setCategories] = useState<Category[]>([])
   const [rules, setRules] = useState<CategorizationRule[]>([])
+  // '' for all Categories, or a Category's id, as the Category filter on Transactions.
+  const [categoryFilter, setCategoryFilter] = useState(() => (target ? categoryFilterOf(target.categoryId) : ''))
   const [keyword, setKeyword] = useState('')
-  const [categoryId, setCategoryId] = useState('')
+  // The add form's Category starts on the filtered one, or on none while all are shown.
+  const [categoryId, setCategoryId] = useState(categoryFilter)
   const [isSaving, setIsSaving] = useState(false)
   const [fieldErrors, setFieldErrors] = useState<RuleFieldErrors>({})
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
@@ -202,9 +212,7 @@ export function RulesPage() {
   const [newOnly, setNewOnly] = useState(false)
   const [aiOnly, setAiOnly] = useState(false)
   const [search, setSearch] = useState('')
-  // '' for all Categories, or a Category's id, as the Category filter on Transactions.
-  const [categoryFilter, setCategoryFilter] = useState('')
-  const [sort,setSort] = useState<RuleSort>({ column: 'keyword', direction: 'ascending' })
+  const [sort, setSort] = useState<RuleSort>({ column: 'keyword', direction: 'ascending' })
   // Which recount is the latest, so an earlier one that answers late is ignored.
   const recount = useRef(0)
 
@@ -225,7 +233,7 @@ export function RulesPage() {
   }, [])
 
   const dark = useIsDark()
-  const addPreview = useRulePreview(previewRequest(keyword, categoryId, rules), previewAddingRule)
+  const addPreview = useRulePreview(previewRequest(keyword, categoryId, rules), previewAddingRule, rules)
   // The same function while the same rule is edited, so a reply about another rule's edit is never
   // shown. It is only asked while a rule is edited.
   const editedRuleId = edit?.id
@@ -237,6 +245,7 @@ export function RulesPage() {
   const editPreview = useRulePreview(
     edit && previewRequest(edit.keyword, edit.categoryId, rules.filter((r) => r.id !== edit.id)),
     previewEditing,
+    rules,
   )
   const categoryName = (id: number) => categories.find((c) => c.id === id)?.name ?? ''
   const hasNewRules = rules.some((r) => r.isNew)
@@ -285,7 +294,7 @@ export function RulesPage() {
     if (result.ok) {
       setRules((current) => [...current, result.rule])
       setKeyword('')
-      setCategoryId('')
+      setCategoryId(categoryFilter)
       setStatusMessage(changedMessage('Rule added.', result.transactionsChanged))
       countRulesAgain()
     } else {
@@ -308,6 +317,13 @@ export function RulesPage() {
   function changeFilter(change: () => void) {
     if (edit) cancelEdit()
     change()
+  }
+
+  // The add form's Category starts on the filtered one, so it follows the filter for as long as no
+  // keyword has been typed in the form. A rule half written is left as it is.
+  function chooseCategoryFilter(next: string) {
+    if (keyword.trim() === '') setCategoryId(next)
+    setCategoryFilter(next)
   }
 
   // A column already sorted by turns the other way; another starts A–Å or lowest first. The rule being
@@ -487,7 +503,7 @@ export function RulesPage() {
         <select
           aria-label="Filter by category"
           value={categoryFilter}
-          onChange={(event) => changeFilter(() => setCategoryFilter(event.target.value))}
+          onChange={(event) => changeFilter(() => chooseCategoryFilter(event.target.value))}
           className="min-w-0 rounded-lg border border-slate-300 dark:border-slate-700 px-3 py-1.5 text-sm text-slate-900 dark:text-slate-100"
         >
           <option value="">All categories</option>

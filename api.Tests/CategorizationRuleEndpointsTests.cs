@@ -748,9 +748,8 @@ public class CategorizationRuleEndpointsTests : IAsyncLifetime
             preview.Changes.Select(c => c.Date));
     }
 
-    private async Task<Dictionary<string, string[]>> PreviewExpectingValidationErrors(string? keyword, int? categoryId)
+    private static async Task<Dictionary<string, string[]>> ValidationErrors(HttpResponseMessage response)
     {
-        var response = await PreviewAddingRule(keyword, categoryId);
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         var problem = await response.Content.ReadFromJsonAsync<ValidationProblemDetails>();
         return new Dictionary<string, string[]>(problem!.Errors);
@@ -772,9 +771,9 @@ public class CategorizationRuleEndpointsTests : IAsyncLifetime
         foreach (var (keyword, categoryId) in invalid)
             Assert.Equal(
                 await AddRuleExpectingValidationErrors(keyword, categoryId),
-                await PreviewExpectingValidationErrors(keyword, categoryId));
-        Assert.Equal(["A rule for 'kafé' already exists."], (await PreviewExpectingValidationErrors("KAFÉ", _categories.Groceries))["keyword"]);
-        Assert.Equal(["Category does not exist."], (await PreviewExpectingValidationErrors("butikk", 9999))["categoryId"]);
+                await ValidationErrors(await PreviewAddingRule(keyword, categoryId)));
+        Assert.Equal(["A rule for 'kafé' already exists."], (await ValidationErrors(await PreviewAddingRule("KAFÉ", _categories.Groceries)))["keyword"]);
+        Assert.Equal(["Category does not exist."], (await ValidationErrors(await PreviewAddingRule("butikk", 9999)))["categoryId"]);
     }
 
     private Task<HttpResponseMessage> PreviewDeletingRule(int ruleId) =>
@@ -956,13 +955,6 @@ public class CategorizationRuleEndpointsTests : IAsyncLifetime
         Assert.Equal(
             (ids[0], (int?)_categories.Restaurants, (int?)_categories.Groceries),
             preview.Changes.Select(c => (c.Id, c.FromCategoryId, c.ToCategoryId)).Single());
-    }
-
-    private async Task<Dictionary<string, string[]>> ValidationErrors(HttpResponseMessage response)
-    {
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        var problem = await response.Content.ReadFromJsonAsync<ValidationProblemDetails>();
-        return new Dictionary<string, string[]>(problem!.Errors);
     }
 
     [Fact]

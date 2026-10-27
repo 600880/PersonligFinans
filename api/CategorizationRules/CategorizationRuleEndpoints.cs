@@ -20,7 +20,8 @@ public record DeletedCategorizationRulesResponse(int RulesDeleted);
 
 // What a rule change would do, without doing it. ChangedCount: how many Transactions would change
 // Category. LockedCount: how many Locked Transactions contain the keyword, which it leaves as they
-// are. Changes: up to ten of the Transactions that would change, newest posted date first.
+// are. Changes: up to Categorizer.PreviewedChangesMax of the Transactions that would change, newest
+// posted date first.
 public record RulePreviewResponse(int ChangedCount, int LockedCount, List<RulePreviewChange> Changes);
 
 // A Transaction a rule change would change, from one Category to another; null means Uncategorized.
@@ -157,7 +158,7 @@ public static class CategorizationRuleEndpoints
     // keyword, so no Locked Transactions are counted.
     private static async Task<IResult> PreviewDeletingRule(int id, AppDbContext db)
     {
-        var rules = await db.CategorizationRules.AsNoTracking().ToListAsync();
+        var rules = await db.CategorizationRules.AsNoTracking().ToListAsync<ICategorizationRule>();
         if (rules.RemoveAll(r => r.Id == id) == 0)
             return Results.NotFound();
 

@@ -6,7 +6,7 @@ import { Dashboard } from './components/Dashboard'
 import { LandingPage } from './components/LandingPage'
 import { ErrorMessage, StatusMessage } from './components/Messages'
 import { ReceiptScanModal, type Receipt } from './components/ReceiptScanModal'
-import { RulesPage } from './components/RulesPage'
+import { RulesPage, type RulesTarget } from './components/RulesPage'
 import { TransactionsPage, type TransactionsTarget } from './components/TransactionsPage'
 import { UserPage } from './components/UserPage'
 import {
@@ -147,9 +147,10 @@ function SignedInApp({ user, onSignedOut }: SignedInAppProps) {
   // Bumped after new Transactions are saved, and on coming back to home, so the Dashboard reloads in
   // place.
   const [dashboardVersion, setDashboardVersion] = useState(0)
-  // Where the Transactions page opens when reached from the Dashboard or the Categories page;
-  // undefined from the header.
+  // Where the Transactions page opens when reached from the Dashboard or the Categories page, and
+  // the Rules page when reached from the Categories page; undefined from the header.
   const [transactionsTarget, setTransactionsTarget] = useState<TransactionsTarget | undefined>()
+  const [rulesTarget, setRulesTarget] = useState<RulesTarget | undefined>()
   const fileInputRef = useRef<HTMLInputElement>(null)
   const receiptInputRef = useRef<HTMLInputElement>(null)
   // The id of the Receipt scan of the latest pick of Receipts, so that an earlier pick still being
@@ -190,6 +191,7 @@ function SignedInApp({ user, onSignedOut }: SignedInAppProps) {
     if (view === 'home' && next !== 'home') clearHomeMessages()
     if (view !== 'home' && next === 'home') setDashboardVersion((version) => version + 1)
     setTransactionsTarget(undefined)
+    setRulesTarget(undefined)
     setIsNavOpen(false)
     setView(next)
   }
@@ -197,6 +199,11 @@ function SignedInApp({ user, onSignedOut }: SignedInAppProps) {
   function openTransactions(target: TransactionsTarget) {
     chooseView('transactions')
     setTransactionsTarget(target)
+  }
+
+  function openRules(target: RulesTarget) {
+    chooseView('rules')
+    setRulesTarget(target)
   }
 
   function handleSaved() {
@@ -382,11 +389,11 @@ function SignedInApp({ user, onSignedOut }: SignedInAppProps) {
         </main>
       ) : view === 'categories' ? (
         <main className="flex flex-col items-center px-6 py-10 max-sm:px-4">
-          <CategoriesPage onOpenTransactions={openTransactions} />
+          <CategoriesPage onOpenTransactions={openTransactions} onOpenRules={openRules} />
         </main>
       ) : view === 'rules' ? (
         <main className="flex flex-col items-center px-6 py-10 max-sm:px-4">
-          <RulesPage />
+          <RulesPage target={rulesTarget} />
         </main>
       ) : view === 'user' ? (
         <main className="flex flex-col items-center px-6 py-10 max-sm:px-4">

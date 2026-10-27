@@ -9,6 +9,7 @@ import { CategorySwatch } from './CategorySwatch'
 import type { Palette } from './ColourPicker'
 import { Count } from './Count'
 import { ErrorMessage, StatusMessage } from './Messages'
+import type { RulesTarget } from './RulesPage'
 import type { TransactionsTarget } from './TransactionsPage'
 
 // The API's order: the Built-in Categories first, kept in the order they were served (they can't
@@ -38,6 +39,9 @@ const descriptionCellClass = 'py-3 pr-3 max-sm:basis-full max-sm:min-w-0 max-sm:
 const transactionCountCellClass = 'py-3 pl-3 text-right whitespace-nowrap tabular-nums max-sm:p-0 max-sm:text-left'
 const ruleCountCellClass = 'py-3 pl-3 text-right whitespace-nowrap tabular-nums max-sm:p-0 max-sm:text-left'
 const actionsCellClass = 'py-2 pr-4 pl-3 text-right whitespace-nowrap max-sm:ml-auto max-sm:p-0'
+// A count that opens the page listing what it counts.
+const countLinkClass =
+  'font-medium underline decoration-slate-300 dark:decoration-slate-600 underline-offset-2 hover:decoration-current'
 
 function BuiltInBadge() {
   return (
@@ -73,9 +77,16 @@ function changedMessage(action: string, transactionsChanged: number) {
 // Every Category in the order the API lists them, Built-in ones first, with what uses it, and a button
 // that adds one in a dialog. Each can be edited in the same dialog, and one that isn't Built-in can be
 // deleted in a dialog of its own, which asks first; a Built-in one shows Delete disabled.
-// A nonzero Transactions count opens the Transactions page on that Category's latest year. Under the
-// list, a line says how many Transactions are Uncategorized, unless none are, and opens them the same way.
-export function CategoriesPage({ onOpenTransactions }: { onOpenTransactions: (target: TransactionsTarget) => void }) {
+// A nonzero Transactions count opens the Transactions page on that Category's latest year, and a nonzero
+// rule count opens the Rules page filtered to it. Under the list, a line says how many Transactions are
+// Uncategorized, unless none are, and opens them the same way.
+export function CategoriesPage({
+  onOpenTransactions,
+  onOpenRules,
+}: {
+  onOpenTransactions: (target: TransactionsTarget) => void
+  onOpenRules: (target: RulesTarget) => void
+}) {
   const dark = useIsDark()
   const [categories, setCategories] = useState<Category[]>([])
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
@@ -239,7 +250,7 @@ export function CategoriesPage({ onOpenTransactions }: { onOpenTransactions: (ta
                         onClick={() =>
                           onOpenTransactions({ period: 'latestYearWithTransactions', categoryId: category.id })
                         }
-                        className="font-medium underline decoration-slate-300 dark:decoration-slate-600 underline-offset-2 hover:decoration-current"
+                        className={countLinkClass}
                       >
                         <Count count={category.transactionCount} noun="transaction" />
                       </button>
@@ -248,7 +259,18 @@ export function CategoriesPage({ onOpenTransactions }: { onOpenTransactions: (ta
                     )}
                   </td>
                   <td className={ruleCountCellClass}>
-                    <Count count={category.ruleCount} noun="rule" />
+                    {category.ruleCount > 0 ? (
+                      <button
+                        type="button"
+                        aria-label={`Show rules for ${category.name} (${formatCount(category.ruleCount)})`}
+                        onClick={() => onOpenRules({ categoryId: category.id })}
+                        className={countLinkClass}
+                      >
+                        <Count count={category.ruleCount} noun="rule" />
+                      </button>
+                    ) : (
+                      <Count count={category.ruleCount} noun="rule" />
+                    )}
                   </td>
                   <td className={actionsCellClass}>
                     <button
@@ -282,7 +304,7 @@ export function CategoriesPage({ onOpenTransactions }: { onOpenTransactions: (ta
           <button
             type="button"
             onClick={() => onOpenTransactions({ period: 'latestYearWithTransactions', categoryId: null })}
-            className="font-medium underline decoration-slate-300 dark:decoration-slate-600 underline-offset-2 hover:decoration-current"
+            className={countLinkClass}
           >
             {formatCount(uncategorizedCount)} {plural(uncategorizedCount, 'transaction')}{' '}
             {uncategorizedCount === 1 ? 'is' : 'are'} Uncategorized

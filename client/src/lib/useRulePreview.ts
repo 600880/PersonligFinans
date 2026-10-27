@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { CategorizationRuleRequest, RulePreview } from './api'
+import type { CategorizationRule, CategorizationRuleRequest, RulePreview } from './api'
 
 // How long typing in a rule's keyword must pause before the preview of saving it is asked for.
 const RULE_PREVIEW_DELAY_MS = 300
@@ -12,8 +12,14 @@ type AskForPreview = (request: CategorizationRuleRequest) => Promise<RulePreview
 // form still holds what it was asked, so a reply to a request since replaced is ignored. A change the
 // server refuses, as for a keyword another rule has, or a preview that fails, shows none. ask must
 // keep its identity between renders unless the change it previews does not, as when another rule is
-// edited.
-export function useRulePreview(request: CategorizationRuleRequest | null, ask: AskForPreview): RulePreview | null {
+// edited. rules are the rules the change would be made to: once they change, as when another rule is
+// edited, kept or deleted, saving may do something else, so the preview is asked for again and none
+// is shown until it answers.
+export function useRulePreview(
+  request: CategorizationRuleRequest | null,
+  ask: AskForPreview,
+  rules: CategorizationRule[],
+): RulePreview | null {
   const keyword = request?.keyword ?? null
   const categoryId = request?.categoryId ?? null
   // The reply remembers what it was asked, so that it is only shown while the form still holds it.
@@ -21,6 +27,7 @@ export function useRulePreview(request: CategorizationRuleRequest | null, ask: A
     keyword: string
     categoryId: number
     ask: AskForPreview
+    rules: CategorizationRule[]
     preview: RulePreview | null
   } | null>(null)
 
@@ -32,16 +39,20 @@ export function useRulePreview(request: CategorizationRuleRequest | null, ask: A
         // A failed preview only means none is shown: it never stands in the way of saving.
         .catch(() => null)
         .then((preview) => {
-          if (!ignore) setReply({ keyword, categoryId, ask, preview })
+          if (!ignore) setReply({ keyword, categoryId, ask, rules, preview })
         })
     }, RULE_PREVIEW_DELAY_MS)
     return () => {
       ignore = true
       clearTimeout(timer)
     }
-  }, [keyword, categoryId, ask])
+  }, [keyword, categoryId, ask, rules])
 
-  return reply !== null && reply.keyword === keyword && reply.categoryId === categoryId && reply.ask === ask
+  return reply !== null &&
+    reply.keyword === keyword &&
+    reply.categoryId === categoryId &&
+    reply.ask === ask &&
+    reply.rules === rules
     ? reply.preview
     : null
 }

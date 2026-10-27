@@ -16,19 +16,23 @@ interface CategoryDialogProps {
 }
 
 // The colour the picker starts on: the Category's own, or for a new Category the first no Category
-// has. None when that isn't a palette colour, as for a Category on the slate fallback, or when every
-// one is taken, or before the palette has loaded.
+// has, ignoring case as the server does when it chooses one. None when that isn't a palette colour,
+// as for a Category on the slate fallback, or when every one is taken, or before the palette has
+// loaded.
 function startingColour(category: Category | undefined, categories: Category[], palette: Palette) {
   if (!Array.isArray(palette)) return null
   if (category) return palette.includes(category.colour) ? category.colour : null
-  return palette.find((colour) => !categories.some((c) => c.colour === colour)) ?? null
+  const taken = new Set(categories.map((c) => c.colour?.toLowerCase()))
+  return palette.find((colour) => !taken.has(colour.toLowerCase())) ?? null
 }
 
 // Adds a Category, or edits one, by its Name, Description and Colour. The fields start empty for a
 // new Category and filled in for one being edited. A Built-in Category's name is shown but can't be
-// changed, so it is sent unchanged; its colour can. With no colour chosen none is sent, so a new
-// Category gets the server's choice and an edited one keeps its own. Closing the dialog without
-// saving discards what was typed and chosen.
+// changed, so it is sent unchanged; its colour can. The colour the picker starts on is sent like a
+// chosen one, so once the palette has loaded a new Category is sent the dialog's own pick of the
+// first unused colour. With no colour at all none is sent, so a new Category gets the server's
+// choice and an edited one keeps its own. Closing the dialog without saving discards what was typed
+// and chosen.
 export function CategoryDialog({ category, categories, palette, onCancel, onSaved }: CategoryDialogProps) {
   const id = useId()
   const builtIn = category?.builtIn ?? false

@@ -2164,6 +2164,30 @@ describe('Categories page', () => {
       expect(swatch('Fitness')).toHaveStyle({ backgroundColor: 'rgb(144, 133, 233)' })
     })
 
+    it('counts a colour as taken whatever its case, as the server does when it chooses one', async () => {
+      categoriesServed = [categories[0], categories[1], { ...health, colour: '#EB6834' }]
+      let posted: unknown
+      handleAddCategory = (body) => {
+        posted = body
+        return Response.json(
+          { id: 20, ...(body as object), builtIn: false, transactionCount: 0, ruleCount: 0 },
+          { status: 201 },
+        )
+      }
+      const user = await openCategoriesPage()
+      await listedRows()
+
+      const dialog = await openAddDialog(user)
+      const picker = colourPicker(dialog)
+      expect(picker.getByRole('radio', { checked: true })).toBe(picker.getAllByRole('radio')[3])
+      await user.type(dialog.getByLabelText('Name'), 'Fitness')
+      await user.type(dialog.getByLabelText('Description'), 'Gym and sports.')
+      await user.click(dialog.getByRole('button', { name: 'Save' }))
+
+      expect(await screen.findByRole('status')).toHaveTextContent('Category added.')
+      expect(posted).toEqual({ name: 'Fitness', description: 'Gym and sports.', colour: '#1baf7a' })
+    })
+
     it('starts a new Category on no colour once every one is taken, and leaves its colour to the server', async () => {
       palette = ['#2a78d6', '#9085e9']
       let posted: unknown
@@ -3215,20 +3239,38 @@ describe('Rules page', () => {
     })
   })
 
-  describe('previewing an added rule', () => {
-    type RulePreview = {
-      changedCount: number
-      lockedCount: number
-      changes: {
-        id: number
-        date: string
-        description: string
-        amount: number
-        fromCategoryId: number | null
-        toCategoryId: number | null
-      }[]
-    }
+  type RulePreview = {
+    changedCount: number
+    lockedCount: number
+    changes: {
+      id: number
+      date: string
+      description: string
+      amount: number
+      fromCategoryId: number | null
+      toCategoryId: number | null
+    }[]
+  }
 
+  function answer(preview: RulePreview) {
+    return Response.json(preview)
+  }
+
+  // The add form and an edit ask only once typing has paused, so the tests move the clock on past that
+  // pause.
+  async function afterThePause() {
+    await act(() => vi.advanceTimersByTimeAsync(1_000))
+  }
+
+  function preview() {
+    return screen.queryByRole('region', { name: 'Preview' })
+  }
+
+  function findPreview() {
+    return screen.findByRole('region', { name: 'Preview' })
+  }
+
+  describe('previewing an added rule', () => {
     // What the add preview answers for a request, and every request it was asked.
     let handlePreview: (body: { keyword: string; categoryId: number }) => Response | Promise<Response>
     let asked: unknown[]
@@ -3248,23 +3290,6 @@ describe('Rules page', () => {
       amount: -54,
       fromCategoryId: 13,
       toCategoryId: 1,
-    }
-
-    function answer(preview: RulePreview) {
-      return Response.json(preview)
-    }
-
-    // The form asks only once typing has paused, so the tests move the clock on past that pause.
-    async function afterThePause() {
-      await act(() => vi.advanceTimersByTimeAsync(1_000))
-    }
-
-    function preview() {
-      return screen.queryByRole('region', { name: 'Preview' })
-    }
-
-    function findPreview() {
-      return screen.findByRole('region', { name: 'Preview' })
     }
 
     async function fillAddForm(user: ReturnType<typeof userEvent.setup>, keyword: string, category: string) {
@@ -3483,6 +3508,35 @@ describe('Rules page', () => {
       expect(preview()).not.toBeInTheDocument()
     })
 
+    it('asks again once the other rules change, as when one is deleted or edited, never showing the old answer', async () => {
+      let changedCount = 3
+      handlePreview = () => answer({ changedCount, lockedCount: 0, changes: [] })
+      const user = await openRulesPage()
+      await fillAddForm(user, 'butikk', 'Groceries')
+      await afterThePause()
+      expect(await findPreview()).toHaveTextContent('Would change 3 transactions')
+
+      changedCount = 5
+      await user.click(within(ruleRow('kiwi')).getByRole('button', { name: 'Delete' }))
+      await screen.findByText('Rule deleted. 0 transactions changed category.')
+
+      expect(screen.queryByText('Would change 3 transactions')).not.toBeInTheDocument()
+      await afterThePause()
+      await waitFor(() => expect(preview()).toHaveTextContent('Would change 5 transactions'))
+
+      changedCount = 8
+      await user.click(within(ruleRow('overføring mellom egne kontoer')).getByRole('button', { name: 'Edit' }))
+      const editing = within(screen.getByRole('button', { name: 'Save' }).closest('tr')!)
+      await user.selectOptions(editing.getByLabelText('Category'), 'Groceries')
+      await user.click(editing.getByRole('button', { name: 'Save' }))
+      await screen.findByText('Rule updated. 0 transactions changed category.')
+
+      expect(screen.queryByText('Would change 5 transactions')).not.toBeInTheDocument()
+      await afterThePause()
+      await waitFor(() => expect(preview()).toHaveTextContent('Would change 8 transactions'))
+      expect(asked.at(-1)).toEqual({ keyword: 'butikk', categoryId: 1 })
+    })
+
     it('goes once the rule is added, with the same message after saving as without it', async () => {
       handlePreview = () => answer({ changedCount: 3, lockedCount: 0, changes: [] })
       handleAddRule = () =>
@@ -3535,7 +3589,7 @@ describe('Rules page', () => {
 
     beforeEach(() => {
       rules = [kiwi, rema]
-      handlePreview = () => Response.json({ changedCount: 5, lockedCount: 0, changes: [kiwiSentrum, kiwiKafe] })
+      handlePreview = () => answer({ changedCount: 5, lockedCount: 0, changes: [kiwiSentrum, kiwiKafe] })
       asked = []
       vi.stubGlobal(
         'fetch',
@@ -3681,19 +3735,6 @@ describe('Rules page', () => {
   })
 
   describe('previewing an edited rule', () => {
-    type RulePreview = {
-      changedCount: number
-      lockedCount: number
-      changes: {
-        id: number
-        date: string
-        description: string
-        amount: number
-        fromCategoryId: number | null
-        toCategoryId: number | null
-      }[]
-    }
-
     // What the edit preview answers for a rule and request, and every rule and request it was asked.
     let handlePreview: (id: number, body: { keyword: string; categoryId: number }) => Response | Promise<Response>
     let asked: { id: number; body: unknown }[]
@@ -3706,23 +3747,6 @@ describe('Rules page', () => {
       amount: -249.9,
       fromCategoryId: 1,
       toCategoryId: null,
-    }
-
-    function answer(preview: RulePreview) {
-      return Response.json(preview)
-    }
-
-    // The edit asks only once typing has paused, so the tests move the clock on past that pause.
-    async function afterThePause() {
-      await act(() => vi.advanceTimersByTimeAsync(1_000))
-    }
-
-    function preview() {
-      return screen.queryByRole('region', { name: 'Preview' })
-    }
-
-    function findPreview() {
-      return screen.findByRole('region', { name: 'Preview' })
     }
 
     beforeEach(() => {
@@ -3890,6 +3914,30 @@ describe('Rules page', () => {
       await afterThePause()
       expect(await findPreview()).toHaveTextContent('Would change 2 transactions')
       expect(asked.at(-1)).toEqual({ id: 2, body: { keyword: 'kiwi pluss', categoryId: 1 } })
+    })
+
+    it('asks again once the other rules change, as when one is deleted, never showing the old answer', async () => {
+      rules = [
+        { id: 1, keyword: 'kiwi', categoryId: 1, aiGenerated: false, isNew: false },
+        { id: 3, keyword: 'kiwi pluss', categoryId: 1, aiGenerated: false, isNew: false },
+      ]
+      let changedCount = 3
+      handlePreview = () => answer({ changedCount, lockedCount: 0, changes: [] })
+      const user = await openRulesPage()
+      const row = await startEditingKiwi(user)
+      await user.selectOptions(row.getByLabelText('Category'), 'Other')
+      await afterThePause()
+      expect(await findPreview()).toHaveTextContent('Would change 3 transactions')
+
+      // Without kiwi pluss, kiwi categorizes the transactions it took too.
+      changedCount = 5
+      await user.click(within(ruleRow('kiwi pluss')).getByRole('button', { name: 'Delete' }))
+      await screen.findByText('Rule deleted. 0 transactions changed category.')
+
+      expect(screen.queryByText('Would change 3 transactions')).not.toBeInTheDocument()
+      await afterThePause()
+      await waitFor(() => expect(preview()).toHaveTextContent('Would change 5 transactions'))
+      expect(asked.at(-1)).toEqual({ id: 1, body: { keyword: 'kiwi', categoryId: 13 } })
     })
 
     it('goes once the edit is saved or cancelled, with the same message after saving as without it', async () => {
@@ -6281,6 +6329,130 @@ describe("Transactions page from a Category's Transactions count", () => {
 
     expect(await screen.findByRole('cell', { name: 'Rema 1000' })).toBeInTheDocument()
     expect(chosenFilters()).toEqual(['2026', 'March', 'All categories'])
+  })
+})
+
+describe("Rules page from a Category's rule count", () => {
+  const health = { id: 7, name: 'Health', description: 'Pharmacy etc.', builtIn: false, transactionCount: 4, ruleCount: 0 }
+
+  beforeEach(() => {
+    categoriesServed = [{ ...categories[0], ruleCount: 2 }, health, { ...categories[1], ruleCount: 1 }]
+    rules = [
+      { id: 3, keyword: 'apotek', categoryId: 13, aiGenerated: false, isNew: false },
+      { id: 1, keyword: 'kiwi', categoryId: 1, aiGenerated: false, isNew: false },
+      { id: 4, keyword: 'rema', categoryId: 1, aiGenerated: false, isNew: false },
+    ]
+  })
+
+  async function openCategoriesPage() {
+    const user = userEvent.setup()
+    await renderApp()
+    await user.click(screen.getByRole('button', { name: 'Categories' }))
+    await screen.findByText('All groceries.')
+    return user
+  }
+
+  function keywords() {
+    return screen
+      .getAllByRole('row')
+      .slice(1)
+      .map((row) => within(row).getAllByRole('cell')[0].textContent)
+  }
+
+  it('links each nonzero count, and shows a zero count as plain text', async () => {
+    await openCategoriesPage()
+
+    expect(screen.getByRole('button', { name: 'Show rules for Groceries (2)' })).toHaveTextContent('2')
+    expect(screen.getByRole('button', { name: 'Show rules for Other (1)' })).toHaveTextContent('1')
+    const healthRow = screen.getByRole('row', { name: /Health/ })
+    expect(within(healthRow).queryByRole('button', { name: /Show rules/ })).not.toBeInTheDocument()
+    expect(within(healthRow).getAllByRole('cell')[3]).toHaveTextContent('0')
+  })
+
+  it("opens Rules filtered to the Category, listing only that Category's rules", async () => {
+    const user = await openCategoriesPage()
+
+    await user.click(screen.getByRole('button', { name: 'Show rules for Groceries (2)' }))
+
+    expect(await screen.findByRole('cell', { name: 'kiwi' })).toBeInTheDocument()
+    expect(keywords()).toEqual(['kiwi', 'rema'])
+    expect(screen.getByRole('combobox', { name: 'Filter by category' })).toHaveDisplayValue('Groceries')
+    expect(screen.getByRole('button', { name: 'Rules' })).toHaveAttribute('aria-current', 'page')
+  })
+
+  it('lets the filter be changed like any other once open', async () => {
+    const user = await openCategoriesPage()
+    await user.click(screen.getByRole('button', { name: 'Show rules for Groceries (2)' }))
+    await screen.findByRole('cell', { name: 'kiwi' })
+    const filter = screen.getByRole('combobox', { name: 'Filter by category' })
+
+    await user.selectOptions(filter, 'Other')
+    expect(keywords()).toEqual(['apotek'])
+
+    await user.selectOptions(filter, 'All categories')
+    expect(keywords()).toEqual(['apotek', 'kiwi', 'rema'])
+  })
+
+  it('starts the add form on the filtered Category, and again once a rule is added', async () => {
+    const user = await openCategoriesPage()
+    await user.click(screen.getByRole('button', { name: 'Show rules for Groceries (2)' }))
+    await screen.findByRole('cell', { name: 'kiwi' })
+
+    expect(screen.getByLabelText('Category')).toHaveDisplayValue('Groceries')
+
+    await user.type(screen.getByLabelText('Keyword'), 'meny')
+    await user.click(screen.getByRole('button', { name: 'Add rule' }))
+
+    expect(await screen.findByRole('cell', { name: 'meny' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Keyword')).toHaveValue('')
+    expect(screen.getByLabelText('Category')).toHaveDisplayValue('Groceries')
+  })
+
+  it("moves the add form's Category with the filter while no keyword is typed in the form", async () => {
+    const user = await openCategoriesPage()
+    await user.click(screen.getByRole('button', { name: 'Show rules for Groceries (2)' }))
+    await screen.findByRole('cell', { name: 'kiwi' })
+    const filter = screen.getByRole('combobox', { name: 'Filter by category' })
+
+    await user.selectOptions(filter, 'Other')
+    expect(screen.getByLabelText('Category')).toHaveDisplayValue('Other')
+
+    await user.selectOptions(filter, 'All categories')
+    expect(screen.getByLabelText('Category')).toHaveDisplayValue('Choose…')
+
+    await user.selectOptions(screen.getByLabelText('Category'), 'Health')
+    await user.selectOptions(filter, 'Groceries')
+    expect(screen.getByLabelText('Category')).toHaveDisplayValue('Groceries')
+  })
+
+  it("leaves a half-written rule's Category as it is when the filter changes", async () => {
+    const user = await openCategoriesPage()
+    await user.click(screen.getByRole('button', { name: 'Show rules for Groceries (2)' }))
+    await screen.findByRole('cell', { name: 'kiwi' })
+    const filter = screen.getByRole('combobox', { name: 'Filter by category' })
+    await user.type(screen.getByLabelText('Keyword'), 'meny')
+
+    await user.selectOptions(filter, 'Other')
+    expect(screen.getByLabelText('Category')).toHaveDisplayValue('Groceries')
+
+    await user.selectOptions(filter, 'All categories')
+    expect(screen.getByLabelText('Category')).toHaveDisplayValue('Groceries')
+    expect(screen.getByLabelText('Keyword')).toHaveValue('meny')
+  })
+
+  it('opens from the header on all rules, with no Category chosen to add, after following a count', async () => {
+    const user = await openCategoriesPage()
+    await user.click(screen.getByRole('button', { name: 'Show rules for Other (1)' }))
+    await screen.findByRole('cell', { name: 'apotek' })
+
+    await user.click(screen.getByRole('button', { name: 'Categories' }))
+    await screen.findByText('All groceries.')
+    await user.click(screen.getByRole('button', { name: 'Rules' }))
+
+    expect(await screen.findByRole('cell', { name: 'kiwi' })).toBeInTheDocument()
+    expect(keywords()).toEqual(['apotek', 'kiwi', 'rema'])
+    expect(screen.getByRole('combobox', { name: 'Filter by category' })).toHaveDisplayValue('All categories')
+    expect(screen.getByLabelText('Category')).toHaveDisplayValue('Choose…')
   })
 })
 

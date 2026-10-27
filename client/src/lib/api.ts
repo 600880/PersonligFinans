@@ -1025,7 +1025,8 @@ export type DeleteRuleResult =
 
 // What a rule change would do, without doing it. changedCount: how many Transactions would change
 // Category. lockedCount: how many Locked Transactions contain the keyword, which it leaves as they
-// are. changes: up to ten of the Transactions that would change, newest first.
+// are. changes: up to the server's Categorizer.PreviewedChangesMax of the Transactions that would
+// change, newest first.
 export interface RulePreview {
   changedCount: number
   lockedCount: number
