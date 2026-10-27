@@ -3,11 +3,13 @@ import { fetchCategories, fetchRules, type CategorizationRule, type Category } f
 import { useIsDark } from '../lib/appearance'
 import { categoryColour } from '../lib/categoryColours'
 import { categoryFilterOf, matchesCategory } from '../lib/categoryFilter'
+import { norwegian } from '../lib/norwegian'
 import { CategorySwatch } from './CategorySwatch'
 import { ErrorMessage, StatusMessage } from './Messages'
+import { panelClass, panelHeadClass, toolbarSelectClass } from './panel'
 import { RuleDeleteDialog, type RuleDeleted } from './RuleDeleteDialog'
 import { RuleDialog, type RuleSaved } from './RuleDialog'
-import { SortableHeading } from './SortableHeading'
+import { SortableHeading, type Sort } from './SortableHeading'
 import { ToolbarSearch } from './ToolbarSearch'
 
 function changedMessage(action: string, transactionsChanged: number) {
@@ -15,24 +17,15 @@ function changedMessage(action: string, transactionsChanged: number) {
   return `${action} ${transactionsChanged} ${transactions} changed category.`
 }
 
-// In the Norwegian alphabet, so Æ, Ø and Å come after Z whatever the browser's language.
-function norwegian(a: string, b: string) {
-  return a.localeCompare(b, 'nb', { sensitivity: 'accent' })
-}
-
 function byKeyword(a: CategorizationRule, b: CategorizationRule) {
   return norwegian(a.keyword, b.keyword)
 }
 
-// The column the table is sorted by, and which way, named as aria-sort names it.
+// The columns the table can be sorted by.
 type SortColumn = 'keyword' | 'category'
-interface RuleSort {
-  column: SortColumn
-  direction: 'ascending' | 'descending'
-}
 
 // Sorts by the column, and rules that tie on it by keyword A–Å whichever way the column goes.
-function sortedRules(rules: CategorizationRule[], sort: RuleSort, categoryName: (id: number) => string) {
+function sortedRules(rules: CategorizationRule[], sort: Sort<SortColumn>, categoryName: (id: number) => string) {
   const byColumn = {
     keyword: byKeyword,
     category: (a: CategorizationRule, b: CategorizationRule) =>
@@ -51,12 +44,14 @@ function matchesSearch(rule: CategorizationRule, search: string) {
 // The rule dialog that is open: for adding a rule, or editing one.
 type OpenRuleDialog = { kind: 'add' } | { kind: 'edit'; rule: CategorizationRule }
 
-// On a phone, each rule's row is laid out as a card, and its cells stack inside it.
-const cardClass =
-  'max-sm:flex max-sm:flex-col max-sm:gap-2 max-sm:rounded-lg max-sm:border max-sm:border-slate-200 max-sm:dark:border-slate-800 max-sm:bg-white max-sm:dark:bg-slate-900 max-sm:p-3'
-// The actions last in a card, under a line that keeps them apart from what they act on.
+// On a phone each rule's row is laid out as a card inside the panel instead, ruled off from the next as
+// the Categories' rows are, and its cells stack inside it.
+const rowClass = 'max-sm:flex max-sm:flex-col max-sm:gap-2 max-sm:px-4 max-sm:py-3'
+const keywordCellClass = 'py-3 pr-3 pl-4 font-medium break-words max-sm:block max-sm:p-0'
+const categoryCellClass = 'py-3 pr-3 text-slate-700 dark:text-slate-300 max-sm:block max-sm:p-0'
+// The actions last in a card, at its right as they are in the table.
 const actionsCellClass =
-  'py-2 text-right whitespace-nowrap max-sm:-mx-1 max-sm:flex max-sm:justify-end max-sm:gap-1 max-sm:border-t max-sm:border-slate-100 max-sm:dark:border-slate-800/60 max-sm:pt-2 max-sm:pb-0'
+  'py-2 pr-4 pl-3 text-right whitespace-nowrap max-sm:flex max-sm:justify-end max-sm:gap-1 max-sm:p-0'
 const badgeClass = 'ml-1 inline-flex items-center rounded-md px-1.5 py-0.5 align-middle text-xs font-medium ring-1 ring-inset'
 const smallButtonClass =
   'rounded-lg px-2 py-1 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:cursor-not-allowed disabled:text-slate-300 dark:disabled:text-slate-600'
@@ -90,7 +85,7 @@ export function RulesPage({ target }: { target?: RulesTarget }) {
   const [deleting, setDeleting] = useState<CategorizationRule | null>(null)
   const [newOnly, setNewOnly] = useState(false)
   const [search, setSearch] = useState('')
-  const [sort, setSort] = useState<RuleSort>({ column: 'keyword', direction: 'ascending' })
+  const [sort, setSort] = useState<Sort<SortColumn>>({ column: 'keyword', direction: 'ascending' })
 
   useEffect(() => {
     let ignore = false
@@ -111,6 +106,7 @@ export function RulesPage({ target }: { target?: RulesTarget }) {
   const dark = useIsDark()
   const categoryName = (id: number) => categories.find((c) => c.id === id)?.name ?? ''
   const hasNewRules = rules.some((r) => r.isNew)
+  const newOnlyDisabledReason = hasNewRules ? undefined : 'The last upload added no rules'
   // "Show only new" does nothing while it is disabled, so once no rule is New it is off, even if it was
   // ticked before.
   const isNewOnly = newOnly && hasNewRules
@@ -132,10 +128,10 @@ export function RulesPage({ target }: { target?: RulesTarget }) {
 
   // A save that finishes after its dialog was cancelled still happened, so it is listed and told,
   // but leaves alone any dialog opened since.
-  function handleSaved(saved: OpenRuleDialog, { rule, transactionsChanged }: RuleSaved) {
-    setRules((rules) => (saved.kind === 'add' ? [...rules, rule] : rules.map((r) => (r.id === rule.id ? rule : r))))
-    setDialog((open) => (open === saved ? null : open))
-    setStatusMessage(changedMessage(saved.kind === 'add' ? 'Rule added.' : 'Rule updated.', transactionsChanged))
+  function handleSaved(dialog: OpenRuleDialog, { rule, transactionsChanged }: RuleSaved) {
+    setRules((rules) => (dialog.kind === 'add' ? [...rules, rule] : rules.map((r) => (r.id === rule.id ? rule : r))))
+    setDialog((open) => (open === dialog ? null : open))
+    setStatusMessage(changedMessage(dialog.kind === 'add' ? 'Rule added.' : 'Rule updated.', transactionsChanged))
   }
 
   // A column already sorted by turns the other way; another starts A–Å.
@@ -185,7 +181,7 @@ export function RulesPage({ target }: { target?: RulesTarget }) {
           aria-label="Filter by category"
           value={categoryFilter}
           onChange={(event) => setCategoryFilter(event.target.value)}
-          className="min-w-0 rounded-lg border border-slate-300 dark:border-slate-700 px-3 py-1.5 text-sm text-slate-900 dark:text-slate-100"
+          className={toolbarSelectClass}
         >
           <option value="">All categories</option>
           {categories.map((category) => (
@@ -194,10 +190,10 @@ export function RulesPage({ target }: { target?: RulesTarget }) {
             </option>
           ))}
         </select>
-        {/* The title is on the label rather than the checkbox, so hovering the words says why it is
-            disabled too. */}
+        {/* Why it is disabled is on the label, so hovering the words says it too, and on the checkbox,
+            so a screen reader says it. */}
         <label
-          title={hasNewRules ? undefined : 'The last upload added no rules'}
+          title={newOnlyDisabledReason}
           className={`ml-auto flex shrink-0 items-center gap-2 text-sm font-medium ${
             hasNewRules ? 'text-slate-700 dark:text-slate-300' : 'cursor-not-allowed text-slate-400 dark:text-slate-600'
           }`}
@@ -206,6 +202,7 @@ export function RulesPage({ target }: { target?: RulesTarget }) {
             type="checkbox"
             checked={isNewOnly}
             disabled={!hasNewRules}
+            title={newOnlyDisabledReason}
             onChange={(event) => setNewOnly(event.target.checked)}
             className="size-4 rounded border-slate-300 dark:border-slate-700 disabled:cursor-not-allowed"
           />
@@ -216,68 +213,70 @@ export function RulesPage({ target }: { target?: RulesTarget }) {
       {isFiltering && shownRules.length === 0 ? (
         <p className="mt-6 text-sm text-slate-500 dark:text-slate-400">No rules match</p>
       ) : (
-        /* On a phone each rule is a card of its own, keyword and badges, then its Category, then its
-           actions, so nothing scrolls sideways or drops off the edge of the screen. */
-        <table className="mt-3 w-full text-left text-sm max-sm:block">
-          <thead className="border-b border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 max-sm:hidden">
-            <tr>
-              <SortableHeading column="keyword" sort={sort} onSort={chooseSort} className="py-2 pr-3">
-                Keyword
-              </SortableHeading>
-              <SortableHeading column="category" sort={sort} onSort={chooseSort} className="py-2 pr-3">
-                Category
-              </SortableHeading>
-              <th className="py-2">
-                <span className="sr-only">Actions</span>
-              </th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-200 dark:divide-slate-800 text-slate-900 dark:text-slate-100 max-sm:block max-sm:space-y-2 max-sm:divide-y-0">
-            {shownRules.map((rule) => (
-              <tr key={rule.id} className={cardClass}>
-                <td className="py-2.5 pr-3 font-medium break-words max-sm:block max-sm:p-0">
-                  {rule.keyword}
-                  {rule.aiGenerated && (
-                    <>
-                      {' '}
-                      <span
-                        title="AI-generated rule"
-                        className={`${badgeClass} bg-violet-50 dark:bg-violet-950/40 text-violet-700 dark:text-violet-300 ring-violet-600/20 dark:ring-violet-400/30`}
-                      >
-                        AI
-                      </span>
-                    </>
-                  )}
-                  {rule.isNew && (
-                    <>
-                      {' '}
-                      <span
-                        title="Added by the last upload"
-                        className={`${badgeClass} bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 ring-emerald-600/20 dark:ring-emerald-400/30`}
-                      >
-                        New
-                      </span>
-                    </>
-                  )}
-                </td>
-                <td className="py-2.5 pr-3 text-slate-700 dark:text-slate-300 max-sm:block max-sm:p-0">
-                  <RuleCategory
-                    name={categoryName(rule.categoryId)}
-                    colour={categoryColour(rule.categoryId, categories, dark)}
-                  />
-                </td>
-                <td className={actionsCellClass}>
-                  <button type="button" onClick={() => openDialog({ kind: 'edit', rule })} className={smallButtonClass}>
-                    Edit
-                  </button>
-                  <button type="button" onClick={() => setDeleting(rule)} className={smallButtonClass}>
-                    Delete
-                  </button>
-                </td>
+        <div className={`mt-3 ${panelClass}`}>
+          {/* On a phone each rule is a card instead, keyword and badges, then its Category, then its
+              actions, so nothing scrolls sideways or drops off the edge of the screen. */}
+          <table className="w-full text-left text-sm max-sm:block">
+            <thead className={panelHeadClass}>
+              <tr>
+                <SortableHeading column="keyword" sort={sort} onSort={chooseSort} className="py-2.5 pr-3 pl-4">
+                  Keyword
+                </SortableHeading>
+                <SortableHeading column="category" sort={sort} onSort={chooseSort} className="py-2.5 pr-3">
+                  Category
+                </SortableHeading>
+                <th className="py-2.5 pr-4 pl-3">
+                  <span className="sr-only">Actions</span>
+                </th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody className="divide-y divide-slate-200 dark:divide-slate-800 text-slate-900 dark:text-slate-100 max-sm:block">
+              {shownRules.map((rule) => (
+                <tr key={rule.id} className={rowClass}>
+                  <td className={keywordCellClass}>
+                    {rule.keyword}
+                    {rule.aiGenerated && (
+                      <>
+                        {' '}
+                        <span
+                          title="AI-generated rule"
+                          className={`${badgeClass} bg-violet-50 dark:bg-violet-950/40 text-violet-700 dark:text-violet-300 ring-violet-600/20 dark:ring-violet-400/30`}
+                        >
+                          AI
+                        </span>
+                      </>
+                    )}
+                    {rule.isNew && (
+                      <>
+                        {' '}
+                        <span
+                          title="Added by the last upload"
+                          className={`${badgeClass} bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 ring-emerald-600/20 dark:ring-emerald-400/30`}
+                        >
+                          New
+                        </span>
+                      </>
+                    )}
+                  </td>
+                  <td className={categoryCellClass}>
+                    <RuleCategory
+                      name={categoryName(rule.categoryId)}
+                      colour={categoryColour(rule.categoryId, categories, dark)}
+                    />
+                  </td>
+                  <td className={actionsCellClass}>
+                    <button type="button" onClick={() => openDialog({ kind: 'edit', rule })} className={smallButtonClass}>
+                      Edit
+                    </button>
+                    <button type="button" onClick={() => setDeleting(rule)} className={smallButtonClass}>
+                      Delete
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
 
       {/* The add dialog starts on the Category the list is filtered to as it opens, or on none while all

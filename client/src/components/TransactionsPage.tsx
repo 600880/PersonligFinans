@@ -31,6 +31,7 @@ import { formatAmount } from '../lib/amount'
 import { formatNorwegianDate } from '../lib/date'
 import { inFolderOrder } from '../lib/folders'
 import { currentMonth, MONTH_NAMES } from '../lib/month'
+import { norwegian } from '../lib/norwegian'
 import { periodLabel, periodValue, type Period } from '../lib/period'
 import { firstMonthWithTransactions, monthsOfQuarter } from '../lib/quarter'
 import { latestYearWithTransactions } from '../lib/year'
@@ -38,7 +39,9 @@ import { BookmarkAddedPopup } from './BookmarkAddedPopup'
 import { CategorySwatch } from './CategorySwatch'
 import { FolderDropdown, FolderNameForm } from './FolderDropdown'
 import { ErrorMessage, StatusMessage } from './Messages'
-import { panelClass, panelHeadClass } from './panel'
+import { panelClass, panelHeadClass, toolbarSelectClass } from './panel'
+import { SortableHeading, type Sort } from './SortableHeading'
+import { ToolbarSearch } from './ToolbarSearch'
 import { ZoomableReceipt } from './ZoomableReceipt'
 import { inputClassName } from './TransactionForm'
 
@@ -46,7 +49,6 @@ const LOAD_ERROR = 'Could not load the transactions.'
 const BOOKMARKS_LOAD_ERROR = 'Could not load the bookmarks.'
 const FOLDERS_LOAD_ERROR = 'Could not load the folders.'
 
-const inputClass = 'rounded-lg border border-slate-300 dark:border-slate-700 px-3 py-2 font-normal'
 const smallButtonClass =
   'rounded-lg px-2 py-1 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:cursor-not-allowed disabled:text-slate-300 dark:disabled:text-slate-600'
 const categorySelectClass =
@@ -116,6 +118,36 @@ function matchesSearch(transaction: Transaction, search: string) {
   return transaction.description.toLowerCase().includes(search.trim().toLowerCase())
 }
 
+// The columns the table can be sorted by.
+type SortColumn = 'date' | 'description' | 'category' | 'amount'
+
+// Posted dates are ISO dates, so they compare as text.
+function byDate(a: Transaction, b: Transaction) {
+  return a.date < b.date ? -1 : a.date > b.date ? 1 : 0
+}
+
+// Sorts by the column, and Transactions that tie on it newest first whichever way the column goes,
+// then in the order they came. The Amount is signed, so ascending puts the most negative Amount first.
+// Uncategorized goes after every Category ascending, so it stays together at one end.
+function sortedTransactions(
+  transactions: Transaction[],
+  sort: Sort<SortColumn>,
+  categoryName: (id: number) => string,
+) {
+  const byCategory = (a: Transaction, b: Transaction) =>
+    a.categoryId === null || b.categoryId === null
+      ? Number(a.categoryId === null) - Number(b.categoryId === null)
+      : norwegian(categoryName(a.categoryId), categoryName(b.categoryId))
+  const byColumn = {
+    date: byDate,
+    description: (a: Transaction, b: Transaction) => norwegian(a.description, b.description),
+    category: byCategory,
+    amount: (a: Transaction, b: Transaction) => a.amount - b.amount,
+  }[sort.column]
+  const direction = sort.direction === 'ascending' ? 1 : -1
+  return [...transactions].sort((a, b) => direction * byColumn(a, b) || byDate(b, a))
+}
+
 // Opens on All, on the target when given, with the search empty, and otherwise on the latest month
 // with Transactions and all Categories. The target is read on mount only.
 export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
@@ -166,6 +198,8 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
     target ? categoryFilterOf(target.categoryId) : '',
   )
   const [search, setSearch] = useState('')
+  // Newest first, as the Transactions have always been listed. Kept whatever else changes.
+  const [sort, setSort] = useState<Sort<SortColumn>>({ column: 'date', direction: 'descending' })
   // Kept from mount, so the target is looked at once.
   const [openingTarget] = useState(target)
 
@@ -248,10 +282,15 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
     loaded && selected && periodValue(loaded.period) === periodValue(selected) ? loaded.transactions : null
   const isFiltering = categoryFilter !== '' || search.trim() !== ''
   const chosenFolder = folders?.find((f) => f.id === chosenFolderId) ?? null
-  const shownTransactions =
+  const listedTransactions =
     list === 'bookmarks'
       ? bookmarks
       : (transactions?.filter((t) => matchesCategory(t, categoryFilter) && matchesSearch(t, search)) ?? null)
+  // Sorted as shown rather than as kept, so a Transaction whose Category changes lands where the sort
+  // puts it.
+  const shownTransactions =
+    listedTransactions &&
+    sortedTransactions(listedTransactions, sort, (id) => categories.find((c) => c.id === id)?.name ?? '')
 
   // Closes any open Note editor, delete confirmation or "Bookmark added" popup, and the chosen Folder's
   // name field or delete confirmation.
@@ -381,6 +420,17 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
   function chooseSearch(value: string) {
     closeOpenActions()
     setSearch(value)
+  }
+
+  // A column already sorted by turns the other way; Date starts newest first, the others A–Å or
+  // lowest first. The rows move, so whatever is open in one is closed, as when a filter changes.
+  function chooseSort(column: SortColumn) {
+    closeOpenActions()
+    setSort((current) =>
+      current.column === column
+        ? { column, direction: current.direction === 'ascending' ? 'descending' : 'ascending' }
+        : { column, direction: column === 'date' ? 'descending' : 'ascending' },
+    )
   }
 
   // Shows the change on the Transaction's row in both lists, whichever is shown, so the other one
@@ -624,68 +674,56 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
         </div>
       )}
 
+      {/* One compact toolbar, named for screen readers rather than labelled, like the Rules page's. On a
+          phone the search takes its own line, with the Year, Month and Category wrapping under it. */}
       {list === 'all' && selected && (
-        <div className="mt-4 flex flex-wrap gap-3">
-          <label className="flex flex-col gap-1 text-sm font-medium text-slate-700 dark:text-slate-300">
-            Year
-            <select
-              value={selected.year}
-              onChange={(event) => choosePeriod({ ...selected, year: Number(event.target.value) })}
-              className={inputClass}
-            >
-              {years.map((year) => (
-                <option key={year} value={year}>
-                  {year}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="flex flex-col gap-1 text-sm font-medium text-slate-700 dark:text-slate-300">
-            Month
-            <select
-              value={selected.granularity === 'month' ? selected.month : ''}
-              onChange={(event) =>
-                choosePeriod(
-                  event.target.value === ''
-                    ? { granularity: 'year', year: selected.year }
-                    : { granularity: 'month', year: selected.year, month: Number(event.target.value) },
-                )
-              }
-              className={inputClass}
-            >
-              <option value="">All months</option>
-              {MONTH_NAMES.map((name, index) => (
-                <option key={name} value={index + 1}>
-                  {name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="flex flex-col gap-1 text-sm font-medium text-slate-700 dark:text-slate-300">
-            Category
-            <select
-              value={categoryFilter}
-              onChange={(event) => chooseCategoryFilter(event.target.value)}
-              className={inputClass}
-            >
-              <option value="">All categories</option>
-              {categories.map((category) => (
-                <option key={category.id} value={category.id}>
-                  {category.name}
-                </option>
-              ))}
-              <option value={UNCATEGORIZED}>Uncategorized</option>
-            </select>
-          </label>
-          <label className="flex flex-1 flex-col gap-1 text-sm font-medium text-slate-700 dark:text-slate-300">
-            Search
-            <input
-              type="search"
-              value={search}
-              onChange={(event) => chooseSearch(event.target.value)}
-              className={inputClass}
-            />
-          </label>
+        <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2">
+          <ToolbarSearch placeholder="Search descriptions" value={search} onChange={chooseSearch} />
+          <select
+            aria-label="Year"
+            value={selected.year}
+            onChange={(event) => choosePeriod({ ...selected, year: Number(event.target.value) })}
+            className={toolbarSelectClass}
+          >
+            {years.map((year) => (
+              <option key={year} value={year}>
+                {year}
+              </option>
+            ))}
+          </select>
+          <select
+            aria-label="Month"
+            value={selected.granularity === 'month' ? selected.month : ''}
+            onChange={(event) =>
+              choosePeriod(
+                event.target.value === ''
+                  ? { granularity: 'year', year: selected.year }
+                  : { granularity: 'month', year: selected.year, month: Number(event.target.value) },
+              )
+            }
+            className={toolbarSelectClass}
+          >
+            <option value="">All months</option>
+            {MONTH_NAMES.map((name, index) => (
+              <option key={name} value={index + 1}>
+                {name}
+              </option>
+            ))}
+          </select>
+          <select
+            aria-label="Filter by category"
+            value={categoryFilter}
+            onChange={(event) => chooseCategoryFilter(event.target.value)}
+            className={toolbarSelectClass}
+          >
+            <option value="">All categories</option>
+            {categories.map((category) => (
+              <option key={category.id} value={category.id}>
+                {category.name}
+              </option>
+            ))}
+            <option value={UNCATEGORIZED}>Uncategorized</option>
+          </select>
         </div>
       )}
 
@@ -714,17 +752,25 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
           <table className="w-full text-left text-sm max-sm:block">
             <thead className={panelHeadClass}>
               <tr>
-                <th className="py-2 pl-4 font-medium">Date</th>
-                <th className="py-2 font-medium">Description</th>
-                <th className="py-2 font-medium">Category</th>
-                <th className="py-2 text-right font-medium">Amount</th>
-                <th className="py-2">
+                <SortableHeading column="date" sort={sort} onSort={chooseSort} className="py-2.5 pr-3 pl-4">
+                  Date
+                </SortableHeading>
+                <SortableHeading column="description" sort={sort} onSort={chooseSort} className="py-2.5 pr-3">
+                  Description
+                </SortableHeading>
+                <SortableHeading column="category" sort={sort} onSort={chooseSort} className="py-2.5 pr-3">
+                  Category
+                </SortableHeading>
+                <SortableHeading column="amount" sort={sort} onSort={chooseSort} className="py-2.5 text-right">
+                  Amount
+                </SortableHeading>
+                <th className="py-2.5">
                   <span className="sr-only">Bookmark</span>
                 </th>
-                <th className="py-2">
+                <th className="py-2.5">
                   <span className="sr-only">Note</span>
                 </th>
-                <th className="py-2 pr-4">
+                <th className="py-2.5 pr-4">
                   <span className="sr-only">Delete</span>
                 </th>
               </tr>

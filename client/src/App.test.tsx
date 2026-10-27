@@ -2450,8 +2450,30 @@ describe('Rules page', () => {
     expect(keywords()).toEqual(['ark', 'zara', 'æble', 'ørn', 'åpent'])
   })
 
-  it('stacks each rule as a phone shows its card: keyword and badges, then its Category, then its actions', async () => {
-    rules = [{ id: 3, keyword: 'café løkka', categoryId: 13, aiGenerated: true, isNew: true }]
+  it('lists the rules in the white panel the Categories sit in, slate in Dark, with a ruled header row', async () => {
+    await openRulesPage()
+
+    // jsdom applies no stylesheet, so the panel is checked by its classes, as the phone layout is.
+    const table = screen.getByRole('table')
+    expect(table.parentElement).toHaveClass('rounded-lg', 'border', 'bg-white', 'dark:bg-slate-900', 'shadow-sm')
+    const [head] = within(table).getAllByRole('rowgroup')
+    expect(head).toHaveClass('border-b')
+    // The first and last columns keep their content off the panel's edges.
+    const [firstHeading, ...otherHeadings] = within(head).getAllByRole('columnheader')
+    expect(firstHeading).toHaveClass('pl-4')
+    expect(otherHeadings.at(-1)).toHaveClass('pr-4')
+    for (const row of within(table).getAllByRole('row').slice(1)) {
+      const cells = within(row).getAllByRole('cell')
+      expect(cells[0]).toHaveClass('pl-4')
+      expect(cells.at(-1)).toHaveClass('pr-4')
+    }
+  })
+
+  it('stacks each rule as a phone shows its card inside the panel: keyword and badges, then its Category, then its actions', async () => {
+    rules = [
+      { id: 3, keyword: 'café løkka', categoryId: 13, aiGenerated: true, isNew: true },
+      { id: 1, keyword: 'kiwi', categoryId: 1, aiGenerated: false, isNew: false },
+    ]
     const user = userEvent.setup()
     await renderApp()
     await user.click(screen.getByRole('button', { name: 'Rules' }))
@@ -2471,8 +2493,13 @@ describe('Rules page', () => {
     expect(table).toHaveClass('max-sm:block')
     expect(head).toHaveClass('max-sm:hidden')
     expect(body).toHaveClass('max-sm:block')
-    expect(card).toHaveClass('max-sm:flex', 'max-sm:flex-col')
+    expect(card).toHaveClass('max-sm:flex', 'max-sm:flex-col', 'max-sm:px-4')
     for (const cell of [keyword, category]) expect(cell).toHaveClass('max-sm:block')
+    // The cards sit in the one panel, ruled apart as the Categories' rows are, rather than each
+    // floating as a box of its own.
+    expect(body).toHaveClass('divide-y')
+    expect(body).not.toHaveClass('max-sm:divide-y-0')
+    for (const row of within(body).getAllByRole('row')) expect(row).not.toHaveClass('max-sm:border', 'max-sm:rounded-lg')
     // Nothing on the page is wider than the screen or scrolls sideways.
     const page = screen.getByRole('heading', { name: 'Categorization Rules' }).closest('section')!
     expect(page.querySelector('[class*="overflow-x-auto"], [class*="min-w-"]:not([class*="min-w-0"])')).toBeNull()
@@ -2849,7 +2876,8 @@ describe('Rules page', () => {
     const newOnly = screen.getByRole('checkbox', { name: 'Show only new' })
     expect(newOnly).toBeDisabled()
     expect(newOnly).not.toBeChecked()
-    expect(screen.getByTitle('The last upload added no rules')).toContainElement(newOnly)
+    expect(newOnly).toHaveAccessibleDescription('The last upload added no rules')
+    expect(newOnly.closest('label')).toHaveAttribute('title', 'The last upload added no rules')
   })
 
   it('turns Show only new off and shows every rule again once no rule is New, as when the last New one is deleted', async () => {
@@ -2993,6 +3021,8 @@ describe('Rules page', () => {
 
       expect(screen.getByText('No rules match')).toBeInTheDocument()
       expect(screen.queryByRole('table')).not.toBeInTheDocument()
+      // On the page, not in an empty panel.
+      expect(screen.getByText('No rules match').closest('[class*="bg-white"]')).toBeNull()
     })
   })
 
@@ -4176,6 +4206,42 @@ describe('Transactions page', () => {
     expect(monthOptions.map((option) => option.textContent)).toEqual(['All months', ...monthNames])
   })
 
+  // The All view's toolbar: the search, then the Year, Month and Category selects, in that order.
+  function toolbarControls() {
+    return [
+      screen.getByRole<HTMLInputElement>('searchbox', { name: 'Search' }),
+      screen.getByRole<HTMLSelectElement>('combobox', { name: 'Year' }),
+      screen.getByRole<HTMLSelectElement>('combobox', { name: 'Month' }),
+      screen.getByRole<HTMLSelectElement>('combobox', { name: 'Filter by category' }),
+    ]
+  }
+
+  it('has a toolbar of the search for descriptions, then the Year, Month and Category selects, each named without a visible label', async () => {
+    await openSeptember()
+
+    const controls = toolbarControls()
+    expect(controls[0]).toHaveAttribute('placeholder', 'Search descriptions')
+    for (const control of controls) expect(control.labels).toHaveLength(0)
+    for (const [index, control] of controls.slice(1).entries()) {
+      expect(controls[index].compareDocumentPosition(control) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    }
+  })
+
+  it('wraps the toolbar on a phone, with the search on its own line, never scrolling sideways', async () => {
+    await openSeptember()
+
+    const [search, ...selects] = toolbarControls()
+    const searchLine = search.parentElement!
+    const toolbar = searchLine.parentElement!
+    expect(toolbar).toHaveClass('flex-wrap')
+    expect(searchLine).toHaveClass('max-sm:basis-full')
+    for (const select of selects) {
+      expect(select.parentElement).toBe(toolbar)
+      // Shrinking, so a long Category name never pushes the toolbar wider than the screen.
+      expect(select).toHaveClass('min-w-0')
+    }
+  })
+
   it("lists the whole year's Transactions when All months is chosen", async () => {
     months = [
       { year: 2026, month: 9 },
@@ -4239,7 +4305,7 @@ describe('Transactions page', () => {
     const user = await openTransactionsPage()
     await screen.findByRole('cell', { name: 'Rema 1000' })
 
-    const filter = screen.getByRole<HTMLSelectElement>('combobox', { name: 'Category' })
+    const filter = screen.getByRole<HTMLSelectElement>('combobox', { name: 'Filter by category' })
     expect(filter).toHaveValue('')
     expect(optionsOf(filter).map((option) => option.name)).toEqual([
       'All categories',
@@ -4259,7 +4325,7 @@ describe('Transactions page', () => {
   })
 
   it('narrows the rows to matching descriptions as the search is typed, ignoring case and surrounding spaces', async () => {
-    const bøker = { ...septemberTransactions[0], id: 10, description: 'Bøker Og Blader' }
+    const bøker = { ...septemberTransactions[0], id: 10, date: '2026-09-05', description: 'Bøker Og Blader' }
     months = [{ year: 2026, month: 9 }]
     handleListPeriod = () => Response.json([...otherCategoryTransactions, bøker])
     const user = await openTransactionsPage()
@@ -4303,20 +4369,20 @@ describe('Transactions page', () => {
     const user = await openTransactionsPage()
     await screen.findByRole('cell', { name: 'Rema 1000' })
 
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Category' }), 'Groceries')
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Filter by category' }), 'Groceries')
     await user.type(screen.getByRole('searchbox', { name: 'Search' }), 'i')
     await user.selectOptions(screen.getByLabelText('Month'), 'All months')
 
     expect(await screen.findByRole('cell', { name: 'Kiwi' })).toBeInTheDocument()
     expect(rowCells().map((cells) => cells[1])).toEqual(['Kiwi'])
-    expect(screen.getByRole('combobox', { name: 'Category' })).toHaveValue('1')
+    expect(screen.getByRole('combobox', { name: 'Filter by category' })).toHaveValue('1')
     expect(screen.getByRole('searchbox', { name: 'Search' })).toHaveValue('i')
   })
 
   it('drops a row from the filtered list once its Category is changed to one the filter leaves out', async () => {
     handleChangeCategory = () => Response.json({ ...septemberTransactions[1], categoryId: 1 })
     const user = await openSeptember()
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Category' }), 'Uncategorized')
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Filter by category' }), 'Uncategorized')
 
     await user.selectOptions(categorySelect('Lønn Fra: Testfirma AS'), 'Groceries')
 
@@ -4327,11 +4393,11 @@ describe('Transactions page', () => {
   it('says no transactions match when the filters leave none', async () => {
     const user = await openSeptember()
 
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Category' }), 'Other')
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Filter by category' }), 'Other')
     expect(screen.getByText('No transactions match')).toBeInTheDocument()
     expect(screen.queryByRole('table')).not.toBeInTheDocument()
 
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Category' }), 'All categories')
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Filter by category' }), 'All categories')
     await user.type(screen.getByRole('searchbox', { name: 'Search' }), 'xyz')
     expect(screen.getByText('No transactions match')).toBeInTheDocument()
   })
@@ -4447,6 +4513,264 @@ describe('Transactions page', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Saving failed (500).')
     expect(categorySelect('Vipps *Ola Nordmann')).toHaveValue('13')
     expect(lockMark('Vipps *Ola Nordmann')).not.toBeInTheDocument()
+  })
+
+  describe('sorting', () => {
+    // A September Transaction with the given fields, the rest as an imported, Uncategorized one has.
+    function september(id: number, date: string, description: string, amount: number, categoryId: number | null) {
+      return {
+        id,
+        date: `2026-09-${date}`,
+        description,
+        amount,
+        note: null,
+        categoryId,
+        locked: false,
+        imported: true,
+        bookmarked: false,
+      }
+    }
+
+    // How each sortable column heading says the table is sorted by it.
+    function sortStates() {
+      return Object.fromEntries(
+        screen
+          .getAllByRole('columnheader')
+          .slice(0, 4)
+          .map((header) => [header.textContent, header.getAttribute('aria-sort')]),
+      )
+    }
+
+    // Clicks the column heading, rather than the page or filter of the same name.
+    async function sortBy(user: ReturnType<typeof userEvent.setup>, heading: string) {
+      await user.click(within(screen.getByRole('table')).getByRole('button', { name: heading }))
+    }
+
+    function descriptions() {
+      return rowCells().map((cells) => cells[1])
+    }
+
+    // Opens September listing the given Transactions in the order the server sends them.
+    async function openSeptemberWith(transactions: ReturnType<typeof september>[]) {
+      months = [{ year: 2026, month: 9 }]
+      handleListPeriod = () => Response.json(transactions)
+      const user = await openTransactionsPage()
+      await screen.findByRole('cell', { name: transactions[0].description })
+      return user
+    }
+
+    it('sorts by Date newest first by default, oldest first once Date is clicked, and back again', async () => {
+      const user = await openSeptemberWith([
+        september(1, '10', 'Kiwi', -89.9, 1),
+        september(2, '24', 'Rema 1000', -1249.9, 1),
+        september(3, '03', 'Lønn', 24500, null),
+      ])
+
+      expect(descriptions()).toEqual(['Rema 1000', 'Kiwi', 'Lønn'])
+      expect(sortStates()).toEqual({ Date: 'descending', Description: 'none', Category: 'none', Amount: 'none' })
+
+      await sortBy(user, 'Date')
+
+      expect(descriptions()).toEqual(['Lønn', 'Kiwi', 'Rema 1000'])
+      expect(sortStates()).toEqual({ Date: 'ascending', Description: 'none', Category: 'none', Amount: 'none' })
+
+      await sortBy(user, 'Date')
+
+      expect(descriptions()).toEqual(['Rema 1000', 'Kiwi', 'Lønn'])
+      expect(sortStates()).toEqual({ Date: 'descending', Description: 'none', Category: 'none', Amount: 'none' })
+    })
+
+    it('goes newest first on the first click on Date after another column', async () => {
+      const user = await openSeptemberWith([
+        september(1, '10', 'Kiwi', -89.9, 1),
+        september(2, '24', 'Rema 1000', -1249.9, 1),
+        september(3, '03', 'Lønn', 24500, null),
+      ])
+
+      await sortBy(user, 'Description')
+      await sortBy(user, 'Date')
+
+      expect(descriptions()).toEqual(['Rema 1000', 'Kiwi', 'Lønn'])
+      expect(sortStates()).toEqual({ Date: 'descending', Description: 'none', Category: 'none', Amount: 'none' })
+    })
+
+    it('leaves the Bookmark, Note and Delete columns unsortable', async () => {
+      await openSeptemberWith([september(1, '10', 'Kiwi', -89.9, 1)])
+
+      for (const header of screen.getAllByRole('columnheader').slice(4)) {
+        expect(header).not.toHaveAttribute('aria-sort')
+        expect(within(header).queryByRole('button')).not.toBeInTheDocument()
+      }
+    })
+
+    it('sorts by the signed Amount, the biggest spending first, or the biggest income first', async () => {
+      const user = await openSeptemberWith([
+        september(1, '24', 'Rema 1000', -1249.9, 1),
+        september(2, '20', 'Lønn', 24500, null),
+        september(3, '12', 'Kiwi', -89.9, 1),
+        september(4, '03', 'Gave', -500, 13),
+      ])
+
+      await sortBy(user, 'Amount')
+
+      expect(descriptions()).toEqual(['Rema 1000', 'Gave', 'Kiwi', 'Lønn'])
+      expect(sortStates()).toEqual({ Date: 'none', Description: 'none', Category: 'none', Amount: 'ascending' })
+
+      await sortBy(user, 'Amount')
+
+      expect(descriptions()).toEqual(['Lønn', 'Kiwi', 'Gave', 'Rema 1000'])
+      expect(sortStates()).toEqual({ Date: 'none', Description: 'none', Category: 'none', Amount: 'descending' })
+    })
+
+    it('sorts by Description in the Norwegian alphabet, A–Å or Å–A', async () => {
+      const user = await openSeptemberWith([
+        september(1, '24', 'Åpent Bakeri', -59, 1),
+        september(2, '20', 'zara', -599, 13),
+        september(3, '12', 'Øl og mat', -149, 1),
+        september(4, '03', 'Apotek 1', -89, 13),
+      ])
+
+      await sortBy(user, 'Description')
+
+      expect(descriptions()).toEqual(['Apotek 1', 'zara', 'Øl og mat', 'Åpent Bakeri'])
+      expect(sortStates()).toEqual({ Date: 'none', Description: 'ascending', Category: 'none', Amount: 'none' })
+
+      await sortBy(user, 'Description')
+
+      expect(descriptions()).toEqual(['Åpent Bakeri', 'Øl og mat', 'zara', 'Apotek 1'])
+      expect(sortStates()).toEqual({ Date: 'none', Description: 'descending', Category: 'none', Amount: 'none' })
+    })
+
+    it('sorts by Category name in the Norwegian alphabet, Uncategorized last A–Å and first Å–A, newest first within each', async () => {
+      categoriesServed = [...categories, { id: 20, name: 'Ørsta Sport' }]
+      const user = await openSeptemberWith([
+        september(1, '28', 'Anorakk', -899, 20),
+        september(2, '24', 'Rema 1000', -1249.9, 1),
+        september(3, '20', 'Lønn', 24500, null),
+        september(4, '12', 'Gave', -500, 13),
+        september(5, '03', 'Kiwi', -89.9, 1),
+      ])
+
+      await sortBy(user, 'Category')
+
+      expect(descriptions()).toEqual(['Rema 1000', 'Kiwi', 'Gave', 'Anorakk', 'Lønn'])
+      expect(sortStates()).toEqual({ Date: 'none', Description: 'none', Category: 'ascending', Amount: 'none' })
+
+      await sortBy(user, 'Category')
+
+      expect(descriptions()).toEqual(['Lønn', 'Anorakk', 'Gave', 'Rema 1000', 'Kiwi'])
+      expect(sortStates()).toEqual({ Date: 'none', Description: 'none', Category: 'descending', Amount: 'none' })
+    })
+
+    it('orders Transactions that tie newest first whichever way the column goes, then as they arrived', async () => {
+      // All four tie on Amount, and the two on the 12th on the date too.
+      const user = await openSeptemberWith([
+        september(1, '03', 'Kiwi', -89.9, 1),
+        september(2, '24', 'Rema 1000', -89.9, 1),
+        september(3, '12', 'Meny', -89.9, 1),
+        september(4, '12', 'Bunnpris', -89.9, 1),
+        september(5, '20', 'Joker', -500, 1),
+      ])
+
+      await sortBy(user, 'Amount')
+      expect(descriptions()).toEqual(['Joker', 'Rema 1000', 'Meny', 'Bunnpris', 'Kiwi'])
+
+      await sortBy(user, 'Amount')
+      expect(descriptions()).toEqual(['Rema 1000', 'Meny', 'Bunnpris', 'Kiwi', 'Joker'])
+    })
+
+    it('sorts the Bookmarks too, keeping the sort when switching between All and Bookmarks', async () => {
+      handleListBookmarks = () =>
+        Response.json([
+          { ...september(1, '24', 'Rema 1000', -1249.9, 1), bookmarked: true },
+          { ...september(2, '03', 'Elkjøp', -4990, 13), date: '2024-05-17', bookmarked: true },
+        ])
+      const user = await openSeptemberWith([
+        september(1, '24', 'Rema 1000', -1249.9, 1),
+        september(3, '12', 'Kiwi', -89.9, 1),
+      ])
+      await sortBy(user, 'Amount')
+      await sortBy(user, 'Amount')
+
+      await user.click(within(screen.getByRole('group', { name: 'Show' })).getByRole('button', { name: 'Bookmarks' }))
+
+      await screen.findByRole('cell', { name: 'Elkjøp' })
+      expect(descriptions()).toEqual(['Rema 1000', 'Elkjøp'])
+      expect(sortStates()).toEqual({ Date: 'none', Description: 'none', Category: 'none', Amount: 'descending' })
+
+      await sortBy(user, 'Description')
+      expect(descriptions()).toEqual(['Elkjøp', 'Rema 1000'])
+
+      await user.click(within(screen.getByRole('group', { name: 'Show' })).getByRole('button', { name: 'All' }))
+
+      await screen.findByRole('cell', { name: 'Kiwi' })
+      expect(descriptions()).toEqual(['Kiwi', 'Rema 1000'])
+      expect(sortStates()).toEqual({ Date: 'none', Description: 'ascending', Category: 'none', Amount: 'none' })
+    })
+
+    it('keeps the sort when the Period, Category filter or search changes', async () => {
+      const kiwi = september(1, '12', 'Kiwi', -89.9, 1)
+      const rema = september(2, '24', 'Rema 1000', -1249.9, 1)
+      const meny = { ...september(3, '02', 'Meny', -349, 1), date: '2026-10-02' }
+      const lønn = september(4, '03', 'Lønn', 24500, null)
+      const user = await openSeptemberWith([rema, kiwi, lønn])
+      handleListPeriod = (_year, month) => Response.json(month === undefined ? [meny, rema, kiwi, lønn] : [rema, kiwi, lønn])
+      await sortBy(user, 'Amount')
+
+      await user.selectOptions(screen.getByLabelText('Month'), 'All months')
+      await screen.findByRole('cell', { name: 'Meny' })
+      expect(descriptions()).toEqual(['Rema 1000', 'Meny', 'Kiwi', 'Lønn'])
+
+      await user.selectOptions(screen.getByRole('combobox', { name: 'Filter by category' }), 'Groceries')
+      expect(descriptions()).toEqual(['Rema 1000', 'Meny', 'Kiwi'])
+
+      await user.type(screen.getByRole('searchbox', { name: 'Search' }), 'e')
+      expect(descriptions()).toEqual(['Rema 1000', 'Meny'])
+      expect(sortStates()).toEqual({ Date: 'none', Description: 'none', Category: 'none', Amount: 'ascending' })
+    })
+
+    it('moves a Transaction to where the sort puts it once its Category is changed', async () => {
+      handleChangeCategory = (_id, body) =>
+        Response.json({ ...september(3, '03', 'Lønn', 24500, null), ...(body as object), locked: true })
+      const user = await openSeptemberWith([
+        september(1, '24', 'Rema 1000', -1249.9, 1),
+        september(2, '12', 'Gave', -500, 13),
+        september(3, '03', 'Lønn', 24500, null),
+      ])
+      await sortBy(user, 'Category')
+      expect(descriptions()).toEqual(['Rema 1000', 'Gave', 'Lønn'])
+
+      await user.selectOptions(categorySelect('Lønn'), 'Groceries')
+
+      expect(await screen.findByRole('status')).toHaveTextContent('Category changed')
+      expect(descriptions()).toEqual(['Rema 1000', 'Lønn', 'Gave'])
+    })
+
+    it('closes an open Note editor, delete confirmation or "Bookmark added" popup when the sort changes', async () => {
+      const user = await openSeptemberWith([
+        september(1, '24', 'Rema 1000', -1249.9, 1),
+        { ...september(2, '15', 'Frisør', -450, 13), imported: false },
+      ])
+
+      await user.click(screen.getByRole('button', { name: 'Add note for Rema 1000' }))
+      expect(screen.getByRole('textbox', { name: 'Note' })).toBeInTheDocument()
+      await sortBy(user, 'Amount')
+      expect(screen.queryByRole('textbox', { name: 'Note' })).not.toBeInTheDocument()
+
+      await user.click(screen.getByRole('button', { name: 'Delete Frisør' }))
+      expect(screen.getByText(/^Delete "Frisør"/)).toBeInTheDocument()
+      await sortBy(user, 'Description')
+      expect(screen.queryByText(/^Delete "Frisør"/)).not.toBeInTheDocument()
+
+      await user.click(screen.getByRole('button', { name: 'Bookmark Rema 1000' }))
+      await screen.findByRole('dialog', { name: 'Bookmark added' })
+      // From the keyboard, since a click outside the popup closes it anyway.
+      act(() => within(screen.getByRole('table')).getByRole('button', { name: 'Date' }).focus())
+      await user.keyboard('{Enter}')
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+      expect(sortStates()).toEqual({ Date: 'descending', Description: 'none', Category: 'none', Amount: 'none' })
+    })
+
   })
 
   describe('Category dots', () => {
@@ -4681,8 +5005,8 @@ describe('Transactions page', () => {
       expect(screen.queryByText(confirmation)).not.toBeInTheDocument()
 
       await user.click(deleteButton('Frisør'))
-      await user.selectOptions(screen.getByLabelText('Category'), 'Groceries')
-      await user.selectOptions(screen.getByLabelText('Category'), 'All categories')
+      await user.selectOptions(screen.getByLabelText('Filter by category'), 'Groceries')
+      await user.selectOptions(screen.getByLabelText('Filter by category'), 'All categories')
       expect(screen.queryByText(confirmation)).not.toBeInTheDocument()
 
       await user.click(deleteButton('Frisør'))
@@ -5515,7 +5839,7 @@ describe('Transactions page', () => {
       expect(bookmarksRequests()).toBe(0)
     })
 
-    it('lists the bookmarks from any date in place of the Year, Month, Category and Search', async () => {
+    it('lists the bookmarks from any date in place of the Year, Month, Category and search', async () => {
       handleListBookmarks = () => Response.json(bookmarks)
       const user = await openSeptember()
 
@@ -5525,9 +5849,10 @@ describe('Transactions page', () => {
       expect(switchButton('Bookmarks')).toHaveAttribute('aria-pressed', 'true')
       expect(switchButton('All')).toHaveAttribute('aria-pressed', 'false')
       expect(screen.getByLabelText('Folder')).toHaveDisplayValue('Bookmarks')
-      for (const field of ['Year', 'Month', 'Category', 'Search']) {
+      for (const field of ['Year', 'Month', 'Filter by category', 'Search']) {
         expect(screen.queryByLabelText(field)).not.toBeInTheDocument()
       }
+      expect(screen.queryByRole('searchbox')).not.toBeInTheDocument()
       expect(rowCells()).toEqual([
         ['24.09.2026', 'Rema 1000', 'Groceries', '-1 249,90 kr', '', '', ''],
         ['17.05.2024', 'Elkjøp', 'Other', '-4 990,00 kr', '', '', ''],
@@ -5566,7 +5891,7 @@ describe('Transactions page', () => {
       await screen.findByRole('cell', { name: 'Rema 1000' })
       await user.selectOptions(screen.getByLabelText('Month'), 'All months')
       await screen.findByRole('cell', { name: 'Kiwi' })
-      await user.selectOptions(screen.getByLabelText('Category'), 'Groceries')
+      await user.selectOptions(screen.getByLabelText('Filter by category'), 'Groceries')
       await user.type(screen.getByLabelText('Search'), 'i')
       await showBookmarks(user)
       await screen.findByRole('cell', { name: 'Elkjøp' })
@@ -5577,7 +5902,7 @@ describe('Transactions page', () => {
       expect(switchButton('All')).toHaveAttribute('aria-pressed', 'true')
       expect(screen.getByLabelText('Year')).toHaveValue('2026')
       expect(screen.getByLabelText('Month')).toHaveValue('')
-      expect(screen.getByLabelText('Category')).toHaveValue('1')
+      expect(screen.getByLabelText('Filter by category')).toHaveValue('1')
       expect(screen.getByLabelText('Search')).toHaveValue('i')
       expect(listedDescriptions()).toEqual(['Kiwi'])
       expect(screen.queryByLabelText('Folder')).not.toBeInTheDocument()
@@ -6241,7 +6566,7 @@ describe("Transactions page from a Category's Transactions count", () => {
 
   // The Transactions page's Year, Month and Category as shown.
   function chosenFilters() {
-    return ['Year', 'Month', 'Category'].map(
+    return ['Year', 'Month', 'Filter by category'].map(
       (label) => (screen.getByLabelText(label) as HTMLSelectElement).selectedOptions[0].textContent,
     )
   }
@@ -6468,7 +6793,7 @@ describe('Dashboard', () => {
 
   // The Transactions page's Year, Month and Category as shown.
   function chosenFilters() {
-    return ['Year', 'Month', 'Category'].map(
+    return ['Year', 'Month', 'Filter by category'].map(
       (label) => (screen.getByLabelText(label) as HTMLSelectElement).selectedOptions[0].textContent,
     )
   }
@@ -7057,7 +7382,7 @@ describe('Dashboard', () => {
 
       expect(await screen.findByRole('cell', { name: 'Ukjent butikk' })).toBeInTheDocument()
       expect(listedDescriptions()).toEqual(['Ukjent butikk'])
-      expect(screen.getByLabelText('Category')).toHaveDisplayValue('Uncategorized')
+      expect(screen.getByLabelText('Filter by category')).toHaveDisplayValue('Uncategorized')
     })
 
     it('arrives with the search empty, even after searching before', async () => {
@@ -8265,7 +8590,7 @@ describe('Dashboard', () => {
         await clickNear(dots(TOTAL_COLOUR)[5])
 
         expect(await screen.findByRole('cell', { name: 'Meny' })).toBeInTheDocument()
-        expect(listedDescriptions()).toEqual(['Meny', 'Elkjøp'])
+        expect(listedDescriptions()).toEqual(['Elkjøp', 'Meny'])
         expect(chosenFilters()).toEqual(['2026', 'March', 'All categories'])
       })
 

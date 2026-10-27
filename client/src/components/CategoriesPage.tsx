@@ -3,6 +3,7 @@ import { fetchCategories, fetchPalette, fetchUncategorizedCount, type Category }
 import { useIsDark } from '../lib/appearance'
 import { categoryColour } from '../lib/categoryColours'
 import { formatCount, plural } from '../lib/count'
+import { norwegian } from '../lib/norwegian'
 import { CategoryDeleteDialog, type CategoryDeleted } from './CategoryDeleteDialog'
 import { CategoryDialog } from './CategoryDialog'
 import { CategorySwatch } from './CategorySwatch'
@@ -20,7 +21,7 @@ function inListOrder(categories: Category[]) {
     ...categories.filter((c) => c.builtIn),
     ...categories
       .filter((c) => !c.builtIn)
-      .sort((a, b) => a.name.localeCompare(b.name, 'nb', { sensitivity: 'accent' })),
+      .sort((a, b) => norwegian(a.name, b.name)),
   ]
 }
 
