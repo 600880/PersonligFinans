@@ -366,7 +366,8 @@ public class TransactionEndpointsTests : IAsyncLifetime
         await CategoryChanged((await Own("Kafé Nord")).Id, _categories.Restaurants);
         await CategoryChanged((await Own("Frisør")).Id, _categories.Shopping);
 
-        Assert.Equal(before, await Rules());
+        // Only how many Transactions they categorize changes: a Locked one counts for no rule.
+        Assert.Equal(before.Select(r => r.Keyword == "kafé" ? r with { TransactionCount = 0 } : r), await Rules());
     }
 
     [Fact]
@@ -381,7 +382,7 @@ public class TransactionEndpointsTests : IAsyncLifetime
         await CategoryChanged((await Own("Kafé")).Id, _categories.Groceries);
 
         Assert.Equal(_categories.Groceries, (await Own("Kafé")).CategoryId);
-        Assert.Equal(rule, Assert.Single(await Rules(), r => r.Keyword == "kafé"));
+        Assert.Equal(rule with { TransactionCount = 0 }, Assert.Single(await Rules(), r => r.Keyword == "kafé"));
     }
 
     [Fact]

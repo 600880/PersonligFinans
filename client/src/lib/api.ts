@@ -978,12 +978,15 @@ export async function readReceipt(image: Blob): Promise<ReceiptSuggestion> {
 // aiGenerated: created by an LLM during import rather than by hand. Only records where the rule
 // came from; the rule otherwise behaves like any other.
 // isNew: added by the most recent Upload that imported a Bank Statement; editing keeps it.
+// transactionCount: how many Transactions the rule categorizes, so not the Locked ones nor those a
+// longer keyword won.
 export interface CategorizationRule {
   id: number
   keyword: string
   categoryId: number
   aiGenerated: boolean
   isNew: boolean
+  transactionCount: number
 }
 
 export interface CategorizationRuleRequest {

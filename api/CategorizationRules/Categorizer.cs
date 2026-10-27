@@ -32,6 +32,21 @@ public static class Categorizer
     public static readonly Expression<Func<Transaction, bool>> IsCategorizedByARule =
         t => t.BankStatementId != null && t.CategorizationRuleId != null;
 
+    // How many Transactions each rule categorizes, by rule id: the imported ones whose Category it
+    // assigned. Every rule change re-matches through Categorize and records each Transaction's rule,
+    // so a rule a longer keyword beats everywhere categorizes none, and a Locked Transaction counts
+    // for no rule. A rule that categorizes none is left out.
+    public static Task<Dictionary<int, int>> TransactionCountsByRuleAsync(AppDbContext db) =>
+        db.Transactions
+            .Where(IsCategorizedByARule)
+            .GroupBy(t => t.CategorizationRuleId!.Value)
+            .Select(g => new { RuleId = g.Key, Count = g.Count() })
+            .ToDictionaryAsync(g => g.RuleId, g => g.Count);
+
+    // How many Transactions the rule categorizes, counted as TransactionCountsByRuleAsync counts them.
+    public static Task<int> TransactionCountAsync(AppDbContext db, int ruleId) =>
+        db.Transactions.Where(IsCategorizedByARule).CountAsync(t => t.CategorizationRuleId == ruleId);
+
     // The rule whose keyword the description contains, ignoring case. The longest keyword wins, so
     // a specific rule overrides a general one; between equally long keywords the oldest rule wins.
     public static TRule? ChooseRule<TRule>(string description, IEnumerable<TRule> rules)

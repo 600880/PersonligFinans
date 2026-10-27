@@ -2,10 +2,11 @@ import { useEffect, useState } from 'react'
 import { fetchCategories, type Category } from '../lib/api'
 import { useIsDark } from '../lib/appearance'
 import { categoryColour } from '../lib/categoryColours'
-import { formatCount, plural } from '../lib/count'
+import { formatCount } from '../lib/count'
 import { CategoryDeleteDialog, type CategoryDeleted } from './CategoryDeleteDialog'
 import { CategoryDialog } from './CategoryDialog'
 import { CategorySwatch } from './CategorySwatch'
+import { Count } from './Count'
 import { ErrorMessage, StatusMessage } from './Messages'
 import type { TransactionsTarget } from './TransactionsPage'
 
@@ -60,17 +61,6 @@ function CategoryLabel({ category, colour }: { category: Category; colour: strin
       <span className="font-medium sm:whitespace-nowrap max-sm:min-w-0 max-sm:wrap-anywhere">{category.name}</span>
       {category.builtIn && <BuiltInBadge />}
     </span>
-  )
-}
-
-// A count with what it counts beside it. The noun is shown on a phone, where the column headers are
-// hidden, and read out everywhere.
-function Count({ count, noun }: { count: number; noun: string }) {
-  return (
-    <>
-      {formatCount(count)}{' '}
-      <span className="text-slate-500 dark:text-slate-400 sm:sr-only">{plural(count, noun)}</span>
-    </>
   )
 }
 
@@ -169,7 +159,6 @@ export function CategoriesPage({ onOpenTransactions }: { onOpenTransactions: (ta
           Add category
         </button>
       </div>
-
 
       {errorMessage ? (
         <ErrorMessage className="mt-3">{errorMessage}</ErrorMessage>
