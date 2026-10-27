@@ -91,7 +91,14 @@ public class CategorizationRuleEndpointsTests : IAsyncLifetime
     }
 
     // Stores Transactions as if imported from a Bank Statement, all Uncategorized.
-    private async Task<int[]> Imported(params string[] descriptions)
+    private Task<int[]> Imported(params string[] descriptions) =>
+        Imported(descriptions.Select(d => (d, new DateOnly(2026, 8, 3))));
+
+    // Stores a Transaction as if imported from a Bank Statement, Uncategorized, for each posted date.
+    private Task<int[]> ImportedOn(string description, params DateOnly[] postedDates) =>
+        Imported(postedDates.Select(d => (description, d)));
+
+    private async Task<int[]> Imported(IEnumerable<(string Description, DateOnly PostedDate)> rows)
     {
         await using var user = await UserDatabase.OfAsync(_factory, _email);
         var db = user.Db;
@@ -103,8 +110,8 @@ public class CategorizationRuleEndpointsTests : IAsyncLifetime
             PeriodEnd = new DateOnly(2026, 8, 31),
             ImportedAt = DateTimeOffset.UtcNow,
         };
-        var transactions = descriptions
-            .Select(d => new Transaction { UserId = db.OwnerOfNewRows, PostedDate = new DateOnly(2026, 8, 3), Description = d, Amount = -100m })
+        var transactions = rows
+            .Select(r => new Transaction { UserId = db.OwnerOfNewRows, PostedDate = r.PostedDate, Description = r.Description, Amount = -100m })
             .ToList();
         statement.Transactions.AddRange(transactions);
         db.BankStatements.Add(statement);
@@ -658,5 +665,115 @@ public class CategorizationRuleEndpointsTests : IAsyncLifetime
         Assert.Equal(2, addedRule.TransactionCount);
         Assert.Equal(1, edited.TransactionCount);
         Assert.Equal(1, await ListedTransactionCount(addedRule.Id));
+    }
+
+    private async Task<HttpResponseMessage> PreviewAddingRule(string? keyword, int? categoryId) =>
+        await _client.PostAsJsonAsync("/api/categorization-rules/preview", new { keyword, categoryId });
+
+    private async Task<RulePreviewResponse> PreviewOfAdding(string keyword, int categoryId)
+    {
+        var response = await PreviewAddingRule(keyword, categoryId);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        return (await response.Content.ReadFromJsonAsync<RulePreviewResponse>())!;
+    }
+
+    [Fact]
+    public async Task PostPreview_SaysWhatAddingTheRuleThenDoes()
+    {
+        // The new keyword is longer than "kafé", so it takes the first; the second is Uncategorized;
+        // the third and fourth it doesn't match.
+        var ids = await Imported("Butikk Kafé", "Butikk Nord", "Kafé Nord", "Annet");
+        await TransactionsChangedByAdding("kafé", _categories.Groceries);
+        var before = await CategoriesOf(ids);
+
+        var preview = await PreviewOfAdding("butikk", _categories.Restaurants);
+        var changed = await TransactionsChangedByAdding("butikk", _categories.Restaurants);
+
+        var after = await CategoriesOf(ids);
+        Assert.Equal(changed, preview.ChangedCount);
+        Assert.Equal(
+            ids.Index().Where(t => before[t.Index] != after[t.Index]).Select(t => (t.Item, before[t.Index], after[t.Index])).Order(),
+            preview.Changes.Select(c => (c.Id, c.FromCategoryId, c.ToCategoryId)).Order());
+        Assert.Equal(
+            [(ids[0], (int?)_categories.Groceries, (int?)_categories.Restaurants), (ids[1], null, _categories.Restaurants)],
+            preview.Changes.Select(c => (c.Id, c.FromCategoryId, c.ToCategoryId)).Order());
+        Assert.All(preview.Changes, c => Assert.Equal((new DateOnly(2026, 8, 3), -100m), (c.Date, c.Amount)));
+        Assert.Equal(["Butikk Kafé", "Butikk Nord"], preview.Changes.Select(c => c.Description).Order());
+    }
+
+    [Fact]
+    public async Task PostPreview_ChangesNothing()
+    {
+        var ids = await Imported("Butikk Sentrum", "Butikk Nord", "Annet");
+        var rules = await ListedRules();
+
+        var preview = await PreviewOfAdding("butikk", _categories.Groceries);
+
+        Assert.Equal(2, preview.ChangedCount);
+        Assert.Equal([null, null, null], await CategoriesOf(ids));
+        Assert.Equal(rules, await ListedRules());
+        // The keyword is still free, and adding it does all the preview said.
+        Assert.Equal(2, await TransactionsChangedByAdding("butikk", _categories.Groceries));
+    }
+
+    [Fact]
+    public async Task PostPreview_CountsTheLockedTransactionsTheKeywordMatches()
+    {
+        await Imported("Kafé Sentrum", "Kafé Nord", "Kafé Torget", "Bakeri");
+        await CategorizeByHand("Kafé Nord", _categories.Restaurants);
+        await CategorizeByHand("Kafé Torget", _categories.Other);
+        await CategorizeByHand("Bakeri", _categories.Other);
+        await AddManualAugustTransaction("KAFÉ LØKKA", _categories.Other);
+        await AddManualAugustTransaction("Kiosk", _categories.Other);
+
+        var preview = await PreviewOfAdding("kafé", _categories.Restaurants);
+
+        Assert.Equal(1, preview.ChangedCount);
+        Assert.Equal(3, preview.LockedCount);
+        Assert.Equal(["Kafé Sentrum"], preview.Changes.Select(c => c.Description));
+    }
+
+    [Fact]
+    public async Task PostPreview_ListsTenOfTheChanges_NewestFirst_AndCountsThemAll()
+    {
+        // Twelve, posted in an order other than by date.
+        var days = new[] { 7, 2, 12, 5, 9, 1, 11, 4, 8, 3, 10, 6 };
+        await ImportedOn("Butikk", days.Select(d => new DateOnly(2026, 8, d)).ToArray());
+
+        var preview = await PreviewOfAdding("butikk", _categories.Groceries);
+
+        Assert.Equal(12, preview.ChangedCount);
+        Assert.Equal(
+            Enumerable.Range(3, 10).Reverse().Select(d => new DateOnly(2026, 8, d)),
+            preview.Changes.Select(c => c.Date));
+    }
+
+    private async Task<Dictionary<string, string[]>> PreviewExpectingValidationErrors(string? keyword, int? categoryId)
+    {
+        var response = await PreviewAddingRule(keyword, categoryId);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var problem = await response.Content.ReadFromJsonAsync<ValidationProblemDetails>();
+        return new Dictionary<string, string[]>(problem!.Errors);
+    }
+
+    [Fact]
+    public async Task PostPreview_InvalidInput_GivesTheSameFieldErrorsAsAdding()
+    {
+        await AddedRuleId("kafé", _categories.Restaurants);
+        (string? Keyword, int? CategoryId)[] invalid =
+        [
+            ("   ", null),
+            (" x ", _categories.Groceries),
+            (new string('x', 101), _categories.Groceries),
+            ("  KAFÉ ", _categories.Groceries),
+            ("butikk", 9999),
+        ];
+
+        foreach (var (keyword, categoryId) in invalid)
+            Assert.Equal(
+                await AddRuleExpectingValidationErrors(keyword, categoryId),
+                await PreviewExpectingValidationErrors(keyword, categoryId));
+        Assert.Equal(["A rule for 'kafé' already exists."], (await PreviewExpectingValidationErrors("KAFÉ", _categories.Groceries))["keyword"]);
+        Assert.Equal(["Category does not exist."], (await PreviewExpectingValidationErrors("butikk", 9999))["categoryId"]);
     }
 }

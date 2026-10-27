@@ -5,6 +5,7 @@ import {
   editRule,
   fetchCategories,
   fetchRules,
+  previewAddingRule,
   type CategorizationRule,
   type Category,
   type RuleFieldErrors,
@@ -12,9 +13,11 @@ import {
 import { useIsDark } from '../lib/appearance'
 import { categoryColour } from '../lib/categoryColours'
 import { matchesCategory } from '../lib/categoryFilter'
+import { useRulePreview } from '../lib/useRulePreview'
 import { CategorySwatch } from './CategorySwatch'
 import { Count } from './Count'
 import { ErrorMessage, StatusMessage } from './Messages'
+import { RuleChangePreview } from './RuleChangePreview'
 
 function changedMessage(action: string, transactionsChanged: number) {
   const transactions = transactionsChanged === 1 ? 'transaction' : 'transactions'
@@ -53,6 +56,23 @@ function sortedRules(rules: CategorizationRule[], sort: RuleSort, categoryName: 
 // same as the search on Transactions. Æ, Ø and Å are letters of their own, so "o" never matches "ø".
 function matchesSearch(rule: CategorizationRule, search: string) {
   return rule.keyword.toLowerCase().includes(search.trim().toLowerCase())
+}
+
+// The shortest keyword the server accepts, since a one-letter keyword would match nearly everything.
+const KEYWORD_MIN_LENGTH = 2
+
+// The request to preview for a keyword and Category as typed so far, or null while they could not be
+// saved as one of the rules: the keyword is too short or is another rule's, ignoring case, or no
+// Category is chosen. Anything else the server refuses is told by the preview itself.
+function previewRequest(keyword: string, categoryId: string, otherRules: CategorizationRule[]) {
+  const trimmed = keyword.trim()
+  if (
+    trimmed.length < KEYWORD_MIN_LENGTH ||
+    categoryId === '' ||
+    otherRules.some((r) => r.keyword.toLowerCase() === trimmed.toLowerCase())
+  )
+    return null
+  return { keyword: trimmed, categoryId: Number(categoryId) }
 }
 
 // The rule being edited inline, with the input as typed so far.
@@ -196,6 +216,7 @@ export function RulesPage() {
   }, [])
 
   const dark = useIsDark()
+  const addPreview = useRulePreview(previewRequest(keyword, categoryId, rules), previewAddingRule)
   const categoryName = (id: number) => categories.find((c) => c.id === id)?.name ?? ''
   const hasNewRules = rules.some((r) => r.isNew)
   // The New chip does nothing while it is disabled, so a New filter left on once no rule is New is off.
@@ -396,6 +417,8 @@ export function RulesPage() {
           Add rule
         </button>
       </form>
+
+      {addPreview && <RuleChangePreview preview={addPreview} categories={categories} />}
 
       {errorMessage ? (
         <ErrorMessage className="mt-3">{errorMessage}</ErrorMessage>

@@ -52,7 +52,7 @@ public static class Categorizer
     public static TRule? ChooseRule<TRule>(string description, IEnumerable<TRule> rules)
         where TRule : class, ICategorizationRule =>
         rules
-            .Where(r => description.Contains(r.Keyword, StringComparison.OrdinalIgnoreCase))
+            .Where(r => Matches(description, r.Keyword))
             .OrderByDescending(r => r.Keyword.Length)
             .ThenBy(r => r.CreatedAt)
             .ThenBy(r => r.Id)
@@ -65,6 +65,39 @@ public static class Categorizer
         IEnumerable<Transaction> eligible, IReadOnlyCollection<TRule> rules)
         where TRule : class, ICategorizationRule =>
         eligible.Select(t => new Categorized<TRule>(t, ChooseRule(t.Description, rules))).ToList();
+
+    // Whether the description contains the keyword, ignoring case, as a rule matches it.
+    private static bool Matches(string description, string keyword) =>
+        description.Contains(keyword, StringComparison.OrdinalIgnoreCase);
+
+    // The most Transactions a preview lists of those a rule change would change.
+    public const int PreviewedChangesMax = 10;
+
+    // What saving the proposed rules, held in memory, would do: the rule-eligible Transactions whose
+    // Category it would change, worked out through Categorize just as the re-match after saving is,
+    // so a preview never disagrees with the change. Only up to PreviewedChangesMax of them are
+    // listed, newest posted date first. It also counts the Locked Transactions whose description
+    // contains the keyword, which the change leaves as they are; with no keyword, as for deleting a
+    // rule, it counts none. It changes and locks nothing.
+    public static async Task<RuleChangePreview<TRule>> PreviewAsync<TRule>(
+        AppDbContext db, IReadOnlyCollection<TRule> proposedRules, string? keyword)
+        where TRule : class, ICategorizationRule
+    {
+        var transactions = await db.Transactions.AsNoTracking().ToListAsync();
+        var changed = Categorize(transactions.Where(IsRuleEligibleInMemory), proposedRules)
+            .Where(c => c.ChangesCategory)
+            .ToList();
+        var lockedCount = keyword is null ? 0 : transactions.Count(t => IsLocked(t) && Matches(t.Description, keyword));
+
+        return new(
+            changed.Count,
+            lockedCount,
+            changed
+                .OrderByDescending(c => c.Transaction.PostedDate)
+                .ThenByDescending(c => c.Transaction.Id)
+                .Take(PreviewedChangesMax)
+                .ToList());
+    }
 
     // Saves the rule change tracked by db together with the re-match it causes, in one database
     // transaction, and returns how many Transactions changed Category. The rules table is locked
@@ -163,7 +196,7 @@ public static class Categorizer
     private static bool WouldChangeACategory(
         CategorizationRule rule, IEnumerable<string> descriptions, List<CategorizationRule> rules) =>
         descriptions
-            .Where(d => d.Contains(rule.Keyword, StringComparison.OrdinalIgnoreCase))
+            .Where(d => Matches(d, rule.Keyword))
             .Any(d => ChooseRule(d, rules) is { } current &&
                 ChooseRule(d, [.. rules, rule])!.CategoryId != current.CategoryId);
 
@@ -186,10 +219,9 @@ public static class Categorizer
         foreach (var categorized in Categorize(eligible, rules))
         {
             var (transaction, rule) = categorized;
-            var categoryId = categorized.CategoryId;
-            if (transaction.CategoryId != categoryId)
+            if (categorized.ChangesCategory)
                 changed.Add(transaction);
-            transaction.CategoryId = categoryId;
+            transaction.CategoryId = categorized.CategoryId;
             transaction.CategorizationRule = rule;
             if (rule is null)
                 transaction.CategorizationRuleId = null;
@@ -268,4 +300,18 @@ public sealed record Categorized<TRule>(Transaction Transaction, TRule? Rule)
 {
     // The Category the rules give it: its rule's, or null meaning Uncategorized.
     public int? CategoryId => Rule?.CategoryId;
+
+    // Whether the rules give it a Category other than the one it has.
+    public bool ChangesCategory => Transaction.CategoryId != CategoryId;
 }
+
+// A Categorization Rule only proposed, held in memory to preview a rule change: an added rule, or a
+// saved one as an edit would leave it.
+public sealed record ProposedRule(int Id, string Keyword, int CategoryId, DateTimeOffset CreatedAt) : ICategorizationRule;
+
+// What a rule change would do. ChangedCount: how many Transactions would change Category. LockedCount:
+// how many Locked Transactions match the change's keyword. Changes: up to PreviewedChangesMax of the
+// Transactions that would change, newest posted date first, each with the rule that would categorize
+// it, or none when it would become Uncategorized.
+public sealed record RuleChangePreview<TRule>(int ChangedCount, int LockedCount, List<Categorized<TRule>> Changes)
+    where TRule : class, ICategorizationRule;

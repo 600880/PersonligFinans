@@ -1016,6 +1016,42 @@ export type DeleteRuleResult =
   | { ok: true; alreadyDeleted: boolean; transactionsChanged: number }
   | { ok: false; message: string }
 
+// What a rule change would do, without doing it. changedCount: how many Transactions would change
+// Category. lockedCount: how many Locked Transactions contain the keyword, which it leaves as they
+// are. changes: up to ten of the Transactions that would change, newest first.
+export interface RulePreview {
+  changedCount: number
+  lockedCount: number
+  changes: RulePreviewChange[]
+}
+
+// A Transaction a rule change would move from one Category to another; null means Uncategorized.
+export interface RulePreviewChange {
+  id: number
+  date: string
+  description: string
+  amount: number
+  fromCategoryId: number | null
+  toCategoryId: number | null
+}
+
+// What adding the rule would do. Fails when the server refuses it as addRule would, as for a keyword
+// another rule already has.
+export function previewAddingRule(request: CategorizationRuleRequest): Promise<RulePreview> {
+  return fetchRulePreview('/api/categorization-rules/preview', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request),
+  })
+}
+
+// A preview is a dry run of a rule change: the same request, to the change's URL followed by /preview.
+async function fetchRulePreview(url: string, init: RequestInit): Promise<RulePreview> {
+  const response = await apiFetch(url, init)
+  if (!response.ok) throw new Error(`Previewing the rule change failed (${response.status})`)
+  return (await response.json()) as RulePreview
+}
+
 export async function fetchRules(): Promise<CategorizationRule[]> {
   const response = await apiFetch('/api/categorization-rules')
   if (!response.ok) throw new Error(`Loading rules failed (${response.status})`)
