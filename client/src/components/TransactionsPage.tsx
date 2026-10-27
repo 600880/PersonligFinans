@@ -24,6 +24,8 @@ import {
   type TransactionMonth,
   type YearOrMonth,
 } from '../lib/api'
+import { useIsDark } from '../lib/appearance'
+import { categoryColour } from '../lib/categoryColours'
 import { categoryFilterOf, matchesCategory, UNCATEGORIZED } from '../lib/categoryFilter'
 import { formatAmount } from '../lib/amount'
 import { formatNorwegianDate } from '../lib/date'
@@ -33,8 +35,10 @@ import { periodLabel, periodValue, type Period } from '../lib/period'
 import { firstMonthWithTransactions, monthsOfQuarter } from '../lib/quarter'
 import { latestYearWithTransactions } from '../lib/year'
 import { BookmarkAddedPopup } from './BookmarkAddedPopup'
+import { CategorySwatch } from './CategorySwatch'
 import { FolderDropdown, FolderNameForm } from './FolderDropdown'
 import { ErrorMessage, StatusMessage } from './Messages'
+import { panelClass, panelHeadClass } from './panel'
 import { ZoomableReceipt } from './ZoomableReceipt'
 import { inputClassName } from './TransactionForm'
 
@@ -115,6 +119,7 @@ function matchesSearch(transaction: Transaction, search: string) {
 // Opens on All, on the target when given, with the search empty, and otherwise on the latest month
 // with Transactions and all Categories. The target is read on mount only.
 export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
+  const dark = useIsDark()
   const [list, setList] = useState<List>('all')
   const [categories, setCategories] = useState<Category[]>([])
   const [monthsWithTransactions, setMonthsWithTransactions] = useState<TransactionMonth[]>([])
@@ -703,235 +708,241 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
       )}
 
       {shownTransactions && shownTransactions.length > 0 && (
-        // On a phone each row is laid out as a card instead, its column headers hidden, so the table
-        // never runs wider than the screen.
-        <table className="mt-4 w-full text-left text-sm max-sm:block">
-          <thead className="text-slate-500 dark:text-slate-400 max-sm:hidden">
-            <tr>
-              <th className="py-2 font-medium">Date</th>
-              <th className="py-2 font-medium">Description</th>
-              <th className="py-2 font-medium">Category</th>
-              <th className="py-2 text-right font-medium">Amount</th>
-              <th className="py-2">
-                <span className="sr-only">Bookmark</span>
-              </th>
-              <th className="py-2">
-                <span className="sr-only">Note</span>
-              </th>
-              <th className="py-2">
-                <span className="sr-only">Delete</span>
-              </th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-200 dark:divide-slate-800 text-slate-900 dark:text-slate-100 max-sm:block">
-            {shownTransactions.map((transaction) => (
-              <Fragment key={transaction.id}>
-                <tr className="max-sm:grid max-sm:grid-cols-[1fr_auto_auto_auto] max-sm:items-center max-sm:gap-1 max-sm:py-3">
-                  <td className="py-2 pr-3 whitespace-nowrap max-sm:col-start-1 max-sm:row-start-1 max-sm:p-0">
-                    {formatNorwegianDate(transaction.date)}
-                  </td>
-                  <td className="py-2 pr-3 max-sm:col-span-4 max-sm:row-start-2 max-sm:p-0 max-sm:break-words">
-                    {transaction.description}
-                  </td>
-                  <td className="py-2 pr-3 max-sm:col-start-1 max-sm:row-start-3 max-sm:p-0">
-                    <select
-                      aria-label={`Category for ${transaction.description}`}
-                      value={transaction.categoryId ?? ''}
-                      disabled={savingIds.has(transaction.id) || (isDeleting && confirmingDeleteId === transaction.id)}
-                      onChange={(event) => changeCategory(transaction, Number(event.target.value))}
-                      className={`${categorySelectClass} ${
-                        transaction.categoryId === null ? 'text-slate-400 dark:text-slate-500' : 'text-slate-900 dark:text-slate-100'
-                      }`}
-                    >
-                      {transaction.categoryId === null && (
-                        <option value="" disabled>
-                          Uncategorized
-                        </option>
-                      )}
-                      {categories.map((category) => (
-                        <option key={category.id} value={category.id} className="text-slate-900 dark:text-slate-100">
-                          {category.name}
-                        </option>
-                      ))}
-                    </select>
-                    {transaction.locked && (
-                      <span
-                        role="img"
-                        aria-label="Locked"
-                        title="Locked: rules won't change this Category"
-                        className="ml-1.5 inline-block align-middle text-slate-400 dark:text-slate-500"
-                      >
-                        <svg viewBox="0 0 16 16" fill="currentColor" fillRule="evenodd" aria-hidden="true" className="h-3.5 w-3.5">
-                          <path d="M8 1a3.5 3.5 0 0 0-3.5 3.5V7H4a1.5 1.5 0 0 0-1.5 1.5v5A1.5 1.5 0 0 0 4 15h8a1.5 1.5 0 0 0 1.5-1.5v-5A1.5 1.5 0 0 0 12 7h-.5V4.5A3.5 3.5 0 0 0 8 1Zm2 6V4.5a2 2 0 1 0-4 0V7h4Z" />
-                        </svg>
-                      </span>
-                    )}
-                  </td>
-                  <td className="py-2 text-right whitespace-nowrap tabular-nums max-sm:col-span-3 max-sm:col-start-2 max-sm:row-start-1 max-sm:p-0">
-                    {formatAmount(transaction.amount)}
-                  </td>
-                  <td className="relative py-2 pl-4 text-right max-sm:col-start-2 max-sm:row-start-3 max-sm:p-0">
-                    <button
-                      ref={popup?.transactionId === transaction.id ? popupStarRef : undefined}
-                      type="button"
-                      aria-pressed={transaction.bookmarked}
-                      aria-label={
-                        transaction.bookmarked
-                          ? `Remove bookmark for ${transaction.description}`
-                          : `Bookmark ${transaction.description}`
-                      }
-                      disabled={bookmarkSavingIds.has(transaction.id)}
-                      onClick={() => toggleBookmark(transaction)}
-                      className="group rounded p-1 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:cursor-not-allowed"
-                    >
-                      {/* An empty star turns amber on hover, showing what a click does. */}
-                      <svg
-                        viewBox="0 0 16 16"
-                        fill={transaction.bookmarked ? 'currentColor' : 'none'}
-                        stroke="currentColor"
-                        strokeWidth="1.25"
-                        strokeLinejoin="round"
-                        aria-hidden="true"
-                        className={`h-4 w-4 ${
+        <div className={`mt-4 ${panelClass}`}>
+          {/* On a phone each row is laid out as a card inside the panel instead, its column headers
+              hidden, so the table never runs wider than the screen. */}
+          <table className="w-full text-left text-sm max-sm:block">
+            <thead className={panelHeadClass}>
+              <tr>
+                <th className="py-2 pl-4 font-medium">Date</th>
+                <th className="py-2 font-medium">Description</th>
+                <th className="py-2 font-medium">Category</th>
+                <th className="py-2 text-right font-medium">Amount</th>
+                <th className="py-2">
+                  <span className="sr-only">Bookmark</span>
+                </th>
+                <th className="py-2">
+                  <span className="sr-only">Note</span>
+                </th>
+                <th className="py-2 pr-4">
+                  <span className="sr-only">Delete</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-200 dark:divide-slate-800 text-slate-900 dark:text-slate-100 max-sm:block">
+              {shownTransactions.map((transaction) => (
+                <Fragment key={transaction.id}>
+                  <tr className="max-sm:grid max-sm:grid-cols-[1fr_auto_auto_auto] max-sm:items-center max-sm:gap-1 max-sm:px-4 max-sm:py-3">
+                    <td className="py-2 pr-3 pl-4 whitespace-nowrap max-sm:col-start-1 max-sm:row-start-1 max-sm:p-0">
+                      {formatNorwegianDate(transaction.date)}
+                    </td>
+                    <td className="py-2 pr-3 max-sm:col-span-4 max-sm:row-start-2 max-sm:p-0 max-sm:break-words">
+                      {transaction.description}
+                    </td>
+                    <td className="py-2 pr-3 max-sm:col-start-1 max-sm:row-start-3 max-sm:p-0">
+                      {/* The dot is left out of what is read, since the select names the Category. */}
+                      <div className="flex items-center gap-2">
+                        <CategorySwatch colour={categoryColour(transaction.categoryId, categories, dark)} />
+                        <select
+                          aria-label={`Category for ${transaction.description}`}
+                          value={transaction.categoryId ?? ''}
+                          disabled={savingIds.has(transaction.id) || (isDeleting && confirmingDeleteId === transaction.id)}
+                          onChange={(event) => changeCategory(transaction, Number(event.target.value))}
+                          className={`${categorySelectClass} ${
+                            transaction.categoryId === null ? 'text-slate-400 dark:text-slate-500' : 'text-slate-900 dark:text-slate-100'
+                          }`}
+                        >
+                          {transaction.categoryId === null && (
+                            <option value="" disabled>
+                              Uncategorized
+                            </option>
+                          )}
+                          {categories.map((category) => (
+                            <option key={category.id} value={category.id} className="text-slate-900 dark:text-slate-100">
+                              {category.name}
+                            </option>
+                          ))}
+                        </select>
+                        {transaction.locked && (
+                          <span
+                            role="img"
+                            aria-label="Locked"
+                            title="Locked: rules won't change this Category"
+                            className="text-slate-400 dark:text-slate-500"
+                          >
+                            <svg viewBox="0 0 16 16" fill="currentColor" fillRule="evenodd" aria-hidden="true" className="h-3.5 w-3.5">
+                              <path d="M8 1a3.5 3.5 0 0 0-3.5 3.5V7H4a1.5 1.5 0 0 0-1.5 1.5v5A1.5 1.5 0 0 0 4 15h8a1.5 1.5 0 0 0 1.5-1.5v-5A1.5 1.5 0 0 0 12 7h-.5V4.5A3.5 3.5 0 0 0 8 1Zm2 6V4.5a2 2 0 1 0-4 0V7h4Z" />
+                            </svg>
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="py-2 text-right whitespace-nowrap tabular-nums max-sm:col-span-3 max-sm:col-start-2 max-sm:row-start-1 max-sm:p-0">
+                      {formatAmount(transaction.amount)}
+                    </td>
+                    <td className="relative py-2 pl-4 text-right max-sm:col-start-2 max-sm:row-start-3 max-sm:p-0">
+                      <button
+                        ref={popup?.transactionId === transaction.id ? popupStarRef : undefined}
+                        type="button"
+                        aria-pressed={transaction.bookmarked}
+                        aria-label={
                           transaction.bookmarked
-                            ? 'text-amber-500'
-                            : 'text-slate-500 dark:text-slate-400 group-hover:text-amber-500'
+                            ? `Remove bookmark for ${transaction.description}`
+                            : `Bookmark ${transaction.description}`
+                        }
+                        disabled={bookmarkSavingIds.has(transaction.id)}
+                        onClick={() => toggleBookmark(transaction)}
+                        className="group rounded p-1 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:cursor-not-allowed"
+                      >
+                        {/* An empty star turns amber on hover, showing what a click does. */}
+                        <svg
+                          viewBox="0 0 16 16"
+                          fill={transaction.bookmarked ? 'currentColor' : 'none'}
+                          stroke="currentColor"
+                          strokeWidth="1.25"
+                          strokeLinejoin="round"
+                          aria-hidden="true"
+                          className={`h-4 w-4 ${
+                            transaction.bookmarked
+                              ? 'text-amber-500'
+                              : 'text-slate-500 dark:text-slate-400 group-hover:text-amber-500'
+                          }`}
+                        >
+                          <path d="M8 1.75 9.93 5.66l4.32.63-3.13 3.04.74 4.3L8 11.6l-3.86 2.03.74-4.3L1.75 6.29l4.32-.63L8 1.75Z" />
+                        </svg>
+                      </button>
+                      {popup?.transactionId === transaction.id && (
+                        <BookmarkAddedPopup
+                          folders={folders}
+                          addedFolderId={popup.addedFolderId}
+                          onDone={closePopup}
+                          onRemove={() => removeFromPopup(transaction)}
+                          onFile={(folderId) => fileFromPopup(transaction, folderId)}
+                          createFolder={addToFolders}
+                        />
+                      )}
+                    </td>
+                    <td className="py-2 pl-1 text-right max-sm:col-start-3 max-sm:row-start-3 max-sm:p-0">
+                      <button
+                        type="button"
+                        aria-label={`${transaction.note ? 'Edit' : 'Add'} note for ${transaction.description}`}
+                        title={transaction.note ?? undefined}
+                        aria-expanded={editingNoteId === transaction.id}
+                        // Disabled while its Note saves, so closing can't hide the save or its error.
+                        disabled={isSavingNote && editingNoteId === transaction.id}
+                        onClick={() => toggleNoteEditor(transaction)}
+                        className={`group rounded p-1 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:cursor-not-allowed ${
+                          editingNoteId === transaction.id ? 'bg-slate-100 dark:bg-slate-800' : ''
                         }`}
                       >
-                        <path d="M8 1.75 9.93 5.66l4.32.63-3.13 3.04.74 4.3L8 11.6l-3.86 2.03.74-4.3L1.75 6.29l4.32-.63L8 1.75Z" />
-                      </svg>
-                    </button>
-                    {popup?.transactionId === transaction.id && (
-                      <BookmarkAddedPopup
-                        folders={folders}
-                        addedFolderId={popup.addedFolderId}
-                        onDone={closePopup}
-                        onRemove={() => removeFromPopup(transaction)}
-                        onFile={(folderId) => fileFromPopup(transaction, folderId)}
-                        createFolder={addToFolders}
-                      />
-                    )}
-                  </td>
-                  <td className="py-2 pl-1 text-right max-sm:col-start-3 max-sm:row-start-3 max-sm:p-0">
-                    <button
-                      type="button"
-                      aria-label={`${transaction.note ? 'Edit' : 'Add'} note for ${transaction.description}`}
-                      title={transaction.note ?? undefined}
-                      aria-expanded={editingNoteId === transaction.id}
-                      // Disabled while its Note saves, so closing can't hide the save or its error.
-                      disabled={isSavingNote && editingNoteId === transaction.id}
-                      onClick={() => toggleNoteEditor(transaction)}
-                      className={`group rounded p-1 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:cursor-not-allowed ${
-                        editingNoteId === transaction.id ? 'bg-slate-100 dark:bg-slate-800' : ''
-                      }`}
-                    >
-                      {/* Filled when the Note editor has something to show: a Note or a kept Receipt. */}
-                      {transaction.note || transaction.hasReceipt ? (
-                        <svg viewBox="0 0 16 16" fill="currentColor" fillRule="evenodd" aria-hidden="true" className="h-4 w-4 text-slate-600 dark:text-slate-300">
-                          <path d="M1.75 2h12.5c.966 0 1.75.784 1.75 1.75v8.5A1.75 1.75 0 0 1 14.25 14H1.75A1.75 1.75 0 0 1 0 12.25v-8.5C0 2.784.784 2 1.75 2Zm2.5 3.5a.75.75 0 0 0 0 1.5h7a.75.75 0 0 0 0-1.5h-7Zm0 3a.75.75 0 0 0 0 1.5h4a.75.75 0 0 0 0-1.5h-4Z" />
+                        {/* Filled when the Note editor has something to show: a Note or a kept Receipt. */}
+                        {transaction.note || transaction.hasReceipt ? (
+                          <svg viewBox="0 0 16 16" fill="currentColor" fillRule="evenodd" aria-hidden="true" className="h-4 w-4 text-slate-600 dark:text-slate-300">
+                            <path d="M1.75 2h12.5c.966 0 1.75.784 1.75 1.75v8.5A1.75 1.75 0 0 1 14.25 14H1.75A1.75 1.75 0 0 1 0 12.25v-8.5C0 2.784.784 2 1.75 2Zm2.5 3.5a.75.75 0 0 0 0 1.5h7a.75.75 0 0 0 0-1.5h-7Zm0 3a.75.75 0 0 0 0 1.5h4a.75.75 0 0 0 0-1.5h-4Z" />
+                          </svg>
+                        ) : (
+                          <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" className="h-4 w-4 text-slate-500 dark:text-slate-400 group-hover:text-slate-700 dark:group-hover:text-slate-200">
+                            <path d="M0 3.75C0 2.784.784 2 1.75 2h12.5c.966 0 1.75.784 1.75 1.75v8.5A1.75 1.75 0 0 1 14.25 14H1.75A1.75 1.75 0 0 1 0 12.25Zm1.75-.25a.25.25 0 0 0-.25.25v8.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-8.5a.25.25 0 0 0-.25-.25ZM3.5 6.25a.75.75 0 0 1 .75-.75h7a.75.75 0 0 1 0 1.5h-7a.75.75 0 0 1-.75-.75Zm.75 2.25h4a.75.75 0 0 1 0 1.5h-4a.75.75 0 0 1 0-1.5Z" />
+                          </svg>
+                        )}
+                      </button>
+                    </td>
+                    <td className="py-2 pr-4 pl-1 text-right max-sm:col-start-4 max-sm:row-start-3 max-sm:p-0">
+                      <button
+                        type="button"
+                        aria-label={`Delete ${transaction.description}`}
+                        title={transaction.imported ? "Imported Transactions can't be deleted" : undefined}
+                        disabled={transaction.imported || isDeleting}
+                        onClick={() => startDelete(transaction)}
+                        className="rounded p-1 text-slate-400 dark:text-slate-500 hover:bg-red-50 dark:hover:bg-red-950/40 hover:text-red-700 dark:hover:text-red-300 disabled:cursor-not-allowed disabled:text-slate-300 dark:disabled:text-slate-600 disabled:hover:bg-transparent"
+                      >
+                        <svg viewBox="0 0 16 16" fill="currentColor" fillRule="evenodd" aria-hidden="true" className="h-4 w-4">
+                          <path d="M6.5 1A1.5 1.5 0 0 0 5 2.5V3H2.75a.75.75 0 0 0 0 1.5h.3l.63 9.06A1.5 1.5 0 0 0 5.18 15h5.64a1.5 1.5 0 0 0 1.5-1.44l.63-9.06h.3a.75.75 0 0 0 0-1.5H11v-.5A1.5 1.5 0 0 0 9.5 1h-3Zm3 2v-.5h-3V3h3ZM6.75 6.5a.75.75 0 0 1 .75.75v4.5a.75.75 0 0 1-1.5 0v-4.5a.75.75 0 0 1 .75-.75Zm3.25.75a.75.75 0 0 0-1.5 0v4.5a.75.75 0 0 0 1.5 0v-4.5Z" />
                         </svg>
-                      ) : (
-                        <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" className="h-4 w-4 text-slate-500 dark:text-slate-400 group-hover:text-slate-700 dark:group-hover:text-slate-200">
-                          <path d="M0 3.75C0 2.784.784 2 1.75 2h12.5c.966 0 1.75.784 1.75 1.75v8.5A1.75 1.75 0 0 1 14.25 14H1.75A1.75 1.75 0 0 1 0 12.25Zm1.75-.25a.25.25 0 0 0-.25.25v8.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-8.5a.25.25 0 0 0-.25-.25ZM3.5 6.25a.75.75 0 0 1 .75-.75h7a.75.75 0 0 1 0 1.5h-7a.75.75 0 0 1-.75-.75Zm.75 2.25h4a.75.75 0 0 1 0 1.5h-4a.75.75 0 0 1 0-1.5Z" />
-                        </svg>
-                      )}
-                    </button>
-                  </td>
-                  <td className="py-2 pl-1 text-right max-sm:col-start-4 max-sm:row-start-3 max-sm:p-0">
-                    <button
-                      type="button"
-                      aria-label={`Delete ${transaction.description}`}
-                      title={transaction.imported ? "Imported Transactions can't be deleted" : undefined}
-                      disabled={transaction.imported || isDeleting}
-                      onClick={() => startDelete(transaction)}
-                      className="rounded p-1 text-slate-400 dark:text-slate-500 hover:bg-red-50 dark:hover:bg-red-950/40 hover:text-red-700 dark:hover:text-red-300 disabled:cursor-not-allowed disabled:text-slate-300 dark:disabled:text-slate-600 disabled:hover:bg-transparent"
-                    >
-                      <svg viewBox="0 0 16 16" fill="currentColor" fillRule="evenodd" aria-hidden="true" className="h-4 w-4">
-                        <path d="M6.5 1A1.5 1.5 0 0 0 5 2.5V3H2.75a.75.75 0 0 0 0 1.5h.3l.63 9.06A1.5 1.5 0 0 0 5.18 15h5.64a1.5 1.5 0 0 0 1.5-1.44l.63-9.06h.3a.75.75 0 0 0 0-1.5H11v-.5A1.5 1.5 0 0 0 9.5 1h-3Zm3 2v-.5h-3V3h3ZM6.75 6.5a.75.75 0 0 1 .75.75v4.5a.75.75 0 0 1-1.5 0v-4.5a.75.75 0 0 1 .75-.75Zm3.25.75a.75.75 0 0 0-1.5 0v4.5a.75.75 0 0 0 1.5 0v-4.5Z" />
-                      </svg>
-                    </button>
-                  </td>
-                </tr>
-                {editingNoteId === transaction.id && (
-                  <tr className="max-sm:block">
-                    <td colSpan={7} className="pb-3 max-sm:block max-sm:pt-1">
-                      <div className="flex flex-wrap items-end gap-2 rounded-lg bg-slate-50 dark:bg-slate-950 px-3 py-2">
-                        {/* The Note with the kept Receipt to its left, or above it on a phone. The
-                            Receipt is loaded only now, so listing Transactions never loads one. */}
-                        <div className="flex flex-1 flex-col gap-2 sm:flex-row sm:items-end">
-                          {transaction.hasReceipt && (
-                            <ZoomableReceipt
-                              src={receiptUrl(transaction.id)}
-                              className="shrink-0 self-start overflow-hidden rounded border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 sm:self-end"
-                              imageClassName="h-24 w-auto max-w-full"
-                            />
-                          )}
-                          <label className="flex flex-1 flex-col gap-1 text-sm font-medium text-slate-700 dark:text-slate-300">
-                            Note
-                            <textarea
-                              rows={2}
-                              maxLength={256}
-                              value={noteDraft}
-                              onChange={(e) => setNoteDraft(e.target.value)}
-                              placeholder="Add a note…"
-                              className={`${inputClassName} font-normal`}
-                            />
-                          </label>
+                      </button>
+                    </td>
+                  </tr>
+                  {editingNoteId === transaction.id && (
+                    <tr className="max-sm:block">
+                      <td colSpan={7} className="px-4 pb-3 max-sm:block max-sm:pt-1">
+                        <div className="flex flex-wrap items-end gap-2 rounded-lg bg-slate-50 dark:bg-slate-950 px-3 py-2">
+                          {/* The Note with the kept Receipt to its left, or above it on a phone. The
+                              Receipt is loaded only now, so listing Transactions never loads one. */}
+                          <div className="flex flex-1 flex-col gap-2 sm:flex-row sm:items-end">
+                            {transaction.hasReceipt && (
+                              <ZoomableReceipt
+                                src={receiptUrl(transaction.id)}
+                                className="shrink-0 self-start overflow-hidden rounded border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 sm:self-end"
+                                imageClassName="h-24 w-auto max-w-full"
+                              />
+                            )}
+                            <label className="flex flex-1 flex-col gap-1 text-sm font-medium text-slate-700 dark:text-slate-300">
+                              Note
+                              <textarea
+                                rows={2}
+                                maxLength={256}
+                                value={noteDraft}
+                                onChange={(e) => setNoteDraft(e.target.value)}
+                                placeholder="Add a note…"
+                                className={`${inputClassName} font-normal`}
+                              />
+                            </label>
+                          </div>
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              disabled={isSavingNote}
+                              onClick={() => saveNote(transaction)}
+                              className={smallButtonClass}
+                            >
+                              {isSavingNote ? 'Saving…' : 'Save'}
+                            </button>
+                            <button
+                              type="button"
+                              disabled={isSavingNote}
+                              onClick={() => setEditingNoteId(null)}
+                              className={smallButtonClass}
+                            >
+                              Cancel
+                            </button>
+                          </div>
                         </div>
-                        <div className="flex gap-2">
+                      </td>
+                    </tr>
+                  )}
+                  {confirmingDeleteId === transaction.id && (
+                    <tr className="max-sm:block">
+                      <td colSpan={7} className="px-4 pb-3 max-sm:block max-sm:pt-1">
+                        <div className="flex flex-wrap items-center justify-end gap-2 rounded-lg bg-red-50 dark:bg-red-950/40 px-3 py-2">
+                          <span className="mr-auto text-red-800 dark:text-red-300">
+                            Delete "{transaction.description}" ({formatAmount(transaction.amount)} on{' '}
+                            {formatNorwegianDate(transaction.date)})? This can't be undone.
+                          </span>
                           <button
                             type="button"
-                            disabled={isSavingNote}
-                            onClick={() => saveNote(transaction)}
+                            disabled={isDeleting}
+                            onClick={() => confirmDelete(transaction)}
                             className={smallButtonClass}
                           >
-                            {isSavingNote ? 'Saving…' : 'Save'}
+                            Confirm delete
                           </button>
                           <button
                             type="button"
-                            disabled={isSavingNote}
-                            onClick={() => setEditingNoteId(null)}
+                            disabled={isDeleting}
+                            onClick={() => setConfirmingDeleteId(null)}
                             className={smallButtonClass}
                           >
                             Cancel
                           </button>
                         </div>
-                      </div>
-                    </td>
-                  </tr>
-                )}
-                {confirmingDeleteId === transaction.id && (
-                  <tr className="max-sm:block">
-                    <td colSpan={7} className="pb-3 max-sm:block max-sm:pt-1">
-                      <div className="flex flex-wrap items-center justify-end gap-2 rounded-lg bg-red-50 dark:bg-red-950/40 px-3 py-2">
-                        <span className="mr-auto text-red-800 dark:text-red-300">
-                          Delete "{transaction.description}" ({formatAmount(transaction.amount)} on{' '}
-                          {formatNorwegianDate(transaction.date)})? This can't be undone.
-                        </span>
-                        <button
-                          type="button"
-                          disabled={isDeleting}
-                          onClick={() => confirmDelete(transaction)}
-                          className={smallButtonClass}
-                        >
-                          Confirm delete
-                        </button>
-                        <button
-                          type="button"
-                          disabled={isDeleting}
-                          onClick={() => setConfirmingDeleteId(null)}
-                          className={smallButtonClass}
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                )}
-              </Fragment>
-            ))}
-          </tbody>
-        </table>
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </section>
   )

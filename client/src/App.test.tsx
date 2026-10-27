@@ -4556,6 +4556,113 @@ describe('Transactions page', () => {
     expect(lockMark('Vipps *Ola Nordmann')).not.toBeInTheDocument()
   })
 
+  describe('Category dots', () => {
+    // The dot in the Transaction's Category cell. Hidden from screen readers, it is found as the cell's
+    // first hidden element.
+    function dot(description: string) {
+      const found = categorySelect(description).closest('td')!.querySelector<HTMLElement>('[aria-hidden="true"]')
+      if (!found) throw new Error(`No dot for ${description}`)
+      return found
+    }
+
+    it("puts a dot before each Category select in the colour the Dashboard draws it in, or Uncategorized's grey", async () => {
+      categoriesServed = [{ ...categories[0], colour: '#123456' }, categories[1]]
+      months = [{ year: 2026, month: 9 }]
+      handleListPeriod = () => Response.json([...otherCategoryTransactions, septemberTransactions[1]])
+      await openTransactionsPage()
+      await screen.findByRole('cell', { name: 'Rema 1000' })
+
+      expect(dot('Rema 1000')).toHaveStyle({ backgroundColor: 'rgb(18, 52, 86)' })
+      expect(dot('Gave')).toHaveStyle({ backgroundColor: 'rgb(144, 133, 233)' })
+      expect(dot('Lønn Fra: Testfirma AS')).toHaveStyle({ backgroundColor: 'rgb(148, 163, 184)' })
+      // Before the select, with the Locked icon still after it.
+      expect(dot('Gave').compareDocumentPosition(categorySelect('Gave'))).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+      expect(categorySelect('Gave').compareDocumentPosition(lockMark('Gave')!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+    })
+
+    it('leaves the dot out of what a screen reader reads, since the select names the Category', async () => {
+      await openSeptember()
+
+      expect(within(transactionRow('Rema 1000')).queryByRole('img', { name: /colour/ })).not.toBeInTheDocument()
+      expect(dot('Rema 1000')).not.toHaveAttribute('role')
+      expect(dot('Rema 1000')).not.toHaveAttribute('aria-label')
+    })
+
+    it('changes the dot as soon as another Category is chosen, and back when saving fails', async () => {
+      let failSave: () => void = () => {}
+      handleChangeCategory = () =>
+        new Promise((resolve) => {
+          failSave = () => resolve(new Response(null, { status: 500 }))
+        })
+      const user = await openSeptember()
+
+      await user.selectOptions(categorySelect('Lønn Fra: Testfirma AS'), 'Other')
+      expect(dot('Lønn Fra: Testfirma AS')).toHaveStyle({ backgroundColor: 'rgb(144, 133, 233)' })
+
+      failSave()
+      expect(await screen.findByRole('alert')).toHaveTextContent('Saving failed (500).')
+      expect(dot('Lønn Fra: Testfirma AS')).toHaveStyle({ backgroundColor: 'rgb(148, 163, 184)' })
+    })
+
+    it('draws a dot lighter in Dark, just as the Dashboard draws its Category', async () => {
+      localStorage.setItem('appearance', 'dark')
+      categoriesServed = [{ ...categories[0], colour: '#104281' }, categories[1]]
+      months = [{ year: 2026, month: 9 }]
+      handleSpending = () => Response.json({ total: 120, slices: [{ categoryId: 1, amount: 120 }] })
+      handleListPeriod = () => Response.json(septemberTransactions)
+      const user = userEvent.setup()
+      await renderApp()
+      const legendRow = await within(screen.getByRole('region', { name: 'Spending' })).findByRole('row', {
+        name: /Groceries/,
+      })
+      const onDashboard = (legendRow.querySelector('[aria-hidden="true"]') as HTMLElement).style.backgroundColor
+
+      await user.click(screen.getByRole('button', { name: 'Transactions' }))
+      await screen.findByRole('cell', { name: 'Rema 1000' })
+
+      expect(dot('Rema 1000').style.backgroundColor).toBe(onDashboard)
+      expect(dot('Rema 1000')).not.toHaveStyle({ backgroundColor: 'rgb(16, 66, 129)' })
+    })
+  })
+
+  describe('panel', () => {
+    // The white panel the table sits in, as on Categories, with its ruled header row.
+    function expectInPanel(table: HTMLElement) {
+      expect(table.parentElement).toHaveClass('rounded-lg', 'border', 'bg-white', 'shadow-sm')
+      expect(within(table).getAllByRole('rowgroup')[0]).toHaveClass('border-b')
+    }
+
+    it('shows the table in the white panel, in both All and Bookmarks', async () => {
+      handleListBookmarks = () => Response.json([{ ...septemberTransactions[0], bookmarked: true }])
+      const user = await openSeptember()
+      expectInPanel(screen.getByRole('table'))
+
+      await user.click(within(screen.getByRole('group', { name: 'Show' })).getByRole('button', { name: 'Bookmarks' }))
+      await waitFor(() => expect(screen.queryByRole('cell', { name: 'Lønn Fra: Testfirma AS' })).not.toBeInTheDocument())
+      expectInPanel(screen.getByRole('table'))
+    })
+
+    it('lays each Transaction out as a card inside the panel on a phone, never scrolling sideways', async () => {
+      const user = await openSeptember()
+      await user.click(screen.getByRole('button', { name: 'Add note for Rema 1000' }))
+
+      // jsdom applies no media queries, so the phone layout is checked by its classes: the table and
+      // its body are blocks, the column headers hidden, and each card kept off the panel's edge.
+      const table = screen.getByRole('table')
+      const [head, body] = within(table).getAllByRole('rowgroup')
+      expect(table).toHaveClass('max-sm:block')
+      expect(head).toHaveClass('max-sm:hidden')
+      expect(body).toHaveClass('max-sm:block')
+      for (const description of ['Rema 1000', 'Lønn Fra: Testfirma AS']) {
+        expect(transactionRow(description)).toHaveClass('max-sm:grid', 'max-sm:px-4')
+      }
+      // The Note editor under its card, kept off the edge too.
+      expect(screen.getByRole('textbox', { name: 'Note' }).closest('td')).toHaveClass('px-4')
+      const page = screen.getByRole('heading', { name: 'Transactions' }).closest('section')!
+      expect(page.querySelector('[class*="overflow-x-auto"], [class*="min-w-"]:not([class*="min-w-0"])')).toBeNull()
+    })
+  })
+
   describe('deleting', () => {
     const manualTransaction = {
       id: 6,
