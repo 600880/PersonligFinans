@@ -89,10 +89,7 @@ let deleteCounts:
   | Promise<Response>
 let handleDeleteAllTransactions: () => Response | Promise<Response>
 let handleDeleteAllRules: () => Response | Promise<Response>
-// A rule's transactionCount is 0 unless given.
-let rules:
-  | { id: number; keyword: string; categoryId: number; aiGenerated: boolean; isNew: boolean; transactionCount?: number }[]
-  | Response
+let rules: { id: number; keyword: string; categoryId: number; aiGenerated: boolean; isNew: boolean }[] | Response
 let handleAddRule: PostHandler
 let handleAddCategory: PostHandler
 let handleEditRule: (id: number, body: unknown) => Response
@@ -254,7 +251,7 @@ const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
   }
   if (url === '/api/categorization-rules' && init?.method === 'DELETE') return handleDeleteAllRules()
   if (url === '/api/categorization-rules') {
-    return rules instanceof Response ? rules : Response.json(rules.map((rule) => ({ transactionCount: 0, ...rule })))
+    return rules instanceof Response ? rules : Response.json(rules)
   }
   return new Response(null, { status: 404 })
 })
@@ -273,11 +270,11 @@ beforeEach(() => {
   ]
   handleAddRule = (body) =>
     Response.json(
-      { id: 3, ...(body as object), aiGenerated: false, isNew: false, transactionCount: 0, transactionsChanged: 0 },
+      { id: 3, ...(body as object), aiGenerated: false, isNew: false, transactionsChanged: 0 },
       { status: 201 },
     )
   handleEditRule = (id, body) =>
-    Response.json({ id, ...(body as object), aiGenerated: false, isNew: false, transactionCount: 0, transactionsChanged: 0 })
+    Response.json({ id, ...(body as object), aiGenerated: false, isNew: false, transactionsChanged: 0 })
   handleDeleteRule = () => Response.json({ transactionsChanged: 0 })
   handleDeleteCategory = () => Response.json({ transactionsChanged: 0 })
   handleEditCategory = (id, body) => {
@@ -2363,66 +2360,23 @@ describe('Rules page', () => {
     expect(screen.getAllByRole('columnheader').map((header) => header.textContent)).toEqual([
       'Keyword',
       'Category',
-      'Transactions',
       'Actions',
     ])
   })
 
-  it('shows how many transactions each rule categorizes', async () => {
-    rules = [
-      { id: 1, keyword: 'kiwi', categoryId: 1, aiGenerated: false, isNew: false, transactionCount: 1032 },
-      { id: 2, keyword: 'rema', categoryId: 1, aiGenerated: false, isNew: false, transactionCount: 1 },
-      { id: 3, keyword: 'zara', categoryId: 13, aiGenerated: false, isNew: false, transactionCount: 0 },
-    ]
-    await openRulesPage()
-
-    expect(screen.getAllByRole('row').slice(1).map((row) => within(row).getAllByRole('cell')[2].textContent)).toEqual([
-      '1 032 transactions',
-      '1 transaction',
-      '0 transactions',
-    ])
-  })
-
-  // The count shown in a rule's row.
-  function ruleCount(keyword: string) {
-    return within(ruleRow(keyword)).getAllByRole('cell')[2].textContent
-  }
-
-  it("counts the other rules again after adding, editing or deleting one, since a longer keyword takes another's transactions", async () => {
-    const kiwi = { id: 1, keyword: 'kiwi', categoryId: 1, aiGenerated: false, isNew: false, transactionCount: 5 }
-    const rema = { id: 2, keyword: 'rema', categoryId: 1, aiGenerated: false, isNew: false, transactionCount: 2 }
-    const kiwiButikk = { id: 3, keyword: 'kiwi butikk', categoryId: 1, aiGenerated: false, isNew: false, transactionCount: 3 }
-    const kiwiPluss = { ...kiwiButikk, keyword: 'kiwi pluss', transactionCount: 0 }
-    rules = [kiwi, rema]
-    handleAddRule = () => {
-      rules = [{ ...kiwi, transactionCount: 2 }, rema, kiwiButikk]
-      return Response.json({ ...kiwiButikk, transactionsChanged: 0 }, { status: 201 })
-    }
+  it('asks for the rules only on opening, not again after adding, editing or deleting one', async () => {
     const user = await openRulesPage()
 
-    await addRuleInDialog(user, 'kiwi butikk', 'Groceries')
-
-    await waitFor(() => expect(ruleCount('kiwi')).toBe('2 transactions'))
-    expect(ruleCount('kiwi butikk')).toBe('3 transactions')
-
-    handleEditRule = () => {
-      rules = [kiwi, rema, kiwiPluss]
-      return Response.json({ ...kiwiPluss, transactionsChanged: 0 })
-    }
-    const editing = await openEditDialog(user, 'kiwi butikk')
-    await user.clear(editing.getByLabelText('Keyword'))
-    await user.type(editing.getByLabelText('Keyword'), 'kiwi pluss')
+    await addRuleInDialog(user, 'rema', 'Groceries')
+    await screen.findByText('Rule added. 0 transactions changed category.')
+    const editing = await openEditDialog(user, 'kiwi')
     await user.click(editing.getByRole('button', { name: 'Save' }))
+    await screen.findByText('Rule updated. 0 transactions changed category.')
+    await deleteConfirmed(user, 'rema')
+    await screen.findByText('Rule deleted. 0 transactions changed category.')
 
-    await waitFor(() => expect(ruleCount('kiwi')).toBe('5 transactions'))
-
-    handleDeleteRule = () => {
-      rules = [kiwi, { ...rema, transactionCount: 0 }]
-      return Response.json({ transactionsChanged: 0 })
-    }
-    await user.click(within(ruleRow('kiwi pluss')).getByRole('button', { name: 'Delete' }))
-
-    await waitFor(() => expect(ruleCount('rema')).toBe('0 transactions'))
+    const listed = fetchMock.mock.calls.filter(([url, init]) => url === '/api/categorization-rules' && !init?.method)
+    expect(listed).toHaveLength(1)
   })
 
   // The swatch beside a rule's Category, as a CSS colour.
@@ -2496,21 +2450,18 @@ describe('Rules page', () => {
     expect(keywords()).toEqual(['ark', 'zara', 'æble', 'ørn', 'åpent'])
   })
 
-  it('stacks each rule as a phone shows its card: keyword and badges, then its Category, then its count, then its actions', async () => {
-    rules = [{ id: 3, keyword: 'café løkka', categoryId: 13, aiGenerated: true, isNew: true, transactionCount: 4 }]
+  it('stacks each rule as a phone shows its card: keyword and badges, then its Category, then its actions', async () => {
+    rules = [{ id: 3, keyword: 'café løkka', categoryId: 13, aiGenerated: true, isNew: true }]
     const user = userEvent.setup()
     await renderApp()
     await user.click(screen.getByRole('button', { name: 'Rules' }))
     const card = await screen.findByRole('row', { name: /^café løkka/ })
 
     // On a phone the cells stack as a card in the order they come in.
-    const [keyword, category, count, actions] = within(card).getAllByRole('cell')
+    const [keyword, category, actions] = within(card).getAllByRole('cell')
     expect(keyword).toHaveTextContent('café løkka AI New')
     expect(within(category).getByRole('img', { name: 'Other colour' })).toBeInTheDocument()
     expect(category).toHaveTextContent('Other')
-    // With the column headers hidden, the count says what it counts.
-    expect(count).toHaveTextContent('4 transactions')
-    expect(within(count).getByText('transactions')).not.toHaveClass('sr-only')
     expect(within(actions).getAllByRole('button').map((button) => button.textContent)).toEqual(['Edit', 'Delete'])
 
     // jsdom applies no media queries, so the phone layout is checked by its classes: the table, its
@@ -2521,7 +2472,7 @@ describe('Rules page', () => {
     expect(head).toHaveClass('max-sm:hidden')
     expect(body).toHaveClass('max-sm:block')
     expect(card).toHaveClass('max-sm:flex', 'max-sm:flex-col')
-    for (const cell of [keyword, category, count]) expect(cell).toHaveClass('max-sm:block')
+    for (const cell of [keyword, category]) expect(cell).toHaveClass('max-sm:block')
     // Nothing on the page is wider than the screen or scrolls sideways.
     const page = screen.getByRole('heading', { name: 'Categorization Rules' }).closest('section')!
     expect(page.querySelector('[class*="overflow-x-auto"], [class*="min-w-"]:not([class*="min-w-0"])')).toBeNull()
@@ -2731,6 +2682,13 @@ describe('Rules page', () => {
     return row
   }
 
+  // Deletes the rule as the page always has it done: Delete, then Confirm delete in the confirmation.
+  async function deleteConfirmed(user: ReturnType<typeof userEvent.setup>, keyword: string) {
+    await user.click(within(ruleRow(keyword)).getByRole('button', { name: 'Delete' }))
+    const dialog = screen.getByRole('dialog', { name: `Delete the rule “${keyword}”?` })
+    await user.click(within(dialog).getByRole('button', { name: 'Confirm delete' }))
+  }
+
   it('edits a rule in a dialog filled in with it, and says how many transactions changed category', async () => {
     let edited: { id: number; body: unknown } | undefined
     handleEditRule = (id, body) => {
@@ -2827,45 +2785,6 @@ describe('Rules page', () => {
     expect(dialog.getByLabelText('Keyword')).toHaveValue('kiwi extra')
   })
 
-  it('deletes a rule and says how many transactions changed category', async () => {
-    let deletedId: number | undefined
-    handleDeleteRule = (id) => {
-      deletedId = id
-      return Response.json({ transactionsChanged: 2 })
-    }
-    const user = await openRulesPage()
-
-    await user.click(within(ruleRow('kiwi')).getByRole('button', { name: 'Delete' }))
-
-    expect(deletedId).toBe(1)
-    expect(await screen.findByRole('status')).toHaveTextContent(
-      'Rule deleted. 2 transactions changed category.',
-    )
-    expect(screen.queryByRole('cell', { name: 'kiwi' })).not.toBeInTheDocument()
-  })
-
-  it('removes a rule that was already deleted elsewhere', async () => {
-    handleDeleteRule = () => Response.json({ title: 'Not Found', status: 404 }, { status: 404 })
-    const user = await openRulesPage()
-
-    await user.click(within(ruleRow('kiwi')).getByRole('button', { name: 'Delete' }))
-
-    expect(await screen.findByRole('status')).toHaveTextContent('The rule was already deleted.')
-    expect(screen.queryByRole('cell', { name: 'kiwi' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
-  })
-
-  it('shows a general error when a delete cannot reach the server', async () => {
-    handleDeleteRule = () => {
-      throw new TypeError('Failed to fetch')
-    }
-    const user = await openRulesPage()
-
-    await user.click(within(ruleRow('kiwi')).getByRole('button', { name: 'Delete' }))
-
-    expect(await screen.findByRole('alert')).toHaveTextContent('Could not reach the server.')
-    expect(screen.getByRole('cell', { name: 'kiwi' })).toBeInTheDocument()
-  })
   function keywords() {
     return screen
       .getAllByRole('row')
@@ -2943,6 +2862,9 @@ describe('Rules page', () => {
     expect(keywords()).toEqual(['nille New'])
 
     await user.click(within(ruleRow('nille New')).getByRole('button', { name: 'Delete' }))
+    await user.click(
+      within(screen.getByRole('dialog', { name: 'Delete the rule “nille”?' })).getByRole('button', { name: 'Confirm delete' }),
+    )
     await screen.findByRole('status')
 
     const newOnly = screen.getByRole('checkbox', { name: 'Show only new' })
@@ -3142,12 +3064,12 @@ describe('Rules page', () => {
   })
 
   describe('sorting', () => {
-    // How each column heading says the table is sorted by it.
+    // How each column heading the table can be sorted by says it is sorted by it.
     function sortStates() {
       return Object.fromEntries(
         screen
           .getAllByRole('columnheader')
-          .slice(0, 3)
+          .filter((header) => header.hasAttribute('aria-sort'))
           .map((header) => [header.textContent, header.getAttribute('aria-sort')]),
       )
     }
@@ -3167,17 +3089,17 @@ describe('Rules page', () => {
       const user = await openRulesPage()
 
       expect(keywords()).toEqual(['kiwi', 'zara', 'ørn', 'åpent'])
-      expect(sortStates()).toEqual({ Keyword: 'ascending', Category: 'none', Transactions: 'none' })
+      expect(sortStates()).toEqual({ Keyword: 'ascending', Category: 'none' })
 
       await sortBy(user, 'Keyword')
 
       expect(keywords()).toEqual(['åpent', 'ørn', 'zara', 'kiwi'])
-      expect(sortStates()).toEqual({ Keyword: 'descending', Category: 'none', Transactions: 'none' })
+      expect(sortStates()).toEqual({ Keyword: 'descending', Category: 'none' })
 
       await sortBy(user, 'Keyword')
 
       expect(keywords()).toEqual(['kiwi', 'zara', 'ørn', 'åpent'])
-      expect(sortStates()).toEqual({ Keyword: 'ascending', Category: 'none', Transactions: 'none' })
+      expect(sortStates()).toEqual({ Keyword: 'ascending', Category: 'none' })
     })
 
     it('sorts by Category name in the Norwegian alphabet, either way, keeping keyword A–Å within a Category', async () => {
@@ -3194,66 +3116,35 @@ describe('Rules page', () => {
       await sortBy(user, 'Category')
 
       expect(keywords()).toEqual(['bunnpris', 'kiwi', 'apotek', 'zara', 'anorakk'])
-      expect(sortStates()).toEqual({ Keyword: 'none', Category: 'ascending', Transactions: 'none' })
+      expect(sortStates()).toEqual({ Keyword: 'none', Category: 'ascending' })
 
       await sortBy(user, 'Category')
 
       expect(keywords()).toEqual(['anorakk', 'apotek', 'zara', 'bunnpris', 'kiwi'])
-      expect(sortStates()).toEqual({ Keyword: 'none', Category: 'descending', Transactions: 'none' })
+      expect(sortStates()).toEqual({ Keyword: 'none', Category: 'descending' })
     })
 
-    it('sorts by Transactions count, lowest or highest first, keeping keyword A–Å between equal counts', async () => {
+    it('places a rule added or edited where the current sort puts it', async () => {
       rules = [
-        { id: 1, keyword: 'kiwi', categoryId: 1, aiGenerated: false, isNew: false, transactionCount: 12 },
-        { id: 2, keyword: 'rema', categoryId: 1, aiGenerated: false, isNew: false, transactionCount: 0 },
-        { id: 3, keyword: 'zara', categoryId: 13, aiGenerated: false, isNew: false, transactionCount: 3 },
-        { id: 4, keyword: 'apotek', categoryId: 13, aiGenerated: false, isNew: false, transactionCount: 0 },
-        { id: 5, keyword: 'meny', categoryId: 1, aiGenerated: false, isNew: false, transactionCount: 120 },
+        { id: 1, keyword: 'kiwi', categoryId: 1, aiGenerated: false, isNew: false },
+        { id: 2, keyword: 'zara', categoryId: 13, aiGenerated: false, isNew: false },
       ]
       const user = await openRulesPage()
-
-      await sortBy(user, 'Transactions')
-
-      expect(keywords()).toEqual(['apotek', 'rema', 'zara', 'kiwi', 'meny'])
-      expect(sortStates()).toEqual({ Keyword: 'none', Category: 'none', Transactions: 'ascending' })
-
-      await sortBy(user, 'Transactions')
-
-      expect(keywords()).toEqual(['meny', 'kiwi', 'zara', 'apotek', 'rema'])
-      expect(sortStates()).toEqual({ Keyword: 'none', Category: 'none', Transactions: 'descending' })
-    })
-
-    it('places a rule added or edited where the current sort puts it, by the count it then has', async () => {
-      const kiwi = { id: 1, keyword: 'kiwi', categoryId: 1, aiGenerated: false, isNew: false, transactionCount: 12 }
-      const zara = { id: 2, keyword: 'zara', categoryId: 13, aiGenerated: false, isNew: false, transactionCount: 3 }
-      const rema = { id: 3, keyword: 'rema', categoryId: 1, aiGenerated: false, isNew: false, transactionCount: 5 }
-      const editedKiwi = { ...kiwi, categoryId: 13, transactionCount: 1 }
-      rules = [kiwi, zara]
-      handleAddRule = () => {
-        rules = [kiwi, zara, rema]
-        return Response.json({ ...rema, transactionsChanged: 5 }, { status: 201 })
-      }
-      handleEditRule = () => {
-        rules = [editedKiwi, zara, rema]
-        return Response.json({ ...editedKiwi, transactionsChanged: 0 })
-      }
-      const user = await openRulesPage()
-      await sortBy(user, 'Transactions')
-      await sortBy(user, 'Transactions')
+      await sortBy(user, 'Category')
+      await sortBy(user, 'Category')
 
       await addRuleInDialog(user, 'rema', 'Groceries')
       await screen.findByRole('status')
 
-      expect(keywords()).toEqual(['kiwi', 'rema', 'zara'])
-      expect(within(ruleRow('rema')).getAllByRole('cell')[2]).toHaveTextContent('5 transactions')
+      expect(keywords()).toEqual(['zara', 'kiwi', 'rema'])
 
       const dialog = await openEditDialog(user, 'kiwi')
       await user.selectOptions(dialog.getByLabelText('Category'), 'Other')
       await user.click(dialog.getByRole('button', { name: 'Save' }))
       await screen.findByText('Rule updated. 0 transactions changed category.')
 
-      expect(keywords()).toEqual(['rema', 'zara', 'kiwi'])
-      expect(sortStates()).toEqual({ Keyword: 'none', Category: 'none', Transactions: 'descending' })
+      expect(keywords()).toEqual(['kiwi', 'zara', 'rema'])
+      expect(sortStates()).toEqual({ Keyword: 'none', Category: 'descending' })
     })
   })
 
@@ -3537,7 +3428,7 @@ describe('Rules page', () => {
       handlePreview = () => answer({ changedCount: 3, lockedCount: 0, changes: [] })
       handleAddRule = () =>
         Response.json(
-          { id: 3, keyword: 'rema', categoryId: 1, aiGenerated: false, isNew: false, transactionCount: 3, transactionsChanged: 3 },
+          { id: 3, keyword: 'rema', categoryId: 1, aiGenerated: false, isNew: false, transactionsChanged: 3 },
           { status: 201 },
         )
       const user = await openRulesPage()
@@ -3555,9 +3446,9 @@ describe('Rules page', () => {
     })
   })
 
-  describe('deleting a rule with a confirmation', () => {
-    const kiwi = { id: 1, keyword: 'kiwi', categoryId: 1, aiGenerated: false, isNew: false, transactionCount: 5 }
-    const rema = { id: 2, keyword: 'rema', categoryId: 1, aiGenerated: false, isNew: false, transactionCount: 0 }
+  describe('deleting a rule, always with a confirmation', () => {
+    const kiwi = { id: 1, keyword: 'kiwi', categoryId: 1, aiGenerated: false, isNew: false }
+    const rema = { id: 2, keyword: 'rema', categoryId: 1, aiGenerated: false, isNew: false }
 
     // What the delete preview answers for a rule, and every rule it was asked about.
     let handlePreview: (id: number) => Response | Promise<Response>
@@ -3599,7 +3490,7 @@ describe('Rules page', () => {
       )
     })
 
-    it('asks first, showing what deleting would change, when the rule categorizes transactions', async () => {
+    it('asks first, showing what deleting would change', async () => {
       let deletedId: number | undefined
       handleDeleteRule = (id) => {
         deletedId = id
@@ -3610,7 +3501,6 @@ describe('Rules page', () => {
       await user.click(within(ruleRow('kiwi')).getByRole('button', { name: 'Delete' }))
 
       const dialog = within(deleteDialog()!)
-      expect(dialog.getByText('It categorizes 5 transactions.')).toBeInTheDocument()
       const shown = within(await dialog.findByRole('region', { name: 'Preview' }))
       expect(shown.getByText('Would change 5 transactions')).toBeInTheDocument()
       await user.click(shown.getByRole('button', { name: 'Show transactions' }))
@@ -3623,11 +3513,10 @@ describe('Rules page', () => {
       expect(screen.getByRole('cell', { name: 'kiwi' })).toBeInTheDocument()
     })
 
-    it('deletes the rule once confirmed, with the same message as without asking, and counts the rules again', async () => {
+    it('deletes the rule once confirmed and says how many transactions changed category', async () => {
       let deletedId: number | undefined
       handleDeleteRule = (id) => {
         deletedId = id
-        rules = [{ ...rema, transactionCount: 2 }]
         return Response.json({ transactionsChanged: 5 })
       }
       const user = await openRulesPage()
@@ -3640,7 +3529,6 @@ describe('Rules page', () => {
       expect(await screen.findByRole('status')).toHaveTextContent('Rule deleted. 5 transactions changed category.')
       expect(deleteDialog()).not.toBeInTheDocument()
       expect(screen.queryByRole('cell', { name: 'kiwi' })).not.toBeInTheDocument()
-      await waitFor(() => expect(within(ruleRow('rema')).getAllByRole('cell')[2]).toHaveTextContent('2 transactions'))
     })
 
     it('keeps the rule when the confirmation is cancelled, by Cancel or by Escape', async () => {
@@ -3666,20 +3554,26 @@ describe('Rules page', () => {
       expect(screen.queryByRole('status')).toBeEmptyDOMElement()
     })
 
-    it('deletes a rule that categorizes no transactions on a single click, asking nothing', async () => {
+    it('asks first even for a rule that matches nothing, saying nothing would change', async () => {
       let deletedId: number | undefined
       handleDeleteRule = (id) => {
         deletedId = id
         return Response.json({ transactionsChanged: 0 })
       }
+      handlePreview = () => answer({ changedCount: 0, lockedCount: 0, changes: [] })
       const user = await openRulesPage()
 
       await user.click(within(ruleRow('rema')).getByRole('button', { name: 'Delete' }))
 
+      const dialog = within(screen.getByRole('dialog', { name: 'Delete the rule “rema”?' }))
+      expect(await dialog.findByRole('region', { name: 'Preview' })).toHaveTextContent('Nothing would change')
+      expect(asked).toEqual([2])
+      expect(deletedId).toBeUndefined()
+
+      await user.click(dialog.getByRole('button', { name: 'Confirm delete' }))
+
       expect(deletedId).toBe(2)
       expect(await screen.findByRole('status')).toHaveTextContent('Rule deleted. 0 transactions changed category.')
-      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
-      expect(asked).toEqual([])
     })
 
     it('says the rule was already deleted when it was deleted elsewhere while asking, showing no preview', async () => {
@@ -3708,7 +3602,6 @@ describe('Rules page', () => {
       await waitFor(() => expect(asked).toEqual([1]))
 
       const dialog = within(deleteDialog()!)
-      expect(dialog.getByText('It categorizes 5 transactions.')).toBeInTheDocument()
       expect(dialog.queryByRole('region', { name: 'Preview' })).not.toBeInTheDocument()
       expect(screen.queryByRole('alert')).not.toBeInTheDocument()
 
@@ -3915,7 +3808,7 @@ describe('Rules page', () => {
     it('goes with the dialog once the edit is saved or cancelled, with the same message after saving as without it', async () => {
       handlePreview = () => answer({ changedCount: 3, lockedCount: 0, changes: [] })
       handleEditRule = (id, body) =>
-        Response.json({ id, ...(body as object), aiGenerated: false, isNew: false, transactionCount: 3, transactionsChanged: 3 })
+        Response.json({ id, ...(body as object), aiGenerated: false, isNew: false, transactionsChanged: 3 })
       const user = await openRulesPage()
       const dialog = await openEditDialog(user, 'kiwi')
       await user.type(dialog.getByLabelText('Keyword'), ' minipris')

@@ -6,13 +6,11 @@ namespace PersonligFinans.Api.CategorizationRules;
 
 public record CategorizationRuleRequest(string? Keyword, int? CategoryId);
 
-// IsNew: added by the most recent Upload that imported a Bank Statement. TransactionCount: how many
-// Transactions the rule categorizes, so not the Locked ones nor those a longer keyword won.
-public record CategorizationRuleResponse(
-    int Id, string Keyword, int CategoryId, bool AiGenerated, bool IsNew, int TransactionCount);
+// IsNew: added by the most recent Upload that imported a Bank Statement.
+public record CategorizationRuleResponse(int Id, string Keyword, int CategoryId, bool AiGenerated, bool IsNew);
 
 public record SavedCategorizationRuleResponse(
-    int Id, string Keyword, int CategoryId, bool AiGenerated, bool IsNew, int TransactionCount, int TransactionsChanged);
+    int Id, string Keyword, int CategoryId, bool AiGenerated, bool IsNew, int TransactionsChanged);
 
 public record DeletedCategorizationRuleResponse(int TransactionsChanged);
 
@@ -37,11 +35,11 @@ public static class CategorizationRuleEndpoints
         api.MapGet("/", async (AppDbContext db) =>
         {
             var latestUploadId = await LatestUploadId(db);
-            var rules = await db.CategorizationRules.OrderBy(r => r.Keyword).ToListAsync();
-            var transactionCounts = await Categorizer.TransactionCountsByRuleAsync(db);
-            return rules.Select(r => new CategorizationRuleResponse(
-                r.Id, r.Keyword, r.CategoryId, r.AiGenerated, r.UploadId != null && r.UploadId == latestUploadId,
-                transactionCounts.GetValueOrDefault(r.Id)));
+            return await db.CategorizationRules
+                .OrderBy(r => r.Keyword)
+                .Select(r => new CategorizationRuleResponse(
+                    r.Id, r.Keyword, r.CategoryId, r.AiGenerated, r.UploadId != null && r.UploadId == latestUploadId))
+                .ToListAsync();
         });
 
         api.MapPost("/", AddRule);
@@ -75,8 +73,7 @@ public static class CategorizationRuleEndpoints
         if (await SaveRuleChange(db) is not { } transactionsChanged)
             return await KeywordAlreadyExists(db, keyword);
 
-        return Results.Created(
-            $"/api/categorization-rules/{rule.Id}", await Saved(db, rule, latestUploadId: null, transactionsChanged));
+        return Results.Created($"/api/categorization-rules/{rule.Id}", Saved(rule, latestUploadId: null, transactionsChanged));
     }
 
     // What AddRule would do with the request: the saved rules, with the new one among them, as it
@@ -121,7 +118,7 @@ public static class CategorizationRuleEndpoints
         if (await SaveRuleChange(db) is not { } transactionsChanged)
             return await KeywordAlreadyExists(db, keyword);
 
-        return Results.Ok(await Saved(db, rule, await LatestUploadId(db), transactionsChanged));
+        return Results.Ok(Saved(rule, await LatestUploadId(db), transactionsChanged));
     }
 
     // What EditRule would do with the request: the saved rules, with the edited one as the edit
@@ -181,11 +178,10 @@ public static class CategorizationRuleEndpoints
         return Results.Ok(new DeletedCategorizationRulesResponse(rules.Count));
     }
 
-    private static async Task<SavedCategorizationRuleResponse> Saved(
-        AppDbContext db, CategorizationRule rule, Guid? latestUploadId, int transactionsChanged) =>
+    private static SavedCategorizationRuleResponse Saved(
+        CategorizationRule rule, Guid? latestUploadId, int transactionsChanged) =>
         new(rule.Id, rule.Keyword, rule.CategoryId, rule.AiGenerated,
-            rule.UploadId is not null && rule.UploadId == latestUploadId,
-            await Categorizer.TransactionCountAsync(db, rule.Id), transactionsChanged);
+            rule.UploadId is not null && rule.UploadId == latestUploadId, transactionsChanged);
 
     // The most recent Upload that imported a Bank Statement, or null before any import. Kept even
     // when its Bank Statements are deleted.

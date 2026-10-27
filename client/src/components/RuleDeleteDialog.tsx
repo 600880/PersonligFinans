@@ -1,6 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { deleteRule, previewDeletingRule, type CategorizationRule, type Category, type RulePreview } from '../lib/api'
-import { counted } from '../lib/count'
 import { Dialog } from './Dialog'
 import { ErrorMessage } from './Messages'
 import { RuleChangePreview } from './RuleChangePreview'
@@ -13,7 +12,6 @@ export interface RuleDeleted {
 }
 
 interface RuleDeleteDialogProps {
-  // The rule to delete, one that categorizes Transactions.
   rule: CategorizationRule
   // Every Category, to name each changed Transaction's old and new Category by.
   categories: Category[]
@@ -21,11 +19,11 @@ interface RuleDeleteDialogProps {
   onDeleted: (deleted: RuleDeleted) => void
 }
 
-// Asks before deleting a rule that categorizes Transactions. It says how many, and previews what the
+// Asks before deleting any rule, so none is deleted by a slip of the mouse. It previews what the
 // delete would change: the Transactions left Uncategorized, and those another rule gives its
-// Category. The preview is asked for once, on opening. Until it answers, or when it can't be had, as
-// for a rule deleted elsewhere, the dialog asks without it. A refused delete keeps the dialog open,
-// showing why.
+// Category, or that nothing would. The preview is asked for once, on opening. Until it answers, or
+// when it can't be had, as for a rule deleted elsewhere, the dialog asks without it. A refused delete
+// keeps the dialog open, showing why.
 export function RuleDeleteDialog({ rule, categories, onCancel, onDeleted }: RuleDeleteDialogProps) {
   const [preview, setPreview] = useState<RulePreview | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
@@ -64,9 +62,6 @@ export function RuleDeleteDialog({ rule, categories, onCancel, onDeleted }: Rule
     <Dialog title={`Delete the rule “${rule.keyword}”?`} onCancel={onCancel}>
       {errorMessage && <ErrorMessage className="mt-3">{errorMessage}</ErrorMessage>}
 
-      <p className="mt-3 text-sm text-slate-700 dark:text-slate-300">
-        It categorizes {counted(rule.transactionCount, 'transaction')}.
-      </p>
       {preview && <RuleChangePreview preview={preview} categories={categories} />}
 
       <form className="mt-6 flex justify-end gap-3" onSubmit={handleSubmit}>

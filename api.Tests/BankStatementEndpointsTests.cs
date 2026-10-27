@@ -605,7 +605,7 @@ public class BankStatementEndpointsTests : IAsyncLifetime
             $"/api/categorization-rules/{rule.Id}", new { keyword = rule.Keyword, categoryId = rule.CategoryId });
 
         Assert.Equal(
-            new SavedCategorizationRuleResponse(rule.Id, "kafé", rule.CategoryId, AiGenerated: false, IsNew: true, rule.TransactionCount, TransactionsChanged: 0),
+            new SavedCategorizationRuleResponse(rule.Id, "kafé", rule.CategoryId, AiGenerated: false, IsNew: true, TransactionsChanged: 0),
             await response.Content.ReadFromJsonAsync<SavedCategorizationRuleResponse>());
         Assert.Equal(rule with { AiGenerated = false }, Assert.Single(await AddedRules()));
     }
@@ -916,8 +916,7 @@ public class BankStatementEndpointsTests : IAsyncLifetime
         Assert.Equal(
             [("frisør", true, true), ("kafé", true, false)],
             (await AddedRules()).Select(r => (r.Keyword, r.AiGenerated, r.IsNew)));
-        // Only how many Transactions they categorize changes, as the deleted ones go.
-        Assert.Equal(before.Select(r => r.Keyword == "frisør" ? r with { TransactionCount = 0 } : r), await AddedRules());
+        Assert.Equal(before, await AddedRules());
     }
 
     [Fact]
@@ -1032,10 +1031,7 @@ public class BankStatementEndpointsTests : IAsyncLifetime
 
         Assert.Equal(HttpStatusCode.OK, (await DeleteAllTransactions()).StatusCode);
 
-        // Only how many Transactions they categorize changes, now that there are none.
-        Assert.Equal(
-            rules!.Select(r => r with { TransactionCount = 0 }),
-            await _client.GetFromJsonAsync<List<CategorizationRuleResponse>>("/api/categorization-rules"));
+        Assert.Equal(rules, await _client.GetFromJsonAsync<List<CategorizationRuleResponse>>("/api/categorization-rules"));
         var added = Assert.Single(await AddedRules());
         Assert.Equal(("kafé", true, true), (added.Keyword, added.AiGenerated, added.IsNew));
         Assert.Equal(categories, await CategoryNamesById());

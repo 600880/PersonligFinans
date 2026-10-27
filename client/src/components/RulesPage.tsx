@@ -1,10 +1,9 @@
-import { useEffect, useRef, useState } from 'react'
-import { deleteRule, fetchCategories, fetchRules, type CategorizationRule, type Category } from '../lib/api'
+import { useEffect, useState } from 'react'
+import { fetchCategories, fetchRules, type CategorizationRule, type Category } from '../lib/api'
 import { useIsDark } from '../lib/appearance'
 import { categoryColour } from '../lib/categoryColours'
 import { categoryFilterOf, matchesCategory } from '../lib/categoryFilter'
 import { CategorySwatch } from './CategorySwatch'
-import { Count } from './Count'
 import { ErrorMessage, StatusMessage } from './Messages'
 import { RuleDeleteDialog, type RuleDeleted } from './RuleDeleteDialog'
 import { RuleDialog, type RuleSaved } from './RuleDialog'
@@ -26,7 +25,7 @@ function byKeyword(a: CategorizationRule, b: CategorizationRule) {
 }
 
 // The column the table is sorted by, and which way, named as aria-sort names it.
-type SortColumn = 'keyword' | 'category' | 'transactionCount'
+type SortColumn = 'keyword' | 'category'
 interface RuleSort {
   column: SortColumn
   direction: 'ascending' | 'descending'
@@ -38,7 +37,6 @@ function sortedRules(rules: CategorizationRule[], sort: RuleSort, categoryName: 
     keyword: byKeyword,
     category: (a: CategorizationRule, b: CategorizationRule) =>
       norwegian(categoryName(a.categoryId), categoryName(b.categoryId)),
-    transactionCount: (a: CategorizationRule, b: CategorizationRule) => a.transactionCount - b.transactionCount,
   }[sort.column]
   const direction = sort.direction === 'ascending' ? 1 : -1
   return [...rules].sort((a, b) => direction * byColumn(a, b) || byKeyword(a, b))
@@ -59,7 +57,6 @@ const cardClass =
 // The actions last in a card, under a line that keeps them apart from what they act on.
 const actionsCellClass =
   'py-2 text-right whitespace-nowrap max-sm:-mx-1 max-sm:flex max-sm:justify-end max-sm:gap-1 max-sm:border-t max-sm:border-slate-100 max-sm:dark:border-slate-800/60 max-sm:pt-2 max-sm:pb-0'
-const countCellClass = 'py-2.5 pl-3 text-right whitespace-nowrap tabular-nums max-sm:block max-sm:p-0 max-sm:text-left'
 const badgeClass = 'ml-1 inline-flex items-center rounded-md px-1.5 py-0.5 align-middle text-xs font-medium ring-1 ring-inset'
 const smallButtonClass =
   'rounded-lg px-2 py-1 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:cursor-not-allowed disabled:text-slate-300 dark:disabled:text-slate-600'
@@ -86,7 +83,6 @@ export function RulesPage({ target }: { target?: RulesTarget }) {
   const [rules, setRules] = useState<CategorizationRule[]>([])
   // '' for all Categories, or a Category's id, as the Category filter on Transactions.
   const [categoryFilter, setCategoryFilter] = useState(() => (target ? categoryFilterOf(target.categoryId) : ''))
-  const [isSaving, setIsSaving] = useState(false)
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [dialog, setDialog] = useState<OpenRuleDialog | null>(null)
@@ -95,8 +91,6 @@ export function RulesPage({ target }: { target?: RulesTarget }) {
   const [newOnly, setNewOnly] = useState(false)
   const [search, setSearch] = useState('')
   const [sort, setSort] = useState<RuleSort>({ column: 'keyword', direction: 'ascending' })
-  // Which recount is the latest, so an earlier one that answers late is ignored.
-  const recount = useRef(0)
 
   useEffect(() => {
     let ignore = false
@@ -128,18 +122,6 @@ export function RulesPage({ target }: { target?: RulesTarget }) {
     categoryName,
   )
 
-  // Adding, editing or deleting a rule can move Transactions between the other rules too, as when a
-  // longer keyword takes them from a shorter one, so every rule is counted again. Only the counts are
-  // taken, so a rule added or deleted since is neither lost nor brought back. If counting fails, the
-  // counts shown stay as they were.
-  async function countRulesAgain() {
-    const current = ++recount.current
-    const counted = await fetchRules().catch(() => null)
-    if (!counted || current !== recount.current) return
-    const counts = new Map(counted.map((r) => [r.id, r.transactionCount]))
-    setRules((rules) => rules.map((r) => ({ ...r, transactionCount: counts.get(r.id) ?? r.transactionCount })))
-  }
-
   // A dialog starts a new action, so the messages about earlier ones go. The dialog shows its own
   // errors.
   function openDialog(opened: OpenRuleDialog) {
@@ -154,10 +136,9 @@ export function RulesPage({ target }: { target?: RulesTarget }) {
     setRules((rules) => (saved.kind === 'add' ? [...rules, rule] : rules.map((r) => (r.id === rule.id ? rule : r))))
     setDialog((open) => (open === saved ? null : open))
     setStatusMessage(changedMessage(saved.kind === 'add' ? 'Rule added.' : 'Rule updated.', transactionsChanged))
-    countRulesAgain()
   }
 
-  // A column already sorted by turns the other way; another starts A–Å or lowest first.
+  // A column already sorted by turns the other way; another starts A–Å.
   function chooseSort(column: SortColumn) {
     setSort((current) =>
       current.column === column
@@ -166,42 +147,15 @@ export function RulesPage({ target }: { target?: RulesTarget }) {
     )
   }
 
-  // A rule that categorizes Transactions asks first, showing what deleting it would change. One that
-  // categorizes none is deleted at once.
-  function startDelete(rule: CategorizationRule) {
-    if (rule.transactionCount > 0) setDeleting(rule)
-    else handleDelete(rule)
-  }
-
-  async function handleDelete(rule: CategorizationRule) {
-    if (isSaving) return
-
-    setIsSaving(true)
-    setStatusMessage(null)
-    setErrorMessage(null)
-
-    const result = await deleteRule(rule.id).finally(() => setIsSaving(false))
-
-    if (result.ok) {
-      showDeleted(rule, result)
-    } else {
-      setErrorMessage(result.message)
-    }
-  }
-
-  function handleConfirmedDelete(rule: CategorizationRule, deleted: RuleDeleted) {
+  // Every delete is asked first, whatever the rule matches, and done by the confirmation. This says
+  // what it did.
+  function handleConfirmedDelete(rule: CategorizationRule, { alreadyDeleted, transactionsChanged }: RuleDeleted) {
     setDeleting(null)
     setErrorMessage(null)
-    showDeleted(rule, deleted)
-  }
-
-  // Says what a delete did, the same whether it was asked first or not.
-  function showDeleted(rule: CategorizationRule, { alreadyDeleted, transactionsChanged }: RuleDeleted) {
     setRules((rules) => rules.filter((r) => r.id !== rule.id))
     setStatusMessage(
       alreadyDeleted ? 'The rule was already deleted.' : changedMessage('Rule deleted.', transactionsChanged),
     )
-    if (!alreadyDeleted) countRulesAgain()
   }
 
   return (
@@ -273,9 +227,6 @@ export function RulesPage({ target }: { target?: RulesTarget }) {
               <SortableHeading column="category" sort={sort} onSort={chooseSort} className="py-2 pr-3">
                 Category
               </SortableHeading>
-              <SortableHeading column="transactionCount" sort={sort} onSort={chooseSort} className="py-2 pl-3 text-right">
-                Transactions
-              </SortableHeading>
               <th className="py-2">
                 <span className="sr-only">Actions</span>
               </th>
@@ -315,19 +266,11 @@ export function RulesPage({ target }: { target?: RulesTarget }) {
                     colour={categoryColour(rule.categoryId, categories, dark)}
                   />
                 </td>
-                <td className={countCellClass}>
-                  <Count count={rule.transactionCount} noun="transaction" />
-                </td>
                 <td className={actionsCellClass}>
                   <button type="button" onClick={() => openDialog({ kind: 'edit', rule })} className={smallButtonClass}>
                     Edit
                   </button>
-                  <button
-                    type="button"
-                    disabled={isSaving}
-                    onClick={() => startDelete(rule)}
-                    className={smallButtonClass}
-                  >
+                  <button type="button" onClick={() => setDeleting(rule)} className={smallButtonClass}>
                     Delete
                   </button>
                 </td>
