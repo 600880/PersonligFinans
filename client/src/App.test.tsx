@@ -1463,7 +1463,7 @@ describe('Categories page', () => {
     await user.click(next.getByRole('button', { name: 'Cancel' }))
 
     await user.click(screen.getByRole('button', { name: 'Rules' }))
-    expect(await screen.findByRole('option', { name: 'Fitness' })).toBeInTheDocument()
+    expect(await within(screen.getByLabelText('Category')).findByRole('option', { name: 'Fitness' })).toBeInTheDocument()
   })
 
   it('places an added Category where the API lists it: in the Norwegian alphabet, whatever the browser language', async () => {
@@ -2220,7 +2220,7 @@ describe('Rules page', () => {
     // With the column headers hidden, the count says what it counts.
     expect(count).toHaveTextContent('4 transactions')
     expect(within(count).getByText('transactions')).not.toHaveClass('sr-only')
-    expect(within(actions).getAllByRole('button').map((button) => button.textContent)).toEqual(['Edit', 'Delete'])
+    expect(within(actions).getAllByRole('button').map((button) => button.textContent)).toEqual(['Keep', 'Edit', 'Delete'])
 
     // jsdom applies no media queries, so the phone layout is checked by its classes: the table, its
     // body and each row become blocks and a stacked card, with the column headers hidden.
@@ -2447,7 +2447,7 @@ describe('Rules page', () => {
       .map((row) => within(row).getAllByRole('cell')[0].textContent)
   }
 
-  it('shows an AI badge next to the keyword of AI-generated rules only, with no filter for them', async () => {
+  it('shows an AI badge next to the keyword of AI-generated rules only', async () => {
     rules = [
       { id: 3, keyword: 'café løkka', categoryId: 13, aiGenerated: true, isNew: false },
       { id: 1, keyword: 'kiwi', categoryId: 1, aiGenerated: false, isNew: false },
@@ -2456,7 +2456,28 @@ describe('Rules page', () => {
 
     expect(within(ruleRow('café løkka AI')).getByText('AI')).toBeInTheDocument()
     expect(within(ruleRow('kiwi')).queryByText('AI')).not.toBeInTheDocument()
-    expect(screen.queryByRole('checkbox', { name: 'AI only' })).not.toBeInTheDocument()
+  })
+
+  it('can show only the AI-generated rules, however old, with the AI-generated chip', async () => {
+    rules = [
+      { id: 3, keyword: 'café løkka', categoryId: 13, aiGenerated: true, isNew: false },
+      { id: 1, keyword: 'kiwi', categoryId: 1, aiGenerated: false, isNew: false },
+      { id: 4, keyword: 'nille', categoryId: 13, aiGenerated: true, isNew: true },
+      { id: 5, keyword: 'rema', categoryId: 1, aiGenerated: false, isNew: true },
+    ]
+    const user = await openRulesPage()
+    const chip = screen.getByRole('button', { name: 'AI-generated' })
+    expect(chip).toHaveAttribute('aria-pressed', 'false')
+
+    await user.click(chip)
+
+    expect(chip).toHaveAttribute('aria-pressed', 'true')
+    expect(keywords()).toEqual(['café løkka AI', 'nille AI New'])
+
+    await user.click(chip)
+
+    expect(chip).toHaveAttribute('aria-pressed', 'false')
+    expect(keywords()).toEqual(['café løkka AI', 'kiwi', 'nille AI New', 'rema New'])
   })
 
   it('shows a New badge on rules added by the last upload, and can show only those', async () => {
@@ -2468,20 +2489,27 @@ describe('Rules page', () => {
     const user = await openRulesPage()
 
     expect(keywords()).toEqual(['café løkka AI New', 'kiwi', 'nille New'])
+    const chip = screen.getByRole('button', { name: 'New' })
+    expect(chip).toHaveAttribute('aria-pressed', 'false')
 
-    await user.click(screen.getByRole('checkbox', { name: 'Show only new' }))
+    await user.click(chip)
 
+    expect(chip).toHaveAttribute('aria-pressed', 'true')
     expect(keywords()).toEqual(['café løkka AI New', 'nille New'])
+
+    await user.click(chip)
+
+    expect(chip).toHaveAttribute('aria-pressed', 'false')
+    expect(keywords()).toEqual(['café løkka AI New', 'kiwi', 'nille New'])
   })
 
-  it('disables Show only new when the last upload added no rules', async () => {
+  it('disables the New chip, saying why, when the last upload added no rules', async () => {
     await openRulesPage()
 
-    expect(screen.getByRole('checkbox', { name: 'Show only new' })).toBeDisabled()
-    expect(screen.getByText('Show only new').closest('label')).toHaveAttribute(
-      'title',
-      'The last upload added no rules',
-    )
+    const chip = screen.getByRole('button', { name: 'New' })
+    expect(chip).toBeDisabled()
+    expect(chip).toHaveAttribute('aria-pressed', 'false')
+    expect(chip).toHaveAttribute('title', 'The last upload added no rules')
   })
 
   it('drops the AI badge once an AI-generated rule is saved, even unchanged', async () => {
@@ -2497,6 +2525,92 @@ describe('Rules page', () => {
     await screen.findByRole('status')
 
     expect(keywords()).toEqual(['bakeriet', 'kiwi', 'nille AI'])
+  })
+
+  describe('keeping an AI-generated rule', () => {
+    it('offers Keep on AI-generated rules only', async () => {
+      rules = [
+        { id: 3, keyword: 'café løkka', categoryId: 13, aiGenerated: true, isNew: true },
+        { id: 1, keyword: 'kiwi', categoryId: 1, aiGenerated: false, isNew: false },
+        { id: 4, keyword: 'nille', categoryId: 13, aiGenerated: false, isNew: true },
+        { id: 5, keyword: 'rema', categoryId: 1, aiGenerated: true, isNew: false },
+      ]
+      await openRulesPage()
+
+      expect(within(ruleRow('café løkka AI New')).getByRole('button', { name: 'Keep' })).toBeInTheDocument()
+      expect(within(ruleRow('rema AI')).getByRole('button', { name: 'Keep' })).toBeInTheDocument()
+      expect(within(ruleRow('kiwi')).queryByRole('button', { name: 'Keep' })).not.toBeInTheDocument()
+      expect(within(ruleRow('nille New')).queryByRole('button', { name: 'Keep' })).not.toBeInTheDocument()
+    })
+
+    it('saves the rule unchanged in one click, after which it keeps its New badge but has no AI badge', async () => {
+      rules = [
+        { id: 3, keyword: 'café løkka', categoryId: 13, aiGenerated: true, isNew: true, transactionCount: 4 },
+        { id: 1, keyword: 'kiwi', categoryId: 1, aiGenerated: false, isNew: false },
+      ]
+      let edited: { id: number; body: unknown } | undefined
+      handleEditRule = (id, body) => {
+        edited = { id, body }
+        return Response.json({ id, ...(body as object), aiGenerated: false, isNew: true, transactionCount: 4, transactionsChanged: 0 })
+      }
+      const user = await openRulesPage()
+
+      await user.click(within(ruleRow('café løkka AI New')).getByRole('button', { name: 'Keep' }))
+
+      expect(edited).toEqual({ id: 3, body: { keyword: 'café løkka', categoryId: 13 } })
+      expect(await screen.findByRole('status')).toHaveTextContent('Rule kept.')
+      expect(keywords()).toEqual(['café løkka New', 'kiwi'])
+      expect(ruleRow('café løkka New')).toHaveTextContent('café løkka NewOther4 transactions')
+      expect(within(ruleRow('café løkka New')).queryByRole('button', { name: 'Keep' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument()
+    })
+
+    it('drops a kept rule from the list while the AI-generated chip is on, leaving what is left to review', async () => {
+      rules = [
+        { id: 3, keyword: 'café løkka', categoryId: 13, aiGenerated: true, isNew: true },
+        { id: 1, keyword: 'kiwi', categoryId: 1, aiGenerated: false, isNew: false },
+        { id: 4, keyword: 'nille', categoryId: 13, aiGenerated: true, isNew: true },
+      ]
+      handleEditRule = (id, body) =>
+        Response.json({ id, ...(body as object), aiGenerated: false, isNew: true, transactionCount: 0, transactionsChanged: 0 })
+      const user = await openRulesPage()
+      await user.click(screen.getByRole('button', { name: 'AI-generated' }))
+
+      await user.click(within(ruleRow('café løkka AI New')).getByRole('button', { name: 'Keep' }))
+
+      expect(await screen.findByRole('status')).toHaveTextContent('Rule kept.')
+      expect(keywords()).toEqual(['nille AI New'])
+    })
+
+    it('shows a general error when Keep cannot reach the server, leaving the rule AI-generated', async () => {
+      rules = [
+        { id: 3, keyword: 'café løkka', categoryId: 13, aiGenerated: true, isNew: true },
+        { id: 1, keyword: 'kiwi', categoryId: 1, aiGenerated: false, isNew: false },
+      ]
+      handleEditRule = () => {
+        throw new TypeError('Failed to fetch')
+      }
+      const user = await openRulesPage()
+
+      await user.click(within(ruleRow('café løkka AI New')).getByRole('button', { name: 'Keep' }))
+
+      expect(await screen.findByRole('alert')).toHaveTextContent('Could not reach the server.')
+      expect(keywords()).toEqual(['café løkka AI New', 'kiwi'])
+    })
+
+    it("shows the server's error when the rule can't be kept as it is, as when its Category was deleted elsewhere", async () => {
+      rules = [
+        { id: 3, keyword: 'café løkka', categoryId: 13, aiGenerated: true, isNew: true },
+        { id: 1, keyword: 'kiwi', categoryId: 1, aiGenerated: false, isNew: false },
+      ]
+      handleEditRule = () => Response.json({ errors: { categoryId: ['Category does not exist.'] } }, { status: 400 })
+      const user = await openRulesPage()
+
+      await user.click(within(ruleRow('café løkka AI New')).getByRole('button', { name: 'Keep' }))
+
+      expect(await screen.findByRole('alert')).toHaveTextContent('Category does not exist.')
+      expect(keywords()).toEqual(['café løkka AI New', 'kiwi'])
+    })
   })
 
   describe('searching', () => {
@@ -2545,7 +2659,7 @@ describe('Rules page', () => {
       expect(keywords()).toEqual(['kiwi'])
     })
 
-    it('shows only the new rules that match when Show only new is also checked', async () => {
+    it('shows only the new rules that match when the New chip is also on', async () => {
       rules = [
         { id: 3, keyword: 'café løkka', categoryId: 13, aiGenerated: true, isNew: true },
         { id: 1, keyword: 'kiwi', categoryId: 1, aiGenerated: false, isNew: false },
@@ -2554,7 +2668,7 @@ describe('Rules page', () => {
       const user = await openRulesPage()
 
       await user.type(screen.getByRole('searchbox', { name: 'Search' }), 'kiwi')
-      await user.click(screen.getByRole('checkbox', { name: 'Show only new' }))
+      await user.click(screen.getByRole('button', { name: 'New' }))
 
       expect(keywords()).toEqual(['kiwi minipris New'])
     })
@@ -2596,6 +2710,109 @@ describe('Rules page', () => {
 
       expect(screen.getByText('No rules match')).toBeInTheDocument()
       expect(screen.queryByRole('table')).not.toBeInTheDocument()
+    })
+  })
+
+  describe('filtering', () => {
+    it("narrows the rules to one Category's, and shows them all again with All categories", async () => {
+      rules = [
+        { id: 3, keyword: 'apotek', categoryId: 13, aiGenerated: false, isNew: false },
+        { id: 1, keyword: 'kiwi', categoryId: 1, aiGenerated: false, isNew: false },
+        { id: 4, keyword: 'rema', categoryId: 1, aiGenerated: false, isNew: false },
+      ]
+      const user = await openRulesPage()
+      const filter = screen.getByRole('combobox', { name: 'Filter by category' })
+
+      expect(filter).toHaveDisplayValue('All categories')
+
+      await user.selectOptions(filter, 'Groceries')
+      expect(keywords()).toEqual(['kiwi', 'rema'])
+
+      await user.selectOptions(filter, 'Other')
+      expect(keywords()).toEqual(['apotek'])
+
+      await user.selectOptions(filter, 'All categories')
+      expect(keywords()).toEqual(['apotek', 'kiwi', 'rema'])
+    })
+
+    it('shows the rules that are both New and AI-generated with both chips on', async () => {
+      rules = [
+        { id: 3, keyword: 'café løkka', categoryId: 13, aiGenerated: true, isNew: false },
+        { id: 1, keyword: 'kiwi', categoryId: 1, aiGenerated: false, isNew: false },
+        { id: 4, keyword: 'nille', categoryId: 13, aiGenerated: true, isNew: true },
+        { id: 5, keyword: 'rema', categoryId: 1, aiGenerated: false, isNew: true },
+      ]
+      const user = await openRulesPage()
+
+      await user.click(screen.getByRole('button', { name: 'New' }))
+      await user.click(screen.getByRole('button', { name: 'AI-generated' }))
+
+      expect(keywords()).toEqual(['nille AI New'])
+    })
+
+    it('shows only the rules every filter lets through: search, Category and both chips', async () => {
+      rules = [
+        { id: 1, keyword: 'kiwi', categoryId: 1, aiGenerated: false, isNew: false },
+        { id: 2, keyword: 'kiwi butikk', categoryId: 1, aiGenerated: true, isNew: true },
+        { id: 3, keyword: 'kiwi kafé', categoryId: 13, aiGenerated: true, isNew: true },
+        { id: 4, keyword: 'kiwi pluss', categoryId: 1, aiGenerated: true, isNew: false },
+        { id: 5, keyword: 'kiwi senter', categoryId: 1, aiGenerated: false, isNew: true },
+        { id: 6, keyword: 'meny butikk', categoryId: 1, aiGenerated: true, isNew: true },
+      ]
+      const user = await openRulesPage()
+
+      await user.type(screen.getByRole('searchbox', { name: 'Search' }), 'kiwi')
+      await user.selectOptions(screen.getByRole('combobox', { name: 'Filter by category' }), 'Groceries')
+      expect(keywords()).toEqual(['kiwi', 'kiwi butikk AI New', 'kiwi pluss AI', 'kiwi senter New'])
+
+      await user.click(screen.getByRole('button', { name: 'New' }))
+      expect(keywords()).toEqual(['kiwi butikk AI New', 'kiwi senter New'])
+
+      await user.click(screen.getByRole('button', { name: 'AI-generated' }))
+      expect(keywords()).toEqual(['kiwi butikk AI New'])
+    })
+
+    it('says no rules match when the Category filter or a chip leaves none', async () => {
+      rules = [
+        { id: 1, keyword: 'kiwi', categoryId: 1, aiGenerated: false, isNew: false },
+        { id: 3, keyword: 'café løkka', categoryId: 13, aiGenerated: true, isNew: false },
+      ]
+      const user = await openRulesPage()
+
+      await user.click(screen.getByRole('button', { name: 'AI-generated' }))
+      await user.selectOptions(screen.getByRole('combobox', { name: 'Filter by category' }), 'Groceries')
+
+      expect(screen.getByText('No rules match')).toBeInTheDocument()
+      expect(screen.queryByRole('table')).not.toBeInTheDocument()
+
+      await user.click(screen.getByRole('button', { name: 'AI-generated' }))
+
+      expect(keywords()).toEqual(['kiwi'])
+    })
+
+    it('cancels an open edit once the Category filter or a chip changes, even when the rule still shows', async () => {
+      rules = [
+        { id: 1, keyword: 'kiwi', categoryId: 1, aiGenerated: false, isNew: false },
+        { id: 2, keyword: 'kiwi butikk', categoryId: 1, aiGenerated: true, isNew: true },
+      ]
+      const user = await openRulesPage()
+
+      // Each change leaves kiwi butikk in the list, so only the change itself closes the edit.
+      for (const changeFilter of [
+        () => user.selectOptions(screen.getByRole('combobox', { name: 'Filter by category' }), 'Groceries'),
+        () => user.click(screen.getByRole('button', { name: 'New' })),
+        () => user.click(screen.getByRole('button', { name: 'AI-generated' })),
+      ]) {
+        await user.click(within(ruleRow('kiwi butikk AI New')).getByRole('button', { name: 'Edit' }))
+        const editing = within(screen.getByRole('button', { name: 'Save' }).closest('tr')!)
+        await user.type(editing.getByLabelText('Keyword'), ' extra')
+
+        await changeFilter()
+
+        expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument()
+        expect(ruleRow('kiwi butikk AI New')).toHaveTextContent('kiwi butikk AI NewGroceries')
+      }
+      expect(fetchMock).not.toHaveBeenCalledWith(expect.stringMatching(/\/2$/), expect.anything())
     })
   })
 

@@ -594,6 +594,22 @@ public class BankStatementEndpointsTests : IAsyncLifetime
         Assert.True(Assert.Single(await AddedRules()).IsNew);
     }
 
+    // As the Rules page's Keep saves it.
+    [Fact]
+    public async Task Put_SavingANewRuleUnchanged_KeepsItNewButNoLongerAiGenerated()
+    {
+        await Created(await UploadAddingRuleFor("kafé", NewUploadId()));
+        var rule = Assert.Single(await AddedRules());
+
+        var response = await _client.PutAsJsonAsync(
+            $"/api/categorization-rules/{rule.Id}", new { keyword = rule.Keyword, categoryId = rule.CategoryId });
+
+        Assert.Equal(
+            new SavedCategorizationRuleResponse(rule.Id, "kafé", rule.CategoryId, AiGenerated: false, IsNew: true, rule.TransactionCount, TransactionsChanged: 0),
+            await response.Content.ReadFromJsonAsync<SavedCategorizationRuleResponse>());
+        Assert.Equal(rule with { AiGenerated = false }, Assert.Single(await AddedRules()));
+    }
+
     [Fact]
     public async Task Post_AiGeneratedRule_NeverChangesManuallyEnteredTransactions()
     {

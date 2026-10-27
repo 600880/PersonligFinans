@@ -9,8 +9,9 @@ export function categoryFilterOf(categoryId: number | null | 'all') {
   return categoryId === null ? UNCATEGORIZED : String(categoryId)
 }
 
-export function matchesCategory(transaction: Transaction, categoryFilter: string) {
+// Whether a Transaction, or anything else with a Category such as a Categorization Rule, passes the filter.
+export function matchesCategory(item: Pick<Transaction, 'categoryId'>, categoryFilter: string) {
   if (categoryFilter === '') return true
-  if (categoryFilter === UNCATEGORIZED) return transaction.categoryId === null
-  return transaction.categoryId === Number(categoryFilter)
+  if (categoryFilter === UNCATEGORIZED) return item.categoryId === null
+  return item.categoryId === Number(categoryFilter)
 }

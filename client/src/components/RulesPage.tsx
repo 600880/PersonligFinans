@@ -11,6 +11,7 @@ import {
 } from '../lib/api'
 import { useIsDark } from '../lib/appearance'
 import { categoryColour } from '../lib/categoryColours'
+import { matchesCategory } from '../lib/categoryFilter'
 import { CategorySwatch } from './CategorySwatch'
 import { Count } from './Count'
 import { ErrorMessage, StatusMessage } from './Messages'
@@ -117,6 +118,38 @@ function SortableHeading({
   )
 }
 
+// A toggle in the toolbar that, while pressed, shows only the rules it names; aria-pressed says whether it is.
+function FilterChip({
+  pressed,
+  onToggle,
+  disabled = false,
+  title,
+  children,
+}: {
+  pressed: boolean
+  onToggle: () => void
+  disabled?: boolean
+  title?: string
+  children: string
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={pressed}
+      disabled={disabled}
+      title={title}
+      onClick={onToggle}
+      className={`rounded-full px-3 py-1 text-sm font-medium ring-1 ring-inset disabled:cursor-not-allowed disabled:text-slate-300 dark:disabled:text-slate-600 disabled:ring-slate-200 dark:disabled:ring-slate-800 ${
+        pressed
+          ? 'bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 ring-slate-900 dark:ring-slate-100'
+          : 'text-slate-700 dark:text-slate-300 ring-slate-300 dark:ring-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800'
+      }`}
+    >
+      {children}
+    </button>
+  )
+}
+
 // A rule's Category: a swatch, in the colour the Dashboard draws it in, and its name.
 function RuleCategory({ name, colour }: { name: string; colour: string }) {
   return (
@@ -138,8 +171,11 @@ export function RulesPage() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [edit, setEdit] = useState<RuleEdit | null>(null)
   const [newOnly, setNewOnly] = useState(false)
+  const [aiOnly, setAiOnly] = useState(false)
   const [search, setSearch] = useState('')
-  const [sort, setSort] = useState<RuleSort>({ column: 'keyword', direction: 'ascending' })
+  // '' for all Categories, or a Category's id, as the Category filter on Transactions.
+  const [categoryFilter, setCategoryFilter] = useState('')
+  const [sort,setSort] = useState<RuleSort>({ column: 'keyword', direction: 'ascending' })
   // Which recount is the latest, so an earlier one that answers late is ignored.
   const recount = useRef(0)
 
@@ -162,9 +198,18 @@ export function RulesPage() {
   const dark = useIsDark()
   const categoryName = (id: number) => categories.find((c) => c.id === id)?.name ?? ''
   const hasNewRules = rules.some((r) => r.isNew)
+  // The New chip does nothing while it is disabled, so a New filter left on once no rule is New is off.
+  const isNewOnly = newOnly && hasNewRules
+  const isFiltering = search.trim() !== '' || categoryFilter !== '' || isNewOnly || aiOnly
   // Sorted as shown rather than as kept, so a rule added or edited lands where the sort puts it.
   const shownRules = sortedRules(
-    rules.filter((r) => (!newOnly || !hasNewRules || r.isNew) && matchesSearch(r, search)),
+    rules.filter(
+      (r) =>
+        (!isNewOnly || r.isNew) &&
+        (!aiOnly || r.aiGenerated) &&
+        matchesSearch(r, search) &&
+        matchesCategory(r, categoryFilter),
+    ),
     sort,
     categoryName,
   )
@@ -216,15 +261,15 @@ export function RulesPage() {
     setErrorMessage(null)
   }
 
-  // Changing the search may hide the rule being edited, so any open edit is cancelled, as on Transactions.
-  // With no edit open, an error from an earlier add or delete stays.
-  function chooseSearch(value: string) {
+  // Changing the search or any other filter may hide the rule being edited, so any open edit is
+  // cancelled, as on Transactions. With no edit open, an error from an earlier add or delete stays.
+  function changeFilter(change: () => void) {
     if (edit) cancelEdit()
-    setSearch(value)
+    change()
   }
 
   // A column already sorted by turns the other way; another starts A–Å or lowest first. The rule being
-  // edited may move out of sight, so any open edit is cancelled, as when the search changes.
+  // edited may move out of sight, so any open edit is cancelled, as when a filter changes.
   function chooseSort(column: SortColumn) {
     if (edit) cancelEdit()
     setSort((current) =>
@@ -255,6 +300,29 @@ export function RulesPage() {
     } else {
       setEdit({ ...current, fieldErrors: result.fieldErrors })
       setErrorMessage(result.message)
+    }
+  }
+
+  // Keeps an AI-generated rule as it is: the edit, with its keyword and Category unchanged, which
+  // removes its AI mark and leaves its New mark.
+  async function handleKeep(rule: CategorizationRule) {
+    if (isSaving) return
+
+    setIsSaving(true)
+    setStatusMessage(null)
+    setErrorMessage(null)
+
+    const result = await editRule(rule.id, { keyword: rule.keyword, categoryId: rule.categoryId }).finally(() =>
+      setIsSaving(false),
+    )
+
+    if (result.ok) {
+      setRules((rules) => rules.map((r) => (r.id === result.rule.id ? result.rule : r)))
+      setStatusMessage('Rule kept.')
+    } else {
+      // With no inline edit open to show a field error next to, as when its Category was deleted
+      // elsewhere, it is said above the table instead.
+      setErrorMessage(result.message ?? Object.values(result.fieldErrors).join(' '))
     }
   }
 
@@ -335,9 +403,10 @@ export function RulesPage() {
         <StatusMessage message={statusMessage} className="mt-3" />
       )}
 
-      {/* A toolbar for the table below, smaller than the add form so the two never read as one form. */}
+      {/* A toolbar for the table below, smaller than the add form so the two never read as one form. On
+          a phone the search takes its own line, with the Category filter and the chips under it. */}
       <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2">
-        <div className="relative min-w-0 flex-1 sm:max-w-xs">
+        <div className="relative min-w-0 flex-1 max-sm:basis-full sm:max-w-xs">
           <svg
             viewBox="0 0 16 16"
             fill="currentColor"
@@ -351,25 +420,39 @@ export function RulesPage() {
             aria-label="Search"
             placeholder="Search keywords"
             value={search}
-            onChange={(event) => chooseSearch(event.target.value)}
+            onChange={(event) => changeFilter(() => setSearch(event.target.value))}
             className="w-full rounded-lg border border-slate-300 dark:border-slate-700 py-1.5 pr-3 pl-8 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500"
           />
         </div>
-        <label
-          title={hasNewRules ? undefined : 'The last upload added no rules'}
-          className={`ml-auto inline-flex shrink-0 items-center gap-2 text-sm ${hasNewRules ? 'text-slate-700 dark:text-slate-300' : 'text-slate-400 dark:text-slate-600'}`}
+        <select
+          aria-label="Filter by category"
+          value={categoryFilter}
+          onChange={(event) => changeFilter(() => setCategoryFilter(event.target.value))}
+          className="min-w-0 rounded-lg border border-slate-300 dark:border-slate-700 px-3 py-1.5 text-sm text-slate-900 dark:text-slate-100"
         >
-          <input
-            type="checkbox"
-            checked={newOnly && hasNewRules}
+          <option value="">All categories</option>
+          {categories.map((category) => (
+            <option key={category.id} value={category.id}>
+              {category.name}
+            </option>
+          ))}
+        </select>
+        <div className="ml-auto flex shrink-0 gap-2">
+          <FilterChip
+            pressed={isNewOnly}
+            onToggle={() => changeFilter(() => setNewOnly(!newOnly))}
             disabled={!hasNewRules}
-            onChange={(event) => setNewOnly(event.target.checked)}
-          />
-          Show only new
-        </label>
+            title={hasNewRules ? undefined : 'The last upload added no rules'}
+          >
+            New
+          </FilterChip>
+          <FilterChip pressed={aiOnly} onToggle={() => changeFilter(() => setAiOnly(!aiOnly))}>
+            AI-generated
+          </FilterChip>
+        </div>
       </div>
 
-      {search.trim() !== '' && shownRules.length === 0 ? (
+      {isFiltering && shownRules.length === 0 ? (
         <p className="mt-6 text-sm text-slate-500 dark:text-slate-400">No rules match</p>
       ) : (
         /* On a phone each rule is a card of its own, keyword and badges, then its Category, then its
@@ -483,6 +566,16 @@ export function RulesPage() {
                     <Count count={rule.transactionCount} noun="transaction" />
                   </td>
                   <td className={actionsCellClass}>
+                    {rule.aiGenerated && (
+                      <button
+                        type="button"
+                        disabled={isSaving}
+                        onClick={() => handleKeep(rule)}
+                        className={smallButtonClass}
+                      >
+                        Keep
+                      </button>
+                    )}
                     <button type="button" onClick={() => startEdit(rule)} className={smallButtonClass}>
                       Edit
                     </button>
