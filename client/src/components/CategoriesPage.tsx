@@ -9,6 +9,7 @@ import { CategorySwatch } from './CategorySwatch'
 import type { Palette } from './ColourPicker'
 import { Count } from './Count'
 import { ErrorMessage, StatusMessage } from './Messages'
+import { panelClass, panelHeadClass } from './panel'
 import type { RulesTarget } from './RulesPage'
 import type { TransactionsTarget } from './TransactionsPage'
 
@@ -219,11 +220,11 @@ export function CategoriesPage({
       )}
 
       {categories.length > 0 && (
-        <div className="mt-3 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm">
+        <div className={`mt-3 ${panelClass}`}>
           {/* On a phone each row is a card instead, its column headers hidden, so the list never runs
               wider than the screen. */}
           <table className="w-full text-left text-sm max-sm:block">
-            <thead className="border-b border-slate-200 dark:border-slate-800 text-xs text-slate-500 dark:text-slate-400 max-sm:hidden">
+            <thead className={panelHeadClass}>
               <tr>
                 <th className="py-2.5 pr-3 pl-4 font-medium">Name</th>
                 <th className="py-2.5 pr-3 font-medium">Description</th>

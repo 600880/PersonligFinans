@@ -21,6 +21,8 @@ import { Count } from './Count'
 import { ErrorMessage, StatusMessage } from './Messages'
 import { RuleChangePreview } from './RuleChangePreview'
 import { RuleDeleteDialog, type RuleDeleted } from './RuleDeleteDialog'
+import { SortableHeading } from './SortableHeading'
+import { ToolbarSearch } from './ToolbarSearch'
 
 function changedMessage(action: string, transactionsChanged: number) {
   const transactions = transactionsChanged === 1 ? 'transaction' : 'transactions'
@@ -101,49 +103,6 @@ const countCellClass = 'py-2.5 pl-3 text-right whitespace-nowrap tabular-nums ma
 const badgeClass = 'ml-1 inline-flex items-center rounded-md px-1.5 py-0.5 align-middle text-xs font-medium ring-1 ring-inset'
 const smallButtonClass =
   'rounded-lg px-2 py-1 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:cursor-not-allowed disabled:text-slate-300 dark:disabled:text-slate-600'
-
-// A column heading that sorts the table by its column, A–Å or lowest first, and then the other way
-// each time it is clicked again. The arrow shows which way; aria-sort says it.
-function SortableHeading({
-  column,
-  sort,
-  onSort,
-  className,
-  children,
-}: {
-  column: SortColumn
-  sort: RuleSort
-  onSort: (column: SortColumn) => void
-  className: string
-  children: string
-}) {
-  const direction = sort.column === column ? sort.direction : null
-  return (
-    <th aria-sort={direction ?? 'none'} className={className}>
-      <button
-        type="button"
-        onClick={() => onSort(column)}
-        className={`inline-flex items-center gap-1 rounded font-medium hover:text-slate-900 dark:hover:text-slate-100 ${direction ? 'text-slate-900 dark:text-slate-100' : ''}`}
-      >
-        {children}
-        <svg
-          viewBox="0 0 16 16"
-          fill="currentColor"
-          aria-hidden="true"
-          className={`h-4 w-4 ${direction ? '' : 'text-slate-300 dark:text-slate-600'}`}
-        >
-          {direction === 'ascending' ? (
-            <path d="M4.22 9.78a.75.75 0 0 1 0-1.06l3.25-3.25a.75.75 0 0 1 1.06 0l3.25 3.25a.75.75 0 0 1-1.06 1.06L8 7.06 5.28 9.78a.75.75 0 0 1-1.06 0Z" />
-          ) : direction === 'descending' ? (
-            <path d="M4.22 6.22a.75.75 0 0 1 1.06 0L8 8.94l2.72-2.72a.75.75 0 1 1 1.06 1.06l-3.25 3.25a.75.75 0 0 1-1.06 0L4.22 7.28a.75.75 0 0 1 0-1.06Z" />
-          ) : (
-            <path d="M5.22 10.22a.75.75 0 0 1 1.06 0L8 11.94l1.72-1.72a.75.75 0 1 1 1.06 1.06l-2.25 2.25a.75.75 0 0 1-1.06 0l-2.25-2.25a.75.75 0 0 1 0-1.06ZM10.78 5.78a.75.75 0 0 1-1.06 0L8 4.06 6.28 5.78a.75.75 0 0 1-1.06-1.06l2.25-2.25a.75.75 0 0 1 1.06 0l2.25 2.25a.75.75 0 0 1 0 1.06Z" />
-          )}
-        </svg>
-      </button>
-    </th>
-  )
-}
 
 // A rule's Category: a swatch, in the colour the Dashboard draws it in, and its name.
 function RuleCategory({ name, colour }: { name: string; colour: string }) {
@@ -421,24 +380,11 @@ export function RulesPage({ target }: { target?: RulesTarget }) {
       {/* A toolbar for the table below, smaller than the add form so the two never read as one form. On
           a phone the search takes its own line, with the Category filter and "Show only new" under it. */}
       <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2">
-        <div className="relative min-w-0 flex-1 max-sm:basis-full sm:max-w-xs">
-          <svg
-            viewBox="0 0 16 16"
-            fill="currentColor"
-            aria-hidden="true"
-            className="pointer-events-none absolute top-1/2 left-2.5 h-4 w-4 -translate-y-1/2 text-slate-400 dark:text-slate-500"
-          >
-            <path d="M10.68 11.74a6 6 0 1 1 1.06-1.06l3.04 3.04a.75.75 0 1 1-1.06 1.06ZM11.5 7a4.5 4.5 0 1 0-9 0 4.5 4.5 0 0 0 9 0Z" />
-          </svg>
-          <input
-            type="search"
-            aria-label="Search"
-            placeholder="Search keywords"
-            value={search}
-            onChange={(event) => changeFilter(() => setSearch(event.target.value))}
-            className="w-full rounded-lg border border-slate-300 dark:border-slate-700 py-1.5 pr-3 pl-8 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500"
-          />
-        </div>
+        <ToolbarSearch
+          placeholder="Search keywords"
+          value={search}
+          onChange={(value) => changeFilter(() => setSearch(value))}
+        />
         <select
           aria-label="Filter by category"
           value={categoryFilter}
