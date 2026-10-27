@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
-import { fetchCategories, type Category } from '../lib/api'
+import { fetchCategories, fetchPalette, type Category } from '../lib/api'
 import { useIsDark } from '../lib/appearance'
 import { categoryColour } from '../lib/categoryColours'
 import { formatCount } from '../lib/count'
 import { CategoryDeleteDialog, type CategoryDeleted } from './CategoryDeleteDialog'
 import { CategoryDialog } from './CategoryDialog'
 import { CategorySwatch } from './CategorySwatch'
+import type { Palette } from './ColourPicker'
 import { Count } from './Count'
 import { ErrorMessage, StatusMessage } from './Messages'
 import type { TransactionsTarget } from './TransactionsPage'
@@ -79,6 +80,7 @@ export function CategoriesPage({ onOpenTransactions }: { onOpenTransactions: (ta
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [dialog, setDialog] = useState<OpenDialog | null>(null)
+  const [palette, setPalette] = useState<Palette>('loading')
 
   useEffect(() => {
     let ignore = false
@@ -88,6 +90,14 @@ export function CategoriesPage({ onOpenTransactions }: { onOpenTransactions: (ta
       })
       .catch(() => {
         if (!ignore) setErrorMessage('Could not load the categories.')
+      })
+    // For the Category dialog's colour picker, which says so itself if it fails.
+    fetchPalette()
+      .then((loaded) => {
+        if (!ignore) setPalette(loaded)
+      })
+      .catch(() => {
+        if (!ignore) setPalette('failed')
       })
     return () => {
       ignore = true
@@ -177,6 +187,8 @@ export function CategoriesPage({ onOpenTransactions }: { onOpenTransactions: (ta
         dialog && (
           <CategoryDialog
             category={dialog.kind === 'edit' ? dialog.category : undefined}
+            categories={categories}
+            palette={palette}
             onCancel={() => setDialog(null)}
             onSaved={(category) => handleSaved(dialog, category)}
           />

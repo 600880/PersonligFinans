@@ -120,6 +120,24 @@ public class CategoryEndpointsTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task GetPalette_ServesThePaletteInOrderWithoutTheFallbackOrUncategorizedsGrey()
+    {
+        var palette = await _client.GetFromJsonAsync<List<string>>("/api/categories/palette");
+
+        Assert.Equal(CategoryColours.Palette, palette);
+        Assert.DoesNotContain(CategoryColours.Fallback, palette!);
+        Assert.DoesNotContain(CategoryColours.Uncategorized, palette!);
+    }
+
+    [Fact]
+    public async Task GetPalette_SignedOut_IsUnauthorized()
+    {
+        var response = await _factory.CreateClient().GetAsync("/api/categories/palette");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
     public void BuiltInOrder_NamesEverySeededBuiltInCategoryOnce()
     {
         Assert.Equal(
@@ -685,13 +703,14 @@ public class CategoryEndpointsTests : IAsyncLifetime
         Assert.Equal(id, (await Rule(ruleId)).CategoryId);
     }
 
-    private async Task<HttpResponseMessage> EditCategory(int id, string? name, string? description) =>
-        await _client.PutAsJsonAsync($"/api/categories/{id}", new { name, description });
+    // Leaving the colour out sends none, so the Category keeps its own.
+    private async Task<HttpResponseMessage> EditCategory(int id, string? name, string? description, string? colour = null) =>
+        await _client.PutAsJsonAsync($"/api/categories/{id}", new { name, description, colour });
 
     private async Task<Dictionary<string, string[]>> EditCategoryExpectingValidationErrors(
-        int id, string? name, string? description)
+        int id, string? name, string? description, string? colour = null)
     {
-        var response = await EditCategory(id, name, description);
+        var response = await EditCategory(id, name, description, colour);
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         var problem = await response.Content.ReadFromJsonAsync<ValidationProblemDetails>();
         return new Dictionary<string, string[]>(problem!.Errors);
@@ -805,20 +824,21 @@ public class CategoryEndpointsTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
-    private Task<HttpResponseMessage> AddCategory(string? name, string? description) =>
-        _client.PostAsJsonAsync("/api/categories", new { name, description });
+    // Leaving the colour out sends none, so the Category gets the first unused palette colour.
+    private Task<HttpResponseMessage> AddCategory(string? name, string? description, string? colour = null) =>
+        _client.PostAsJsonAsync("/api/categories", new { name, description, colour });
 
-    private async Task<CategoryResponse> AddedCategory(string name, string description = "Hobbies.")
+    private async Task<CategoryResponse> AddedCategory(string name, string description = "Hobbies.", string? colour = null)
     {
-        var response = await AddCategory(name, description);
+        var response = await AddCategory(name, description, colour);
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         return (await response.Content.ReadFromJsonAsync<CategoryResponse>())!;
     }
 
     private async Task<Dictionary<string, string[]>> AddCategoryExpectingValidationErrors(
-        string? name, string? description)
+        string? name, string? description, string? colour = null)
     {
-        var response = await AddCategory(name, description);
+        var response = await AddCategory(name, description, colour);
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         var problem = await response.Content.ReadFromJsonAsync<ValidationProblemDetails>();
         return new Dictionary<string, string[]>(problem!.Errors);
@@ -919,5 +939,83 @@ public class CategoryEndpointsTests : IAsyncLifetime
         var errors = await AddCategoryExpectingValidationErrors("groceries", "Food.");
 
         Assert.Equal(["A category named 'Groceries' already exists."], errors["name"]);
+    }
+
+    [Fact]
+    public async Task Post_WithAPaletteColour_GivesItThatColourEvenIfAnotherCategoryHasIt()
+    {
+        var groceries = (await ListCategories()).Single(c => c.Id == _categories.Groceries).Colour;
+
+        var added = await AddedCategory("Hobby", colour: groceries);
+
+        Assert.Equal(groceries, added.Colour);
+        Assert.Equal(groceries, (await ListCategories()).Single(c => c.Id == added.Id).Colour);
+    }
+
+    // Neither the fallback nor Uncategorized's grey is a palette colour, so neither can be chosen.
+    [Theory]
+    [InlineData("#123456")]
+    [InlineData("blue")]
+    [InlineData("")]
+    [InlineData(CategoryColours.Fallback)]
+    [InlineData(CategoryColours.Uncategorized)]
+    public async Task Post_ColourOutsideThePalette_IsAFieldErrorOnColour(string colour)
+    {
+        var errors = await AddCategoryExpectingValidationErrors("Hobby", "Hobbies.", colour);
+
+        Assert.Equal(["Colour must be one of the palette's colours."], errors["colour"]);
+        Assert.DoesNotContain(await ListCategories(), c => c.Name == "Hobby");
+    }
+
+    [Fact]
+    public async Task Put_PaletteColour_RecoloursTheCategory()
+    {
+        var id = await CreateCategory("Hobby", "Hobbies.");
+
+        var response = await EditCategory(id, "Hobby", "Hobbies.", CategoryColours.Palette[4]);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var expected = new CategoryResponse(id, "Hobby", "Hobbies.", CategoryColours.Palette[4], BuiltIn: false, 0, 0);
+        Assert.Equal(expected, await response.Content.ReadFromJsonAsync<CategoryResponse>());
+        Assert.Contains(expected, await ListCategories());
+    }
+
+    [Fact]
+    public async Task Put_BuiltInCategory_CanBeRecolouredToAnotherCategorysColour()
+    {
+        var colours = (await ListCategories()).ToDictionary(c => c.Id, c => c.Colour);
+        var transport = colours[_categories.Transport];
+
+        var response = await EditCategory(_categories.Groceries, "Groceries", "All groceries.", transport);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var recoloured = (await ListCategories()).ToDictionary(c => c.Id, c => c.Colour);
+        Assert.NotEqual(transport, colours[_categories.Groceries]);
+        Assert.Equal((transport, transport), (recoloured[_categories.Groceries], recoloured[_categories.Transport]));
+    }
+
+    [Fact]
+    public async Task Put_NoColour_KeepsTheCategorysColour()
+    {
+        var id = await CreateCategory("Hobby", "Hobbies.");
+
+        var response = await EditCategory(id, "Hobby", "Hobbies and sports.");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(CategoryColours.Fallback, (await response.Content.ReadFromJsonAsync<CategoryResponse>())!.Colour);
+    }
+
+    [Fact]
+    public async Task Put_ColourOutsideThePalette_IsAFieldErrorOnColourAndChangesNothing()
+    {
+        var id = await CreateCategory("Hobby", "Hobbies.");
+
+        var errors = await EditCategoryExpectingValidationErrors(
+            id, "Hobby", "Hobbies and sports.", CategoryColours.Uncategorized);
+
+        Assert.Equal(["Colour must be one of the palette's colours."], errors["colour"]);
+        Assert.Contains(
+            new CategoryResponse(id, "Hobby", "Hobbies.", CategoryColours.Fallback, BuiltIn: false, 0, 0),
+            await ListCategories());
     }
 }

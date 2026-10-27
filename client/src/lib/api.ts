@@ -351,6 +351,14 @@ export async function fetchCategories(): Promise<Category[]> {
   return (await response.json()) as Category[]
 }
 
+// The colours a Category can be given, as #rrggbb, in the palette's order. Neither the slate a
+// Category gets once they are all taken nor Uncategorized's grey is among them.
+export async function fetchPalette(): Promise<string[]> {
+  const response = await apiFetch('/api/categories/palette')
+  if (!response.ok) throw new Error(`Loading the palette failed (${response.status})`)
+  return (await response.json()) as string[]
+}
+
 // alreadyDeleted: the Category was gone before this delete, so nothing changed.
 export type DeleteCategoryResult =
   | { ok: true; alreadyDeleted: boolean; transactionsChanged: number }
@@ -399,9 +407,12 @@ export async function deleteCategory(
   return { ok: false, message: `Deleting failed (${response.status}).` }
 }
 
+// colour is one of the palette's. Left out, a new Category gets the first one no Category has, and an
+// edited one keeps its own.
 export interface CategoryRequest {
   name: string
   description: string
+  colour?: string
 }
 
 export type CategoryFieldErrors = Partial<Record<keyof CategoryRequest, string>>

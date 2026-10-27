@@ -5,7 +5,9 @@ using PersonligFinans.Api.Data;
 
 namespace PersonligFinans.Api.Categories;
 
-public record CategoryRequest(string? Name, string? Description);
+// Colour is optional: left out, a new Category gets the first unused palette colour, and an edited
+// one keeps its own.
+public record CategoryRequest(string? Name, string? Description, string? Colour);
 
 // TransactionCount and RuleCount are how many Transactions and Categorization Rules have the Category.
 public record CategoryResponse(
@@ -46,6 +48,10 @@ public static class CategoryEndpoints
             .ThenBy(c => c.Name, NorwegianAlphabet.IgnoringCase)
             .ToList());
 
+        // The colours a Category can be given, in palette order, so the client never copies them.
+        // Neither the fallback nor Uncategorized's grey is one of them.
+        api.MapGet("/palette", () => CategoryColours.Palette);
+
         api.MapPost("/", AddCategory);
         api.MapPut("/{id:int}", EditCategory);
         api.MapDelete("/{id:int}", DeleteCategory);
@@ -54,7 +60,7 @@ public static class CategoryEndpoints
     // A new Category is never built-in, and nothing uses it yet.
     private static async Task<IResult> AddCategory(CategoryRequest request, AppDbContext db)
     {
-        var (name, description, errors) = await Validate(request, db, editedCategory: null);
+        var (name, description, colour, errors) = await Validate(request, db, editedCategory: null);
         if (errors.Count > 0)
             return Results.ValidationProblem(errors);
 
@@ -63,7 +69,7 @@ public static class CategoryEndpoints
             UserId = db.OwnerOfNewRows,
             Name = name,
             Description = description,
-            Colour = CategoryColours.Next(await db.Categories.Select(c => c.Colour).ToListAsync()),
+            Colour = colour ?? CategoryColours.Next(await db.Categories.Select(c => c.Colour).ToListAsync()),
         };
         db.Categories.Add(category);
 
@@ -81,12 +87,13 @@ public static class CategoryEndpoints
         if (category is null)
             return Results.NotFound();
 
-        var (name, description, errors) = await Validate(request, db, editedCategory: category);
+        var (name, description, colour, errors) = await Validate(request, db, editedCategory: category);
         if (errors.Count > 0)
             return Results.ValidationProblem(errors);
 
         category.Name = name;
         category.Description = description;
+        category.Colour = colour ?? category.Colour;
 
         if (!await SaveCategory(db))
             return await NameAlreadyExists(db, name);
@@ -165,10 +172,11 @@ public static class CategoryEndpoints
     private static IResult ReplacementProblem(string message) =>
         Results.ValidationProblem(new Dictionary<string, string[]> { ["replacementCategoryId"] = [message] });
 
-    // The trimmed name and description, and the validation errors keyed on the request's fields.
-    // When editing, the edited Category's own name doesn't count as a duplicate, and a Built-in
-    // Category must keep its name exactly.
-    private static async Task<(string Name, string Description, Dictionary<string, string[]> Errors)> Validate(
+    // The trimmed name and description, the colour as the palette spells it (null when none was
+    // given), and the validation errors keyed on the request's fields. When editing, the edited
+    // Category's own name doesn't count as a duplicate, and a Built-in Category must keep its name
+    // exactly. Its colour can be changed like any other's.
+    private static async Task<(string Name, string Description, string? Colour, Dictionary<string, string[]> Errors)> Validate(
         CategoryRequest request, AppDbContext db, Category? editedCategory)
     {
         var errors = new Dictionary<string, string[]>();
@@ -191,7 +199,13 @@ public static class CategoryEndpoints
         else if (description.Length > AppDbContext.CategoryDescriptionMaxLength)
             Fail("description", $"Description must be at most {AppDbContext.CategoryDescriptionMaxLength} characters.");
 
-        return (name, description, errors);
+        var colour = request.Colour is null
+            ? null
+            : CategoryColours.Palette.FirstOrDefault(c => string.Equals(c, request.Colour.Trim(), StringComparison.OrdinalIgnoreCase));
+        if (request.Colour is not null && colour is null)
+            Fail("colour", "Colour must be one of the palette's colours.");
+
+        return (name, description, colour, errors);
     }
 
     // Returns false when the name was taken concurrently, between validation and now.

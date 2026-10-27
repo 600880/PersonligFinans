@@ -17,6 +17,12 @@ export function categoryColour(categoryId: number | null, categories: Category[]
     categoryId === null
       ? UNCATEGORIZED_COLOUR
       : (categories.find((c) => c.id === categoryId)?.colour ?? FALLBACK_COLOUR)
+  return drawnColour(colour, dark)
+}
+
+// A colour as a Category in it is drawn: itself in Light, and lightened in Dark. For the palette's
+// colours before any Category has them, so they look as they will once one does.
+export function drawnColour(colour: string, dark: boolean): string {
   return dark ? lightened(colour) : colour
 }
 

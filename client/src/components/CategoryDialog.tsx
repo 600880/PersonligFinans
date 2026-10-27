@@ -1,5 +1,6 @@
 import { useId, useState, type FormEvent } from 'react'
 import { addCategory, editCategory, type Category, type CategoryFieldErrors } from '../lib/api'
+import { ColourPicker, type Palette } from './ColourPicker'
 import { Dialog } from './Dialog'
 import { ErrorMessage } from './Messages'
 import { inputClassName } from './TransactionForm'
@@ -7,18 +8,35 @@ import { inputClassName } from './TransactionForm'
 interface CategoryDialogProps {
   // The Category to edit, or none to add one.
   category?: Category
+  // Every Category, the edited one included, for the colours they have.
+  categories: Category[]
+  palette: Palette
   onCancel: () => void
   onSaved: (category: Category) => void
 }
 
-// Adds a Category, or edits one, by its Name and Description. The fields start empty for a new
-// Category and filled in for one being edited. A Built-in Category's name is shown but can't be
-// changed, so it is sent unchanged. Closing the dialog without saving discards what was typed.
-export function CategoryDialog({ category, onCancel, onSaved }: CategoryDialogProps) {
+// The colour the picker starts on: the Category's own, or for a new Category the first no Category
+// has. None when that isn't a palette colour, as for a Category on the slate fallback, or when every
+// one is taken, or before the palette has loaded.
+function startingColour(category: Category | undefined, categories: Category[], palette: Palette) {
+  if (!Array.isArray(palette)) return null
+  if (category) return palette.includes(category.colour) ? category.colour : null
+  return palette.find((colour) => !categories.some((c) => c.colour === colour)) ?? null
+}
+
+// Adds a Category, or edits one, by its Name, Description and Colour. The fields start empty for a
+// new Category and filled in for one being edited. A Built-in Category's name is shown but can't be
+// changed, so it is sent unchanged; its colour can. With no colour chosen none is sent, so a new
+// Category gets the server's choice and an edited one keeps its own. Closing the dialog without
+// saving discards what was typed and chosen.
+export function CategoryDialog({ category, categories, palette, onCancel, onSaved }: CategoryDialogProps) {
   const id = useId()
   const builtIn = category?.builtIn ?? false
   const [name, setName] = useState(category?.name ?? '')
   const [description, setDescription] = useState(category?.description ?? '')
+  // Undefined until a colour is chosen, so until then the picker follows the palette as it loads.
+  const [pickedColour, setPickedColour] = useState<string>()
+  const colour = pickedColour ?? startingColour(category, categories, palette)
   const [isSaving, setIsSaving] = useState(false)
   const [fieldErrors, setFieldErrors] = useState<CategoryFieldErrors>({})
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
@@ -31,7 +49,7 @@ export function CategoryDialog({ category, onCancel, onSaved }: CategoryDialogPr
     setFieldErrors({})
     setErrorMessage(null)
 
-    const request = { name: name.trim(), description: description.trim() }
+    const request = { name: name.trim(), description: description.trim(), colour: colour ?? undefined }
     const result = await (category ? editCategory(category.id, request) : addCategory(request)).finally(() =>
       setIsSaving(false),
     )
@@ -86,6 +104,13 @@ export function CategoryDialog({ category, onCancel, onSaved }: CategoryDialogPr
             {fieldErrors.description}
           </span>
         </div>
+        <ColourPicker
+          palette={palette}
+          others={categories.filter((c) => c.id !== category?.id)}
+          value={colour}
+          onChange={setPickedColour}
+          error={fieldErrors.colour}
+        />
 
         <div className="mt-2 flex justify-end gap-3">
           <button

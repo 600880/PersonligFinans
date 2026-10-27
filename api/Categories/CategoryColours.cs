@@ -2,6 +2,8 @@ namespace PersonligFinans.Api.Categories;
 
 // The colours Categories are drawn in on the Dashboard. A new Category gets the first palette colour
 // no Category uses yet, so it can be told apart from the others; once all are used, the fallback.
+// Any Category can then be given any palette colour, even one another Category has, but never the
+// fallback or Uncategorized's grey.
 public static class CategoryColours
 {
     // The first 15 are the seeded Categories' colours, in the order they are seeded.

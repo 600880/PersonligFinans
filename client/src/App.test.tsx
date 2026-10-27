@@ -118,6 +118,8 @@ let handleRenameFolder: (id: number, body: unknown) => Response | Promise<Respon
 let handleDeleteFolder: (id: number) => Response | Promise<Response>
 // What the categories endpoint returns: `categories` unless a test adds to it or makes it fail.
 let categoriesServed: ServedCategory[] | Response
+// The colours a Category can be given, as the palette endpoint serves them: a few of the real ones.
+let palette: string[] | Response
 // The month or quarter is undefined when the Spending of a whole year, or of a quarter, is asked for.
 let handleSpending: (year: number, month: number | undefined, quarter: number | undefined, includeSavings: boolean) => Response
 // The Spending of each month of the Span from `from` to `to`.
@@ -216,6 +218,7 @@ const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
     return handleEditRule(Number(ruleUrl[1]), JSON.parse(init.body as string))
   }
   if (ruleUrl && init?.method === 'DELETE') return handleDeleteRule(Number(ruleUrl[1]))
+  if (url === '/api/categories/palette') return palette instanceof Response ? palette : Response.json(palette)
   const categoryUrlMatch = /^\/api\/categories\/(\d+)(?:\?(.*))?$/.exec(url)
   if (categoryUrlMatch && init?.method === 'PUT') {
     return handleEditCategory(Number(categoryUrlMatch[1]), JSON.parse(init.body as string))
@@ -298,6 +301,7 @@ beforeEach(() => {
   handleSpending = () => Response.json({ total: 0, slices: [] })
   handleMonthlySpending = (from, to) => Response.json(monthlySpending(from, to))
   categoriesServed = categories
+  palette = ['#2a78d6', '#eb6834', '#9085e9', '#1baf7a']
   currentUser = { email: 'me@example.com', isGuest: false }
   handleSignIn = (body) => Response.json({ email: (body as { email: string }).email, isGuest: false })
   handleSignUp = (body) => Response.json({ email: (body as { email: string }).email, isGuest: false })
@@ -1445,7 +1449,8 @@ describe('Categories page', () => {
     await user.type(dialog.getByLabelText('Description'), ' Gym and sports.  ')
     await user.click(dialog.getByRole('button', { name: 'Save' }))
 
-    expect(posted).toEqual({ name: 'Fitness', description: 'Gym and sports.' })
+    // With the first colour no Category has, as the picker starts on.
+    expect(posted).toEqual({ name: 'Fitness', description: 'Gym and sports.', colour: '#eb6834' })
     expect(await screen.findByRole('status')).toHaveTextContent('Category added.')
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Add category' })).toHaveFocus()
@@ -1930,7 +1935,7 @@ describe('Categories page', () => {
       await user.type(dialog.getByLabelText('Description'), 'Food and drink.')
       await user.click(dialog.getByRole('button', { name: 'Save' }))
 
-      expect(edited).toEqual({ name: 'Groceries', description: 'Food and drink.' })
+      expect(edited).toEqual({ name: 'Groceries', description: 'Food and drink.', colour: '#2a78d6' })
       expect(await screen.findByRole('status')).toHaveTextContent('Category updated.')
       expect(within(categoryRow(/Groceries/)).getByText('Food and drink.')).toBeInTheDocument()
     })
@@ -2041,6 +2046,203 @@ describe('Categories page', () => {
       expect(await screen.findByRole('status')).toHaveTextContent('Category updated.')
       expect(categoryRow(/Wellness/)).toHaveTextContent('WellnessPharmacy etc.')
       expect(screen.getByRole('dialog', { name: 'Add category' })).toBeInTheDocument()
+    })
+  })
+
+  describe('colour', () => {
+    const health = { id: 7, name: 'Health', description: 'Pharmacy etc.', builtIn: false, transactionCount: 0, ruleCount: 0 }
+
+    // The dialog's colour picker.
+    function colourPicker(dialog: ReturnType<typeof within>) {
+      return within(dialog.getByRole('radiogroup', { name: 'Colour' }))
+    }
+
+    // The picker's colours, each named by its place in the palette and the Categories that have it.
+    function expectColours(picker: ReturnType<typeof within>, names: string[]) {
+      expect(picker.getAllByRole('radio')).toEqual(names.map((name) => picker.getByRole('radio', { name })))
+    }
+
+    it('offers the palette in order, marking each colour another Category has with its name, and starts a new Category on the first unused one', async () => {
+      categoriesServed = [categories[0], categories[1], { ...health, colour: '#2a78d6' }]
+      let posted: unknown
+      handleAddCategory = (body) => {
+        posted = body
+        return Response.json(
+          { id: 20, ...(body as object), builtIn: false, transactionCount: 0, ruleCount: 0 },
+          { status: 201 },
+        )
+      }
+      const user = await openCategoriesPage()
+      await listedRows()
+
+      const dialog = await openAddDialog(user)
+      const picker = colourPicker(dialog)
+      expectColours(picker, [
+        'Colour 1, used by Groceries and Health',
+        'Colour 2',
+        'Colour 3, used by Other',
+        'Colour 4',
+      ])
+      expect(picker.getByRole('radio', { checked: true })).toBe(picker.getByRole('radio', { name: 'Colour 2' }))
+
+      // A colour in use can still be chosen.
+      await user.click(picker.getByRole('radio', { name: 'Colour 3, used by Other' }))
+      expect(picker.getByRole('radio', { name: 'Colour 3, used by Other' })).toBeChecked()
+      await user.type(dialog.getByLabelText('Name'), 'Fitness')
+      await user.type(dialog.getByLabelText('Description'), 'Gym and sports.')
+      await user.click(dialog.getByRole('button', { name: 'Save' }))
+
+      expect(posted).toEqual({ name: 'Fitness', description: 'Gym and sports.', colour: '#9085e9' })
+      expect(await screen.findByRole('status')).toHaveTextContent('Category added.')
+      expect(swatch('Fitness')).toHaveStyle({ backgroundColor: 'rgb(144, 133, 233)' })
+    })
+
+    it('starts a new Category on no colour once every one is taken, and leaves its colour to the server', async () => {
+      palette = ['#2a78d6', '#9085e9']
+      let posted: unknown
+      handleAddCategory = (body) => {
+        posted = body
+        return Response.json(
+          { id: 20, ...(body as object), colour: '#475569', builtIn: false, transactionCount: 0, ruleCount: 0 },
+          { status: 201 },
+        )
+      }
+      const user = await openCategoriesPage()
+      await listedRows()
+
+      const dialog = await openAddDialog(user)
+      const picker = colourPicker(dialog)
+      expectColours(picker, ['Colour 1, used by Groceries', 'Colour 2, used by Other'])
+      expect(picker.queryByRole('radio', { checked: true })).not.toBeInTheDocument()
+      await user.type(dialog.getByLabelText('Name'), 'Fitness')
+      await user.type(dialog.getByLabelText('Description'), 'Gym and sports.')
+      await user.click(dialog.getByRole('button', { name: 'Save' }))
+
+      expect(await screen.findByRole('status')).toHaveTextContent('Category added.')
+      expect(posted).toStrictEqual({ name: 'Fitness', description: 'Gym and sports.' })
+    })
+
+    it("starts an edit on the Category's own colour, and recolours a Built-in Category in its row and on the Dashboard", async () => {
+      categoriesServed = [...categories]
+      let edited: unknown
+      handleEditCategory = (_id, body) => {
+        edited = body
+        const recoloured = { ...categories[0], ...(body as object) }
+        categoriesServed = [recoloured, categories[1]]
+        return Response.json(recoloured)
+      }
+      months = [{ year: 2026, month: 9 }]
+      handleSpending = () => Response.json({ total: 120, slices: [{ categoryId: 1, amount: 120 }] })
+      const user = await openCategoriesPage()
+      await listedRows()
+
+      await user.click(within(screen.getByRole('row', { name: /Groceries/ })).getByRole('button', { name: 'Edit' }))
+      const dialog = within(screen.getByRole('dialog', { name: 'Edit category' }))
+      const picker = colourPicker(dialog)
+      // Its own colour isn't marked as another Category's.
+      expectColours(picker, ['Colour 1', 'Colour 2', 'Colour 3, used by Other', 'Colour 4'])
+      expect(picker.getByRole('radio', { checked: true })).toBe(picker.getByRole('radio', { name: 'Colour 1' }))
+      await user.click(picker.getByRole('radio', { name: 'Colour 2' }))
+      await user.click(dialog.getByRole('button', { name: 'Save' }))
+
+      expect(edited).toEqual({ name: 'Groceries', description: 'All groceries.', colour: '#eb6834' })
+      expect(await screen.findByRole('status')).toHaveTextContent('Category updated.')
+      expect(swatch('Groceries')).toHaveStyle({ backgroundColor: 'rgb(235, 104, 52)' })
+
+      await user.click(screen.getByRole('button', { name: 'PersonligFinans' }))
+      const legendRow = await within(screen.getByRole('region', { name: 'Spending' })).findByRole('row', {
+        name: /Groceries/,
+      })
+      expect(legendRow.querySelector('[aria-hidden="true"]')).toHaveStyle({ backgroundColor: 'rgb(235, 104, 52)' })
+    })
+
+    it('starts a Category on the slate fallback with no colour chosen, and keeps its colour when saved without one', async () => {
+      const slate = { ...health, colour: '#475569' }
+      categoriesServed = [...categories, slate]
+      let edited: unknown
+      handleEditCategory = (_id, body) => {
+        edited = body
+        return Response.json({ ...slate, ...(body as object) })
+      }
+      const user = await openCategoriesPage()
+      await listedRows()
+      expect(swatch('Health')).toHaveStyle({ backgroundColor: 'rgb(71, 85, 105)' })
+
+      await user.click(within(screen.getByRole('row', { name: /Health/ })).getByRole('button', { name: 'Edit' }))
+      const dialog = within(screen.getByRole('dialog', { name: 'Edit category' }))
+      expect(colourPicker(dialog).queryByRole('radio', { checked: true })).not.toBeInTheDocument()
+      await user.type(dialog.getByLabelText('Description'), ' And gym.')
+      await user.click(dialog.getByRole('button', { name: 'Save' }))
+
+      expect(await screen.findByRole('status')).toHaveTextContent('Category updated.')
+      expect(edited).toStrictEqual({ name: 'Health', description: 'Pharmacy etc. And gym.' })
+      expect(swatch('Health')).toHaveStyle({ backgroundColor: 'rgb(71, 85, 105)' })
+    })
+
+    it('forgets a chosen colour when the dialog is closed without saving', async () => {
+      const user = await openCategoriesPage()
+      await listedRows()
+
+      let picker = colourPicker(await openAddDialog(user))
+      await user.click(picker.getByRole('radio', { name: 'Colour 4' }))
+      await user.keyboard('{Escape}')
+
+      picker = colourPicker(await openAddDialog(user))
+      expect(picker.getByRole('radio', { checked: true })).toBe(picker.getByRole('radio', { name: 'Colour 2' }))
+    })
+
+    it("shows the server's colour error beside the picker", async () => {
+      handleAddCategory = () =>
+        Response.json({ errors: { colour: ["Colour must be one of the palette's colours."] } }, { status: 400 })
+      const user = await openCategoriesPage()
+      await listedRows()
+
+      const dialog = await openAddDialog(user)
+      await user.type(dialog.getByLabelText('Name'), 'Fitness')
+      await user.type(dialog.getByLabelText('Description'), 'Gym and sports.')
+      await user.click(dialog.getByRole('button', { name: 'Save' }))
+
+      await dialog.findByText("Colour must be one of the palette's colours.")
+      expect(dialog.getByRole('radiogroup', { name: 'Colour' })).toHaveAccessibleDescription(
+        "Colour must be one of the palette's colours.",
+      )
+    })
+
+    it('says when the colours could not be loaded, and still saves without one', async () => {
+      palette = new Response(null, { status: 500 })
+      let posted: unknown
+      handleAddCategory = (body) => {
+        posted = body
+        return Response.json(
+          { id: 20, ...(body as object), colour: '#eb6834', builtIn: false, transactionCount: 0, ruleCount: 0 },
+          { status: 201 },
+        )
+      }
+      const user = await openCategoriesPage()
+      await listedRows()
+
+      const dialog = await openAddDialog(user)
+      expect(dialog.getByText('Could not load the colours.')).toBeInTheDocument()
+      expect(dialog.queryByRole('radio')).not.toBeInTheDocument()
+      await user.type(dialog.getByLabelText('Name'), 'Fitness')
+      await user.type(dialog.getByLabelText('Description'), 'Gym and sports.')
+      await user.click(dialog.getByRole('button', { name: 'Save' }))
+
+      expect(await screen.findByRole('status')).toHaveTextContent('Category added.')
+      expect(posted).toStrictEqual({ name: 'Fitness', description: 'Gym and sports.' })
+    })
+
+    it('draws the colours lighter in Dark, as a Category in them is drawn', async () => {
+      localStorage.setItem('appearance', 'dark')
+      const user = await openCategoriesPage()
+      await listedRows()
+
+      const picker = colourPicker(await openAddDialog(user))
+      const colour = picker.getByRole('radio', { name: 'Colour 1, used by Groceries' }).closest('label')!
+      expect(colour.querySelector('[aria-hidden="true"]')).toHaveStyle({
+        backgroundColor: swatch('Groceries').style.backgroundColor,
+      })
+      expect(swatch('Groceries')).not.toHaveStyle({ backgroundColor: 'rgb(42, 120, 214)' })
     })
   })
 })
