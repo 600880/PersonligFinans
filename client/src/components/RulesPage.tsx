@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react'
+import { Fragment, useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import {
   addRule,
   deleteRule,
@@ -6,7 +6,9 @@ import {
   fetchCategories,
   fetchRules,
   previewAddingRule,
+  previewEditingRule,
   type CategorizationRule,
+  type CategorizationRuleRequest,
   type Category,
   type RuleFieldErrors,
 } from '../lib/api'
@@ -18,6 +20,7 @@ import { CategorySwatch } from './CategorySwatch'
 import { Count } from './Count'
 import { ErrorMessage, StatusMessage } from './Messages'
 import { RuleChangePreview } from './RuleChangePreview'
+import { RuleDeleteDialog, type RuleDeleted } from './RuleDeleteDialog'
 
 function changedMessage(action: string, transactionsChanged: number) {
   const transactions = transactionsChanged === 1 ? 'transaction' : 'transactions'
@@ -90,6 +93,10 @@ const cardClass =
 // The actions last in a card, under a line that keeps them apart from what they act on.
 const actionsCellClass =
   'py-2 text-right whitespace-nowrap max-sm:-mx-1 max-sm:flex max-sm:justify-end max-sm:gap-1 max-sm:border-t max-sm:border-slate-100 max-sm:dark:border-slate-800/60 max-sm:pt-2 max-sm:pb-0'
+// The preview of an edit, in a row of its own under the edited rule's row. On a phone it closes the
+// rule's card, under its actions.
+const editPreviewRowClass =
+  'max-sm:-mt-2 max-sm:block max-sm:rounded-b-lg max-sm:border max-sm:border-t-0 max-sm:border-slate-200 max-sm:dark:border-slate-800 max-sm:bg-white max-sm:dark:bg-slate-900 max-sm:px-3 max-sm:pb-3'
 const countCellClass = 'py-2.5 pl-3 text-right whitespace-nowrap tabular-nums max-sm:block max-sm:p-0 max-sm:text-left'
 const badgeClass = 'ml-1 inline-flex items-center rounded-md px-1.5 py-0.5 align-middle text-xs font-medium ring-1 ring-inset'
 const smallButtonClass =
@@ -190,6 +197,8 @@ export function RulesPage() {
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [edit, setEdit] = useState<RuleEdit | null>(null)
+  // The rule whose delete is being confirmed, or null while none is.
+  const [deleting, setDeleting] = useState<CategorizationRule | null>(null)
   const [newOnly, setNewOnly] = useState(false)
   const [aiOnly, setAiOnly] = useState(false)
   const [search, setSearch] = useState('')
@@ -217,6 +226,18 @@ export function RulesPage() {
 
   const dark = useIsDark()
   const addPreview = useRulePreview(previewRequest(keyword, categoryId, rules), previewAddingRule)
+  // The same function while the same rule is edited, so a reply about another rule's edit is never
+  // shown. It is only asked while a rule is edited.
+  const editedRuleId = edit?.id
+  const previewEditing = useCallback(
+    (request: CategorizationRuleRequest) => previewEditingRule(editedRuleId!, request),
+    [editedRuleId],
+  )
+  // The edited rule's own keyword is no other rule's, so saving it unchanged is previewed too.
+  const editPreview = useRulePreview(
+    edit && previewRequest(edit.keyword, edit.categoryId, rules.filter((r) => r.id !== edit.id)),
+    previewEditing,
+  )
   const categoryName = (id: number) => categories.find((c) => c.id === id)?.name ?? ''
   const hasNewRules = rules.some((r) => r.isNew)
   // The New chip does nothing while it is disabled, so a New filter left on once no rule is New is off.
@@ -347,6 +368,13 @@ export function RulesPage() {
     }
   }
 
+  // A rule that categorizes Transactions asks first, showing what deleting it would change. One that
+  // categorizes none is deleted at once.
+  function startDelete(rule: CategorizationRule) {
+    if (rule.transactionCount > 0) setDeleting(rule)
+    else handleDelete(rule)
+  }
+
   async function handleDelete(rule: CategorizationRule) {
     if (isSaving) return
 
@@ -357,16 +385,25 @@ export function RulesPage() {
     const result = await deleteRule(rule.id).finally(() => setIsSaving(false))
 
     if (result.ok) {
-      setRules((rules) => rules.filter((r) => r.id !== rule.id))
-      setStatusMessage(
-        result.alreadyDeleted
-          ? 'The rule was already deleted.'
-          : changedMessage('Rule deleted.', result.transactionsChanged),
-      )
-      if (!result.alreadyDeleted) countRulesAgain()
+      showDeleted(rule, result)
     } else {
       setErrorMessage(result.message)
     }
+  }
+
+  function handleConfirmedDelete(rule: CategorizationRule, deleted: RuleDeleted) {
+    setDeleting(null)
+    setErrorMessage(null)
+    showDeleted(rule, deleted)
+  }
+
+  // Says what a delete did, the same whether it was asked first or not.
+  function showDeleted(rule: CategorizationRule, { alreadyDeleted, transactionsChanged }: RuleDeleted) {
+    setRules((rules) => rules.filter((r) => r.id !== rule.id))
+    setStatusMessage(
+      alreadyDeleted ? 'The rule was already deleted.' : changedMessage('Rule deleted.', transactionsChanged),
+    )
+    if (!alreadyDeleted) countRulesAgain()
   }
 
   return (
@@ -500,58 +537,69 @@ export function RulesPage() {
           <tbody className="divide-y divide-slate-200 dark:divide-slate-800 text-slate-900 dark:text-slate-100 max-sm:block max-sm:space-y-2 max-sm:divide-y-0">
             {shownRules.map((rule) =>
               edit?.id === rule.id ? (
-                <tr key={rule.id} className={`align-top ${cardClass}`}>
-                  <td className="py-2 pr-3 max-sm:block max-sm:p-0">
-                    <div className="flex flex-col gap-1">
-                      <input
-                        aria-label="Keyword"
-                        value={edit.keyword}
-                        onChange={(event) => setEdit({ ...edit, keyword: event.target.value })}
-                        aria-describedby={`rule-${rule.id}-keyword-error`}
-                        className={`${inputClass} w-full min-w-0`}
-                      />
-                      <span id={`rule-${rule.id}-keyword-error`} className="text-xs text-red-600 dark:text-red-300">
-                        {edit.fieldErrors.keyword}
-                      </span>
-                    </div>
-                  </td>
-                  <td className="py-2 pr-3 max-sm:block max-sm:p-0">
-                    <div className="flex flex-col gap-1">
-                      <select
-                        aria-label="Category"
-                        value={edit.categoryId}
-                        onChange={(event) => setEdit({ ...edit, categoryId: event.target.value })}
-                        aria-describedby={`rule-${rule.id}-category-error`}
-                        className={`${inputClass} w-full min-w-0`}
+                <Fragment key={rule.id}>
+                  <tr
+                    className={`align-top ${cardClass} ${editPreview ? 'border-b-0 max-sm:rounded-b-none max-sm:border-b-0' : ''}`}
+                  >
+                    <td className="py-2 pr-3 max-sm:block max-sm:p-0">
+                      <div className="flex flex-col gap-1">
+                        <input
+                          aria-label="Keyword"
+                          value={edit.keyword}
+                          onChange={(event) => setEdit({ ...edit, keyword: event.target.value })}
+                          aria-describedby={`rule-${rule.id}-keyword-error`}
+                          className={`${inputClass} w-full min-w-0`}
+                        />
+                        <span id={`rule-${rule.id}-keyword-error`} className="text-xs text-red-600 dark:text-red-300">
+                          {edit.fieldErrors.keyword}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="py-2 pr-3 max-sm:block max-sm:p-0">
+                      <div className="flex flex-col gap-1">
+                        <select
+                          aria-label="Category"
+                          value={edit.categoryId}
+                          onChange={(event) => setEdit({ ...edit, categoryId: event.target.value })}
+                          aria-describedby={`rule-${rule.id}-category-error`}
+                          className={`${inputClass} w-full min-w-0`}
+                        >
+                          {categories.map((category) => (
+                            <option key={category.id} value={category.id}>
+                              {category.name}
+                            </option>
+                          ))}
+                        </select>
+                        <span id={`rule-${rule.id}-category-error`} className="text-xs text-red-600 dark:text-red-300">
+                          {edit.fieldErrors.categoryId}
+                        </span>
+                      </div>
+                    </td>
+                    <td className={`${countCellClass} sm:pt-4`}>
+                      <Count count={rule.transactionCount} noun="transaction" />
+                    </td>
+                    <td className={actionsCellClass}>
+                      <button
+                        type="button"
+                        disabled={isSaving}
+                        onClick={() => handleSave(edit)}
+                        className={smallButtonClass}
                       >
-                        {categories.map((category) => (
-                          <option key={category.id} value={category.id}>
-                            {category.name}
-                          </option>
-                        ))}
-                      </select>
-                      <span id={`rule-${rule.id}-category-error`} className="text-xs text-red-600 dark:text-red-300">
-                        {edit.fieldErrors.categoryId}
-                      </span>
-                    </div>
-                  </td>
-                  <td className={`${countCellClass} sm:pt-4`}>
-                    <Count count={rule.transactionCount} noun="transaction" />
-                  </td>
-                  <td className={actionsCellClass}>
-                    <button
-                      type="button"
-                      disabled={isSaving}
-                      onClick={() => handleSave(edit)}
-                      className={smallButtonClass}
-                    >
-                      Save
-                    </button>
-                    <button type="button" onClick={cancelEdit} className={smallButtonClass}>
-                      Cancel
-                    </button>
-                  </td>
-                </tr>
+                        Save
+                      </button>
+                      <button type="button" onClick={cancelEdit} className={smallButtonClass}>
+                        Cancel
+                      </button>
+                    </td>
+                  </tr>
+                  {editPreview && (
+                    <tr className={editPreviewRowClass}>
+                      <td colSpan={4} className="pb-3 max-sm:block max-sm:p-0">
+                        <RuleChangePreview preview={editPreview} categories={categories} />
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
               ) : (
                 <tr key={rule.id} className={cardClass}>
                   <td className="py-2.5 pr-3 font-medium break-words max-sm:block max-sm:p-0">
@@ -605,7 +653,7 @@ export function RulesPage() {
                     <button
                       type="button"
                       disabled={isSaving}
-                      onClick={() => handleDelete(rule)}
+                      onClick={() => startDelete(rule)}
                       className={smallButtonClass}
                     >
                       Delete
@@ -616,6 +664,15 @@ export function RulesPage() {
             )}
           </tbody>
         </table>
+      )}
+
+      {deleting && (
+        <RuleDeleteDialog
+          rule={deleting}
+          categories={categories}
+          onCancel={() => setDeleting(null)}
+          onDeleted={(deleted) => handleConfirmedDelete(deleting, deleted)}
+        />
       )}
     </section>
   )

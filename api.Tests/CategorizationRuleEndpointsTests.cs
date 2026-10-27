@@ -776,4 +776,222 @@ public class CategorizationRuleEndpointsTests : IAsyncLifetime
         Assert.Equal(["A rule for 'kafé' already exists."], (await PreviewExpectingValidationErrors("KAFÉ", _categories.Groceries))["keyword"]);
         Assert.Equal(["Category does not exist."], (await PreviewExpectingValidationErrors("butikk", 9999))["categoryId"]);
     }
+
+    private Task<HttpResponseMessage> PreviewDeletingRule(int ruleId) =>
+        _client.DeleteAsync($"/api/categorization-rules/{ruleId}/preview");
+
+    private async Task<RulePreviewResponse> PreviewOfDeleting(int ruleId)
+    {
+        var response = await PreviewDeletingRule(ruleId);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        return (await response.Content.ReadFromJsonAsync<RulePreviewResponse>())!;
+    }
+
+    [Fact]
+    public async Task DeletePreview_SaysWhatDeletingTheRuleThenDoes()
+    {
+        // Without "butikk", the first goes to the rule for "sent", the second stays in Groceries through
+        // the rule for "nord", the third becomes Uncategorized, and the fourth it never matched.
+        var ids = await Imported("Butikk Sentrum", "Butikk Nord", "Butikk Torget", "Annet");
+        await AddedRuleId("sent", _categories.Other);
+        await AddedRuleId("nord", _categories.Groceries);
+        var ruleId = await AddedRuleId("butikk", _categories.Groceries);
+        var before = await CategoriesOf(ids);
+
+        var preview = await PreviewOfDeleting(ruleId);
+        var changed = await TransactionsChangedByDeleting(ruleId);
+
+        var after = await CategoriesOf(ids);
+        Assert.Equal(changed, preview.ChangedCount);
+        Assert.Equal(
+            ids.Index().Where(t => before[t.Index] != after[t.Index]).Select(t => (t.Item, before[t.Index], after[t.Index])).Order(),
+            preview.Changes.Select(c => (c.Id, c.FromCategoryId, c.ToCategoryId)).Order());
+        Assert.Equal(
+            [(ids[0], (int?)_categories.Groceries, (int?)_categories.Other), (ids[2], _categories.Groceries, null)],
+            preview.Changes.Select(c => (c.Id, c.FromCategoryId, c.ToCategoryId)).Order());
+        Assert.Equal(["Butikk Sentrum", "Butikk Torget"], preview.Changes.Select(c => c.Description).Order());
+    }
+
+    [Fact]
+    public async Task DeletePreview_ChangesNothing()
+    {
+        var ids = await Imported("Butikk Sentrum", "Butikk Nord", "Annet");
+        var ruleId = await AddedRuleId("butikk", _categories.Groceries);
+        var rules = await ListedRules();
+
+        var preview = await PreviewOfDeleting(ruleId);
+
+        Assert.Equal(2, preview.ChangedCount);
+        Assert.Equal([_categories.Groceries, _categories.Groceries, null], await CategoriesOf(ids));
+        Assert.Equal(rules, await ListedRules());
+        // The rule is still there, and deleting it does all the preview said.
+        Assert.Equal(2, await TransactionsChangedByDeleting(ruleId));
+    }
+
+    [Fact]
+    public async Task DeletePreview_CountsNoLockedTransactions_EvenWhenTheKeywordMatchesSome()
+    {
+        await Imported("Kafé Sentrum", "Kafé Nord");
+        var ruleId = await AddedRuleId("kafé", _categories.Restaurants);
+        await CategorizeByHand("Kafé Nord", _categories.Other);
+        await AddManualAugustTransaction("KAFÉ LØKKA", _categories.Other);
+
+        var preview = await PreviewOfDeleting(ruleId);
+
+        Assert.Equal(0, preview.LockedCount);
+        Assert.Equal(["Kafé Sentrum"], preview.Changes.Select(c => c.Description));
+    }
+
+    [Fact]
+    public async Task DeletePreview_ListsTenOfTheChanges_NewestFirst_AndCountsThemAll()
+    {
+        // Twelve, posted in an order other than by date.
+        var days = new[] { 7, 2, 12, 5, 9, 1, 11, 4, 8, 3, 10, 6 };
+        await ImportedOn("Butikk", days.Select(d => new DateOnly(2026, 8, d)).ToArray());
+        var ruleId = await AddedRuleId("butikk", _categories.Groceries);
+
+        var preview = await PreviewOfDeleting(ruleId);
+
+        Assert.Equal(12, preview.ChangedCount);
+        Assert.Equal(
+            Enumerable.Range(3, 10).Reverse().Select(d => new DateOnly(2026, 8, d)),
+            preview.Changes.Select(c => c.Date));
+    }
+
+    [Fact]
+    public async Task DeletePreview_UnknownRule_ReturnsNotFound()
+    {
+        var response = await PreviewDeletingRule(int.MaxValue);
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    private async Task<HttpResponseMessage> PreviewEditingRule(int id, string? keyword, int? categoryId) =>
+        await _client.PutAsJsonAsync($"/api/categorization-rules/{id}/preview", new { keyword, categoryId });
+
+    private async Task<RulePreviewResponse> PreviewOfEditing(int id, string keyword, int categoryId)
+    {
+        var response = await PreviewEditingRule(id, keyword, categoryId);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        return (await response.Content.ReadFromJsonAsync<RulePreviewResponse>())!;
+    }
+
+    [Fact]
+    public async Task PutPreview_SaysWhatEditingTheRuleThenDoes_IncludingWhatItStopsCategorizing()
+    {
+        // The edited rule stops categorizing the first two: "sent" takes the first, and the second
+        // becomes Uncategorized. It takes the third, and leaves the Locked fourth as it is.
+        var ids = await Imported("Butikk Sentrum", "Butikk Nord", "Bakeri", "Bakeri Torget", "Annet");
+        await CategorizeByHand("Bakeri Torget", _categories.Other);
+        await AddedRuleId("sent", _categories.Other);
+        var ruleId = await AddedRuleId("butikk", _categories.Groceries);
+        var before = await CategoriesOf(ids);
+
+        var preview = await PreviewOfEditing(ruleId, "bakeri", _categories.Restaurants);
+        var edited = await EditedRule(ruleId, "bakeri", _categories.Restaurants);
+
+        var after = await CategoriesOf(ids);
+        Assert.Equal(edited.TransactionsChanged, preview.ChangedCount);
+        Assert.Equal(
+            ids.Index().Where(t => before[t.Index] != after[t.Index]).Select(t => (t.Item, before[t.Index], after[t.Index])).Order(),
+            preview.Changes.Select(c => (c.Id, c.FromCategoryId, c.ToCategoryId)).Order());
+        Assert.Equal(
+            [
+                (ids[0], (int?)_categories.Groceries, (int?)_categories.Other),
+                (ids[1], _categories.Groceries, null),
+                (ids[2], null, _categories.Restaurants),
+            ],
+            preview.Changes.Select(c => (c.Id, c.FromCategoryId, c.ToCategoryId)).Order());
+        Assert.Equal(1, preview.LockedCount);
+    }
+
+    [Fact]
+    public async Task PutPreview_UnchangedEdit_WouldChangeNothing()
+    {
+        await Imported("Butikk Sentrum", "Butikk Nord", "Kafé Nord");
+        await CategorizeByHand("Butikk Nord", _categories.Other);
+        await AddedRuleId("kafé", _categories.Restaurants);
+        var ruleId = await AddedRuleId("butikk", _categories.Groceries);
+
+        var unchanged = await PreviewOfEditing(ruleId, "butikk", _categories.Groceries);
+        var onlyTheCase = await PreviewOfEditing(ruleId, " BUTIKK ", _categories.Groceries);
+
+        Assert.All([unchanged, onlyTheCase], preview =>
+        {
+            Assert.Equal((0, 1), (preview.ChangedCount, preview.LockedCount));
+            Assert.Empty(preview.Changes);
+        });
+    }
+
+    [Fact]
+    public async Task PutPreview_ChangesNothing()
+    {
+        var ids = await Imported("Butikk Sentrum", "Bakeri", "Annet");
+        var ruleId = await AddedRuleId("butikk", _categories.Groceries);
+        await MarkAiGenerated(ruleId);
+        var rules = await ListedRules();
+
+        var preview = await PreviewOfEditing(ruleId, "bakeri", _categories.Restaurants);
+
+        Assert.Equal(2, preview.ChangedCount);
+        Assert.Equal([_categories.Groceries, null, null], await CategoriesOf(ids));
+        // The rule keeps its keyword, Category and AI mark.
+        Assert.Equal(rules, await ListedRules());
+        Assert.Equal(2, (await EditedRule(ruleId, "bakeri", _categories.Restaurants)).TransactionsChanged);
+    }
+
+    [Fact]
+    public async Task PutPreview_TheEditedRuleKeepsItsAge_AsTheEditDoes()
+    {
+        // "bbbb" categorizes it now. Edited to an equally long keyword, the older rule wins it.
+        var ids = await Imported("aaaa bbbb");
+        var olderRuleId = await AddedRuleId("cccc", _categories.Groceries);
+        await AddedRuleId("bbbb", _categories.Restaurants);
+
+        var preview = await PreviewOfEditing(olderRuleId, "aaaa", _categories.Groceries);
+        var edited = await EditedRule(olderRuleId, "aaaa", _categories.Groceries);
+
+        Assert.Equal((1, 1), (edited.TransactionsChanged, preview.ChangedCount));
+        Assert.Equal([_categories.Groceries], await CategoriesOf(ids));
+        Assert.Equal(
+            (ids[0], (int?)_categories.Restaurants, (int?)_categories.Groceries),
+            preview.Changes.Select(c => (c.Id, c.FromCategoryId, c.ToCategoryId)).Single());
+    }
+
+    private async Task<Dictionary<string, string[]>> ValidationErrors(HttpResponseMessage response)
+    {
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var problem = await response.Content.ReadFromJsonAsync<ValidationProblemDetails>();
+        return new Dictionary<string, string[]>(problem!.Errors);
+    }
+
+    [Fact]
+    public async Task PutPreview_InvalidInput_GivesTheSameFieldErrorsAsEditing()
+    {
+        await AddedRuleId("kafé", _categories.Restaurants);
+        var ruleId = await AddedRuleId("butikk", _categories.Groceries);
+        (string? Keyword, int? CategoryId)[] invalid =
+        [
+            ("   ", null),
+            (" x ", _categories.Groceries),
+            (new string('x', 101), _categories.Groceries),
+            ("  KAFÉ ", _categories.Groceries),
+            ("butikk", 9999),
+        ];
+
+        foreach (var (keyword, categoryId) in invalid)
+            Assert.Equal(
+                await ValidationErrors(await EditRule(ruleId, keyword, categoryId)),
+                await ValidationErrors(await PreviewEditingRule(ruleId, keyword, categoryId)));
+        Assert.Equal(["A rule for 'kafé' already exists."], (await ValidationErrors(await PreviewEditingRule(ruleId, "KAFÉ", _categories.Groceries)))["keyword"]);
+        Assert.Equal(["Category does not exist."], (await ValidationErrors(await PreviewEditingRule(ruleId, "butikk", 9999)))["categoryId"]);
+    }
+
+    [Fact]
+    public async Task PutPreview_UnknownRule_ReturnsNotFound()
+    {
+        var response = await PreviewEditingRule(int.MaxValue, "butikk", _categories.Groceries);
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
 }

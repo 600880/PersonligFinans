@@ -533,6 +533,47 @@ public class UserIsolationTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task ADeletePreview_SeesOnlyThatUsersRuleAndTransactions()
+    {
+        Assert.Equal(HttpStatusCode.Created, (await Upload(_a, Statement(AccountNumber()))).StatusCode);
+        Assert.Equal(HttpStatusCode.Created, (await Upload(_b, Statement(AccountNumber()))).StatusCode);
+        var ruleA = await AddRule(_a, "kafé", _categoriesA.Restaurants);
+        var ruleB = await AddRule(_b, "kafé", _categoriesB.Restaurants);
+
+        var preview = await _b.DeleteAsync($"/api/categorization-rules/{ruleB.Id}/preview");
+        var ofAnotherUsersRule = await _b.DeleteAsync($"/api/categorization-rules/{ruleA.Id}/preview");
+
+        Assert.Equal(HttpStatusCode.OK, preview.StatusCode);
+        var previewed = (await preview.Content.ReadFromJsonAsync<RulePreviewResponse>())!;
+        Assert.Equal(
+            (1, (await August(_b)).Single().Id, (int?)_categoriesB.Restaurants, (int?)null),
+            (previewed.ChangedCount, previewed.Changes.Single().Id, previewed.Changes.Single().FromCategoryId, previewed.Changes.Single().ToCategoryId));
+        Assert.Equal(HttpStatusCode.NotFound, ofAnotherUsersRule.StatusCode);
+        Assert.Contains(await Rules(_a), r => r.Id == ruleA.Id);
+    }
+
+    [Fact]
+    public async Task AnEditPreview_SeesOnlyThatUsersOwnRule_AndTransactions()
+    {
+        Assert.Equal(HttpStatusCode.Created, (await Upload(_a, Statement(AccountNumber()))).StatusCode);
+        Assert.Equal(HttpStatusCode.Created, (await Upload(_b, Statement(AccountNumber()))).StatusCode);
+        var theirRule = await AddRule(_a, "sentrum", _categoriesA.Other);
+        var rule = await AddRule(_b, "sentrum", _categoriesB.Other);
+
+        var ofTheirRule = await _b.PutAsJsonAsync(
+            $"/api/categorization-rules/{theirRule.Id}/preview", new { keyword = "kafé", categoryId = _categoriesB.Restaurants });
+        var preview = await _b.PutAsJsonAsync(
+            $"/api/categorization-rules/{rule.Id}/preview", new { keyword = "kafé", categoryId = _categoriesB.Restaurants });
+
+        Assert.Equal(HttpStatusCode.NotFound, ofTheirRule.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, preview.StatusCode);
+        var previewed = (await preview.Content.ReadFromJsonAsync<RulePreviewResponse>())!;
+        Assert.Equal(
+            ((await August(_b)).Single().Id, (int?)_categoriesB.Other, (int?)_categoriesB.Restaurants),
+            previewed.Changes.Select(c => (c.Id, c.FromCategoryId, c.ToCategoryId)).Single());
+    }
+
+    [Fact]
     public async Task DeletingACategory_MovesOnlyThatUsersTransactionsAndRules()
     {
         var hobbiesA = await AddCategory(_a, "Hobbies");

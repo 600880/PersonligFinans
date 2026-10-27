@@ -3503,6 +3503,420 @@ describe('Rules page', () => {
       expect(asked).toHaveLength(1)
     })
   })
+
+  describe('deleting a rule with a confirmation', () => {
+    const kiwi = { id: 1, keyword: 'kiwi', categoryId: 1, aiGenerated: false, isNew: false, transactionCount: 5 }
+    const rema = { id: 2, keyword: 'rema', categoryId: 1, aiGenerated: false, isNew: false, transactionCount: 0 }
+
+    // What the delete preview answers for a rule, and every rule it was asked about.
+    let handlePreview: (id: number) => Response | Promise<Response>
+    let asked: number[]
+
+    const kiwiSentrum = {
+      id: 7,
+      date: '2026-08-14',
+      description: 'Kiwi Sentrum',
+      amount: -249.9,
+      fromCategoryId: 1,
+      toCategoryId: null,
+    }
+    const kiwiKafe = {
+      id: 5,
+      date: '2026-08-03',
+      description: 'Kiwi Kafé',
+      amount: -54,
+      fromCategoryId: 1,
+      toCategoryId: 13,
+    }
+
+    function deleteDialog() {
+      return screen.queryByRole('dialog', { name: 'Delete the rule “kiwi”?' })
+    }
+
+    beforeEach(() => {
+      rules = [kiwi, rema]
+      handlePreview = () => Response.json({ changedCount: 5, lockedCount: 0, changes: [kiwiSentrum, kiwiKafe] })
+      asked = []
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (url: string, init?: RequestInit) => {
+          const previewUrl = /^\/api\/categorization-rules\/(\d+)\/preview$/.exec(url)
+          if (!previewUrl || init?.method !== 'DELETE') return fetchMock(url, init)
+          asked.push(Number(previewUrl[1]))
+          return handlePreview(Number(previewUrl[1]))
+        }),
+      )
+    })
+
+    it('asks first, showing what deleting would change, when the rule categorizes transactions', async () => {
+      let deletedId: number | undefined
+      handleDeleteRule = (id) => {
+        deletedId = id
+        return Response.json({ transactionsChanged: 5 })
+      }
+      const user = await openRulesPage()
+
+      await user.click(within(ruleRow('kiwi')).getByRole('button', { name: 'Delete' }))
+
+      const dialog = within(deleteDialog()!)
+      expect(dialog.getByText('It categorizes 5 transactions.')).toBeInTheDocument()
+      const shown = within(await dialog.findByRole('region', { name: 'Preview' }))
+      expect(shown.getByText('Would change 5 transactions')).toBeInTheDocument()
+      await user.click(shown.getByRole('button', { name: 'Show transactions' }))
+      expect(shown.getAllByRole('listitem').map((item) => item.textContent)).toEqual([
+        '14.08.2026Kiwi Sentrum-249,90 krGroceries → Uncategorized',
+        '03.08.2026Kiwi Kafé-54,00 krGroceries → Other',
+      ])
+      expect(asked).toEqual([1])
+      expect(deletedId).toBeUndefined()
+      expect(screen.getByRole('cell', { name: 'kiwi' })).toBeInTheDocument()
+    })
+
+    it('deletes the rule once confirmed, with the same message as without asking, and counts the rules again', async () => {
+      let deletedId: number | undefined
+      handleDeleteRule = (id) => {
+        deletedId = id
+        rules = [{ ...rema, transactionCount: 2 }]
+        return Response.json({ transactionsChanged: 5 })
+      }
+      const user = await openRulesPage()
+      await user.click(within(ruleRow('kiwi')).getByRole('button', { name: 'Delete' }))
+      await within(deleteDialog()!).findByRole('region', { name: 'Preview' })
+
+      await user.click(within(deleteDialog()!).getByRole('button', { name: 'Confirm delete' }))
+
+      expect(deletedId).toBe(1)
+      expect(await screen.findByRole('status')).toHaveTextContent('Rule deleted. 5 transactions changed category.')
+      expect(deleteDialog()).not.toBeInTheDocument()
+      expect(screen.queryByRole('cell', { name: 'kiwi' })).not.toBeInTheDocument()
+      await waitFor(() => expect(within(ruleRow('rema')).getAllByRole('cell')[2]).toHaveTextContent('2 transactions'))
+    })
+
+    it('keeps the rule when the confirmation is cancelled, by Cancel or by Escape', async () => {
+      let deleted = false
+      handleDeleteRule = () => {
+        deleted = true
+        return Response.json({ transactionsChanged: 5 })
+      }
+      const user = await openRulesPage()
+
+      await user.click(within(ruleRow('kiwi')).getByRole('button', { name: 'Delete' }))
+      await user.click(within(deleteDialog()!).getByRole('button', { name: 'Cancel' }))
+
+      expect(deleteDialog()).not.toBeInTheDocument()
+
+      await user.click(within(ruleRow('kiwi')).getByRole('button', { name: 'Delete' }))
+      expect(deleteDialog()).toBeInTheDocument()
+      await user.keyboard('{Escape}')
+
+      expect(deleteDialog()).not.toBeInTheDocument()
+      expect(deleted).toBe(false)
+      expect(screen.getByRole('cell', { name: 'kiwi' })).toBeInTheDocument()
+      expect(screen.queryByRole('status')).toBeEmptyDOMElement()
+    })
+
+    it('deletes a rule that categorizes no transactions on a single click, asking nothing', async () => {
+      let deletedId: number | undefined
+      handleDeleteRule = (id) => {
+        deletedId = id
+        return Response.json({ transactionsChanged: 0 })
+      }
+      const user = await openRulesPage()
+
+      await user.click(within(ruleRow('rema')).getByRole('button', { name: 'Delete' }))
+
+      expect(deletedId).toBe(2)
+      expect(await screen.findByRole('status')).toHaveTextContent('Rule deleted. 0 transactions changed category.')
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+      expect(asked).toEqual([])
+    })
+
+    it('says the rule was already deleted when it was deleted elsewhere while asking, showing no preview', async () => {
+      const notFound = () => Response.json({ title: 'Not Found', status: 404 }, { status: 404 })
+      handlePreview = notFound
+      handleDeleteRule = notFound
+      const user = await openRulesPage()
+      await user.click(within(ruleRow('kiwi')).getByRole('button', { name: 'Delete' }))
+      await waitFor(() => expect(asked).toEqual([1]))
+
+      expect(within(deleteDialog()!).queryByRole('region', { name: 'Preview' })).not.toBeInTheDocument()
+
+      await user.click(within(deleteDialog()!).getByRole('button', { name: 'Confirm delete' }))
+
+      expect(await screen.findByRole('status')).toHaveTextContent('The rule was already deleted.')
+      expect(deleteDialog()).not.toBeInTheDocument()
+      expect(screen.queryByRole('cell', { name: 'kiwi' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    })
+
+    it('still asks, and deletes once confirmed, when the preview cannot be had', async () => {
+      handlePreview = () => new Response(null, { status: 500 })
+      handleDeleteRule = () => Response.json({ transactionsChanged: 5 })
+      const user = await openRulesPage()
+      await user.click(within(ruleRow('kiwi')).getByRole('button', { name: 'Delete' }))
+      await waitFor(() => expect(asked).toEqual([1]))
+
+      const dialog = within(deleteDialog()!)
+      expect(dialog.getByText('It categorizes 5 transactions.')).toBeInTheDocument()
+      expect(dialog.queryByRole('region', { name: 'Preview' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+
+      await user.click(dialog.getByRole('button', { name: 'Confirm delete' }))
+
+      expect(await screen.findByRole('status')).toHaveTextContent('Rule deleted. 5 transactions changed category.')
+    })
+
+    it('keeps the confirmation open, saying why, when the delete cannot reach the server', async () => {
+      handleDeleteRule = () => {
+        throw new TypeError('Failed to fetch')
+      }
+      const user = await openRulesPage()
+      await user.click(within(ruleRow('kiwi')).getByRole('button', { name: 'Delete' }))
+
+      await user.click(within(deleteDialog()!).getByRole('button', { name: 'Confirm delete' }))
+
+      expect(await within(deleteDialog()!).findByRole('alert')).toHaveTextContent('Could not reach the server.')
+      expect(screen.getByRole('cell', { name: 'kiwi' })).toBeInTheDocument()
+    })
+  })
+
+  describe('previewing an edited rule', () => {
+    type RulePreview = {
+      changedCount: number
+      lockedCount: number
+      changes: {
+        id: number
+        date: string
+        description: string
+        amount: number
+        fromCategoryId: number | null
+        toCategoryId: number | null
+      }[]
+    }
+
+    // What the edit preview answers for a rule and request, and every rule and request it was asked.
+    let handlePreview: (id: number, body: { keyword: string; categoryId: number }) => Response | Promise<Response>
+    let asked: { id: number; body: unknown }[]
+
+    // A Transaction kiwi categorizes, which "kiwi minipris" would leave Uncategorized.
+    const kiwiSentrum = {
+      id: 7,
+      date: '2026-08-14',
+      description: 'Kiwi Sentrum',
+      amount: -249.9,
+      fromCategoryId: 1,
+      toCategoryId: null,
+    }
+
+    function answer(preview: RulePreview) {
+      return Response.json(preview)
+    }
+
+    // The edit asks only once typing has paused, so the tests move the clock on past that pause.
+    async function afterThePause() {
+      await act(() => vi.advanceTimersByTimeAsync(1_000))
+    }
+
+    function preview() {
+      return screen.queryByRole('region', { name: 'Preview' })
+    }
+
+    function findPreview() {
+      return screen.findByRole('region', { name: 'Preview' })
+    }
+
+    beforeEach(() => {
+      vi.useFakeTimers({ shouldAdvanceTime: true })
+      handlePreview = () => answer({ changedCount: 0, lockedCount: 0, changes: [] })
+      asked = []
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (url: string, init?: RequestInit) => {
+          const previewUrl = /^\/api\/categorization-rules\/(\d+)\/preview$/.exec(url)
+          if (!previewUrl || init?.method !== 'PUT') return fetchMock(url, init)
+          const id = Number(previewUrl[1])
+          const body = JSON.parse(init.body as string) as { keyword: string; categoryId: number }
+          asked.push({ id, body })
+          return handlePreview(id, body)
+        }),
+      )
+    })
+
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
+    it('says what saving the edit would change, including the transactions the rule would stop categorizing', async () => {
+      handlePreview = () => answer({ changedCount: 4, lockedCount: 1, changes: [kiwiSentrum] })
+      const user = await openRulesPage()
+      const row = await startEditingKiwi(user)
+
+      await user.type(row.getByLabelText('Keyword'), ' minipris ')
+      await afterThePause()
+
+      const shown = within(await findPreview())
+      expect(shown.getByText("Would change 4 transactions · 1 Locked won't change")).toBeInTheDocument()
+      await user.click(shown.getByRole('button', { name: 'Show transactions' }))
+      expect(shown.getAllByRole('listitem').map((item) => item.textContent)).toEqual([
+        '14.08.2026Kiwi Sentrum-249,90 krGroceries → Uncategorized',
+      ])
+      expect(asked).toEqual([{ id: 1, body: { keyword: 'kiwi minipris', categoryId: 1 } }])
+    })
+
+    it('says nothing would change while the edit changes nothing', async () => {
+      handlePreview = (_id, { keyword, categoryId }) =>
+        keyword === 'kiwi' && categoryId === 1
+          ? answer({ changedCount: 0, lockedCount: 0, changes: [] })
+          : answer({ changedCount: 5, lockedCount: 0, changes: [] })
+      const user = await openRulesPage()
+
+      await startEditingKiwi(user)
+      await afterThePause()
+
+      const shown = await findPreview()
+      expect(shown).toHaveTextContent(/^Nothing would change$/)
+      expect(within(shown).queryByRole('button')).not.toBeInTheDocument()
+      expect(asked).toEqual([{ id: 1, body: { keyword: 'kiwi', categoryId: 1 } }])
+    })
+
+    it('asks once typing pauses rather than at every keystroke, and follows the keyword and Category', async () => {
+      handlePreview = (_id, { keyword, categoryId }) =>
+        answer({ changedCount: keyword.length + categoryId, lockedCount: 0, changes: [] })
+      const user = await openRulesPage()
+      const row = await startEditingKiwi(user)
+      await afterThePause()
+      expect(await findPreview()).toHaveTextContent('Would change 5 transactions')
+
+      await user.type(row.getByLabelText('Keyword'), ' minipris')
+      await afterThePause()
+
+      await waitFor(() => expect(preview()).toHaveTextContent('Would change 14 transactions'))
+      expect(asked.map((a) => a.body)).toEqual([
+        { keyword: 'kiwi', categoryId: 1 },
+        { keyword: 'kiwi minipris', categoryId: 1 },
+      ])
+
+      await user.selectOptions(row.getByLabelText('Category'), 'Other')
+      await afterThePause()
+
+      await waitFor(() => expect(preview()).toHaveTextContent('Would change 26 transactions'))
+      expect(asked).toHaveLength(3)
+    })
+
+    it("asks nothing and shows no preview while the keyword is too short or another rule's, but does for the rule's own", async () => {
+      const user = await openRulesPage()
+      const row = await startEditingKiwi(user)
+      const keyword = row.getByLabelText('Keyword')
+      await user.clear(keyword)
+
+      await user.type(keyword, ' k ')
+      await afterThePause()
+      expect(asked).toEqual([])
+
+      // Another rule's keyword, ignoring case.
+      await user.clear(keyword)
+      await user.type(keyword, 'Overføring mellom egne kontoer')
+      await afterThePause()
+      expect(asked).toEqual([])
+      expect(preview()).not.toBeInTheDocument()
+
+      // Its own, ignoring case.
+      await user.clear(keyword)
+      await user.type(keyword, 'KIWI')
+      await afterThePause()
+      expect(await findPreview()).toHaveTextContent('Nothing would change')
+      expect(asked).toEqual([{ id: 1, body: { keyword: 'KIWI', categoryId: 1 } }])
+    })
+
+    it("shows no preview when the server refuses the edit, and the server's field error only once it is saved", async () => {
+      const refused = () => Response.json({ errors: { categoryId: ['Category does not exist.'] } }, { status: 400 })
+      handlePreview = refused
+      handleEditRule = refused
+      const user = await openRulesPage()
+      const row = await startEditingKiwi(user)
+
+      await user.selectOptions(row.getByLabelText('Category'), 'Other')
+      await afterThePause()
+      await waitFor(() => expect(asked).toHaveLength(1))
+
+      expect(preview()).not.toBeInTheDocument()
+      expect(screen.queryByText('Category does not exist.')).not.toBeInTheDocument()
+
+      await user.click(row.getByRole('button', { name: 'Save' }))
+
+      expect(await row.findByText('Category does not exist.')).toBeInTheDocument()
+      expect(preview()).not.toBeInTheDocument()
+    })
+
+    it('ignores a reply that arrives after the keyword has changed', async () => {
+      let answerLate: (response: Response) => void = () => {}
+      handlePreview = (_id, { keyword }) =>
+        keyword === 'kiwi'
+          ? new Promise((resolve) => (answerLate = resolve))
+          : answer({ changedCount: 2, lockedCount: 0, changes: [] })
+      const user = await openRulesPage()
+      const row = await startEditingKiwi(user)
+      await afterThePause()
+
+      await user.type(row.getByLabelText('Keyword'), ' minipris')
+      await afterThePause()
+      expect(await findPreview()).toHaveTextContent('Would change 2 transactions')
+      await act(async () => answerLate(answer({ changedCount: 99, lockedCount: 0, changes: [] })))
+
+      expect(preview()).toHaveTextContent('Would change 2 transactions')
+      expect(asked.map((a) => a.body)).toEqual([
+        { keyword: 'kiwi', categoryId: 1 },
+        { keyword: 'kiwi minipris', categoryId: 1 },
+      ])
+    })
+
+    it("never shows the preview of another rule's edit, even with the same keyword and Category", async () => {
+      handlePreview = (id) => answer({ changedCount: id === 1 ? 99 : 2, lockedCount: 0, changes: [] })
+      const user = await openRulesPage()
+      const kiwi = await startEditingKiwi(user)
+      await user.clear(kiwi.getByLabelText('Keyword'))
+      await user.type(kiwi.getByLabelText('Keyword'), 'kiwi pluss')
+      await afterThePause()
+      expect(await findPreview()).toHaveTextContent('Would change 99 transactions')
+      await user.click(kiwi.getByRole('button', { name: 'Cancel' }))
+
+      await user.click(within(ruleRow('overføring mellom egne kontoer')).getByRole('button', { name: 'Edit' }))
+      const other = within(screen.getByRole('button', { name: 'Save' }).closest('tr')!)
+      await user.clear(other.getByLabelText('Keyword'))
+      await user.type(other.getByLabelText('Keyword'), 'kiwi pluss')
+      await user.selectOptions(other.getByLabelText('Category'), 'Groceries')
+
+      expect(preview()).not.toBeInTheDocument()
+      await afterThePause()
+      expect(await findPreview()).toHaveTextContent('Would change 2 transactions')
+      expect(asked.at(-1)).toEqual({ id: 2, body: { keyword: 'kiwi pluss', categoryId: 1 } })
+    })
+
+    it('goes once the edit is saved or cancelled, with the same message after saving as without it', async () => {
+      handlePreview = () => answer({ changedCount: 3, lockedCount: 0, changes: [] })
+      handleEditRule = (id, body) =>
+        Response.json({ id, ...(body as object), aiGenerated: false, isNew: false, transactionCount: 3, transactionsChanged: 3 })
+      const user = await openRulesPage()
+      const row = await startEditingKiwi(user)
+      await user.type(row.getByLabelText('Keyword'), ' minipris')
+      await afterThePause()
+      await findPreview()
+
+      await user.click(row.getByRole('button', { name: 'Save' }))
+
+      expect(await screen.findByRole('status')).toHaveTextContent('Rule updated. 3 transactions changed category.')
+      expect(preview()).not.toBeInTheDocument()
+
+      await user.click(within(ruleRow('kiwi minipris')).getByRole('button', { name: 'Edit' }))
+      await afterThePause()
+      await findPreview()
+      await user.click(screen.getByRole('button', { name: 'Cancel' }))
+
+      expect(preview()).not.toBeInTheDocument()
+      await afterThePause()
+      expect(asked).toHaveLength(2)
+    })
+  })
 })
 
 describe('Header', () => {
