@@ -1,26 +1,13 @@
-import { Fragment, useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
-import {
-  addRule,
-  deleteRule,
-  editRule,
-  fetchCategories,
-  fetchRules,
-  previewAddingRule,
-  previewEditingRule,
-  type CategorizationRule,
-  type CategorizationRuleRequest,
-  type Category,
-  type RuleFieldErrors,
-} from '../lib/api'
+import { useEffect, useRef, useState } from 'react'
+import { deleteRule, fetchCategories, fetchRules, type CategorizationRule, type Category } from '../lib/api'
 import { useIsDark } from '../lib/appearance'
 import { categoryColour } from '../lib/categoryColours'
 import { categoryFilterOf, matchesCategory } from '../lib/categoryFilter'
-import { useRulePreview } from '../lib/useRulePreview'
 import { CategorySwatch } from './CategorySwatch'
 import { Count } from './Count'
 import { ErrorMessage, StatusMessage } from './Messages'
-import { RuleChangePreview } from './RuleChangePreview'
 import { RuleDeleteDialog, type RuleDeleted } from './RuleDeleteDialog'
+import { RuleDialog, type RuleSaved } from './RuleDialog'
 import { SortableHeading } from './SortableHeading'
 import { ToolbarSearch } from './ToolbarSearch'
 
@@ -63,42 +50,15 @@ function matchesSearch(rule: CategorizationRule, search: string) {
   return rule.keyword.toLowerCase().includes(search.trim().toLowerCase())
 }
 
-// The shortest keyword the server accepts, since a one-letter keyword would match nearly everything.
-const KEYWORD_MIN_LENGTH = 2
+// The rule dialog that is open: for adding a rule, or editing one.
+type OpenRuleDialog = { kind: 'add' } | { kind: 'edit'; rule: CategorizationRule }
 
-// The request to preview for a keyword and Category as typed so far, or null while they could not be
-// saved as one of the rules: the keyword is too short or is another rule's, ignoring case, or no
-// Category is chosen. Anything else the server refuses is told by the preview itself.
-function previewRequest(keyword: string, categoryId: string, otherRules: CategorizationRule[]) {
-  const trimmed = keyword.trim()
-  if (
-    trimmed.length < KEYWORD_MIN_LENGTH ||
-    categoryId === '' ||
-    otherRules.some((r) => r.keyword.toLowerCase() === trimmed.toLowerCase())
-  )
-    return null
-  return { keyword: trimmed, categoryId: Number(categoryId) }
-}
-
-// The rule being edited inline, with the input as typed so far.
-interface RuleEdit {
-  id: number
-  keyword: string
-  categoryId: string
-  fieldErrors: RuleFieldErrors
-}
-
-const inputClass = 'rounded-lg border border-slate-300 dark:border-slate-700 px-3 py-2 font-normal'
 // On a phone, each rule's row is laid out as a card, and its cells stack inside it.
 const cardClass =
   'max-sm:flex max-sm:flex-col max-sm:gap-2 max-sm:rounded-lg max-sm:border max-sm:border-slate-200 max-sm:dark:border-slate-800 max-sm:bg-white max-sm:dark:bg-slate-900 max-sm:p-3'
 // The actions last in a card, under a line that keeps them apart from what they act on.
 const actionsCellClass =
   'py-2 text-right whitespace-nowrap max-sm:-mx-1 max-sm:flex max-sm:justify-end max-sm:gap-1 max-sm:border-t max-sm:border-slate-100 max-sm:dark:border-slate-800/60 max-sm:pt-2 max-sm:pb-0'
-// The preview of an edit, in a row of its own under the edited rule's row. On a phone it closes the
-// rule's card, under its actions.
-const editPreviewRowClass =
-  'max-sm:-mt-2 max-sm:block max-sm:rounded-b-lg max-sm:border max-sm:border-t-0 max-sm:border-slate-200 max-sm:dark:border-slate-800 max-sm:bg-white max-sm:dark:bg-slate-900 max-sm:px-3 max-sm:pb-3'
 const countCellClass = 'py-2.5 pl-3 text-right whitespace-nowrap tabular-nums max-sm:block max-sm:p-0 max-sm:text-left'
 const badgeClass = 'ml-1 inline-flex items-center rounded-md px-1.5 py-0.5 align-middle text-xs font-medium ring-1 ring-inset'
 const smallButtonClass =
@@ -126,14 +86,10 @@ export function RulesPage({ target }: { target?: RulesTarget }) {
   const [rules, setRules] = useState<CategorizationRule[]>([])
   // '' for all Categories, or a Category's id, as the Category filter on Transactions.
   const [categoryFilter, setCategoryFilter] = useState(() => (target ? categoryFilterOf(target.categoryId) : ''))
-  const [keyword, setKeyword] = useState('')
-  // The add form's Category starts on the filtered one, or on none while all are shown.
-  const [categoryId, setCategoryId] = useState(categoryFilter)
   const [isSaving, setIsSaving] = useState(false)
-  const [fieldErrors, setFieldErrors] = useState<RuleFieldErrors>({})
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
-  const [edit, setEdit] = useState<RuleEdit | null>(null)
+  const [dialog, setDialog] = useState<OpenRuleDialog | null>(null)
   // The rule whose delete is being confirmed, or null while none is.
   const [deleting, setDeleting] = useState<CategorizationRule | null>(null)
   const [newOnly, setNewOnly] = useState(false)
@@ -159,20 +115,6 @@ export function RulesPage({ target }: { target?: RulesTarget }) {
   }, [])
 
   const dark = useIsDark()
-  const addPreview = useRulePreview(previewRequest(keyword, categoryId, rules), previewAddingRule, rules)
-  // The same function while the same rule is edited, so a reply about another rule's edit is never
-  // shown. It is only asked while a rule is edited.
-  const editedRuleId = edit?.id
-  const previewEditing = useCallback(
-    (request: CategorizationRuleRequest) => previewEditingRule(editedRuleId!, request),
-    [editedRuleId],
-  )
-  // The edited rule's own keyword is no other rule's, so saving it unchanged is previewed too.
-  const editPreview = useRulePreview(
-    edit && previewRequest(edit.keyword, edit.categoryId, rules.filter((r) => r.id !== edit.id)),
-    previewEditing,
-    rules,
-  )
   const categoryName = (id: number) => categories.find((c) => c.id === id)?.name ?? ''
   const hasNewRules = rules.some((r) => r.isNew)
   // "Show only new" does nothing while it is disabled, so once no rule is New it is off, even if it was
@@ -198,88 +140,30 @@ export function RulesPage({ target }: { target?: RulesTarget }) {
     setRules((rules) => rules.map((r) => ({ ...r, transactionCount: counts.get(r.id) ?? r.transactionCount })))
   }
 
-  async function handleAdd(event: FormEvent) {
-    event.preventDefault()
-    if (isSaving) return
-
-    setIsSaving(true)
-    setFieldErrors({})
+  // A dialog starts a new action, so the messages about earlier ones go. The dialog shows its own
+  // errors.
+  function openDialog(opened: OpenRuleDialog) {
     setStatusMessage(null)
     setErrorMessage(null)
-
-    const result = await addRule({
-      keyword: keyword.trim(),
-      categoryId: categoryId === '' ? null : Number(categoryId),
-    }).finally(() => setIsSaving(false))
-
-    if (result.ok) {
-      setRules((current) => [...current, result.rule])
-      setKeyword('')
-      setCategoryId(categoryFilter)
-      setStatusMessage(changedMessage('Rule added.', result.transactionsChanged))
-      countRulesAgain()
-    } else {
-      setFieldErrors(result.fieldErrors)
-      setErrorMessage(result.message)
-    }
+    setDialog(opened)
   }
 
-  function startEdit(rule: CategorizationRule) {
-    setEdit({ id: rule.id, keyword: rule.keyword, categoryId: String(rule.categoryId), fieldErrors: {} })
+  // A save that finishes after its dialog was cancelled still happened, so it is listed and told,
+  // but leaves alone any dialog opened since.
+  function handleSaved(saved: OpenRuleDialog, { rule, transactionsChanged }: RuleSaved) {
+    setRules((rules) => (saved.kind === 'add' ? [...rules, rule] : rules.map((r) => (r.id === rule.id ? rule : r))))
+    setDialog((open) => (open === saved ? null : open))
+    setStatusMessage(changedMessage(saved.kind === 'add' ? 'Rule added.' : 'Rule updated.', transactionsChanged))
+    countRulesAgain()
   }
 
-  function cancelEdit() {
-    setEdit(null)
-    setErrorMessage(null)
-  }
-
-  // Changing the search or any other filter may hide the rule being edited, so any open edit is
-  // cancelled, as on Transactions. With no edit open, an error from an earlier add or delete stays.
-  function changeFilter(change: () => void) {
-    if (edit) cancelEdit()
-    change()
-  }
-
-  // The add form's Category starts on the filtered one, so it follows the filter for as long as no
-  // keyword has been typed in the form. A rule half written is left as it is.
-  function chooseCategoryFilter(next: string) {
-    if (keyword.trim() === '') setCategoryId(next)
-    setCategoryFilter(next)
-  }
-
-  // A column already sorted by turns the other way; another starts A–Å or lowest first. The rule being
-  // edited may move out of sight, so any open edit is cancelled, as when a filter changes.
+  // A column already sorted by turns the other way; another starts A–Å or lowest first.
   function chooseSort(column: SortColumn) {
-    if (edit) cancelEdit()
     setSort((current) =>
       current.column === column
         ? { column, direction: current.direction === 'ascending' ? 'descending' : 'ascending' }
         : { column, direction: 'ascending' },
     )
-  }
-
-  async function handleSave(current: RuleEdit) {
-    if (isSaving) return
-
-    setIsSaving(true)
-    setEdit({ ...current, fieldErrors: {} })
-    setStatusMessage(null)
-    setErrorMessage(null)
-
-    const result = await editRule(current.id, {
-      keyword: current.keyword.trim(),
-      categoryId: current.categoryId === '' ? null : Number(current.categoryId),
-    }).finally(() => setIsSaving(false))
-
-    if (result.ok) {
-      setRules((rules) => rules.map((r) => (r.id === result.rule.id ? result.rule : r)))
-      setEdit(null)
-      setStatusMessage(changedMessage('Rule updated.', result.transactionsChanged))
-      countRulesAgain()
-    } else {
-      setEdit({ ...current, fieldErrors: result.fieldErrors })
-      setErrorMessage(result.message)
-    }
   }
 
   // A rule that categorizes Transactions asks first, showing what deleting it would change. One that
@@ -322,54 +206,16 @@ export function RulesPage({ target }: { target?: RulesTarget }) {
 
   return (
     <section className="w-full max-w-3xl">
-      <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Categorization Rules</h2>
-
-      <form className="mt-4 flex items-start gap-3 max-sm:flex-col max-sm:items-stretch" onSubmit={handleAdd}>
-        <div className="flex flex-1 flex-col gap-1">
-          <label className="flex flex-col gap-1 text-sm font-medium text-slate-700 dark:text-slate-300">
-            Keyword
-            <input
-              value={keyword}
-              onChange={(event) => setKeyword(event.target.value)}
-              aria-describedby="rule-keyword-error"
-              className={inputClass}
-            />
-          </label>
-          <span id="rule-keyword-error" className="text-xs text-red-600 dark:text-red-300">
-            {fieldErrors.keyword}
-          </span>
-        </div>
-        <div className="flex flex-col gap-1">
-          <label className="flex flex-col gap-1 text-sm font-medium text-slate-700 dark:text-slate-300">
-            Category
-            <select
-              value={categoryId}
-              onChange={(event) => setCategoryId(event.target.value)}
-              aria-describedby="rule-category-error"
-              className={inputClass}
-            >
-              <option value="">Choose…</option>
-              {categories.map((category) => (
-                <option key={category.id} value={category.id}>
-                  {category.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <span id="rule-category-error" className="text-xs text-red-600 dark:text-red-300">
-            {fieldErrors.categoryId}
-          </span>
-        </div>
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Categorization Rules</h2>
         <button
-          type="submit"
-          disabled={isSaving}
-          className="mt-6 rounded-lg bg-slate-900 dark:bg-slate-100 px-4 py-2 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-700 dark:hover:bg-slate-300 disabled:cursor-not-allowed disabled:bg-slate-300 dark:disabled:bg-slate-800 dark:disabled:text-slate-500 max-sm:mt-0 max-sm:self-start"
+          type="button"
+          onClick={() => openDialog({ kind: 'add' })}
+          className="rounded-lg bg-slate-900 dark:bg-slate-100 px-4 py-2 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-700 dark:hover:bg-slate-300"
         >
           Add rule
         </button>
-      </form>
-
-      {addPreview && <RuleChangePreview preview={addPreview} categories={categories} />}
+      </div>
 
       {errorMessage ? (
         <ErrorMessage className="mt-3">{errorMessage}</ErrorMessage>
@@ -377,18 +223,14 @@ export function RulesPage({ target }: { target?: RulesTarget }) {
         <StatusMessage message={statusMessage} className="mt-3" />
       )}
 
-      {/* A toolbar for the table below, smaller than the add form so the two never read as one form. On
-          a phone the search takes its own line, with the Category filter and "Show only new" under it. */}
+      {/* A toolbar for the table below. On a phone the search takes its own line, with the Category
+          filter and "Show only new" under it. */}
       <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2">
-        <ToolbarSearch
-          placeholder="Search keywords"
-          value={search}
-          onChange={(value) => changeFilter(() => setSearch(value))}
-        />
+        <ToolbarSearch placeholder="Search keywords" value={search} onChange={setSearch} />
         <select
           aria-label="Filter by category"
           value={categoryFilter}
-          onChange={(event) => changeFilter(() => chooseCategoryFilter(event.target.value))}
+          onChange={(event) => setCategoryFilter(event.target.value)}
           className="min-w-0 rounded-lg border border-slate-300 dark:border-slate-700 px-3 py-1.5 text-sm text-slate-900 dark:text-slate-100"
         >
           <option value="">All categories</option>
@@ -410,7 +252,7 @@ export function RulesPage({ target }: { target?: RulesTarget }) {
             type="checkbox"
             checked={isNewOnly}
             disabled={!hasNewRules}
-            onChange={(event) => changeFilter(() => setNewOnly(event.target.checked))}
+            onChange={(event) => setNewOnly(event.target.checked)}
             className="size-4 rounded border-slate-300 dark:border-slate-700 disabled:cursor-not-allowed"
           />
           Show only new
@@ -440,125 +282,72 @@ export function RulesPage({ target }: { target?: RulesTarget }) {
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-200 dark:divide-slate-800 text-slate-900 dark:text-slate-100 max-sm:block max-sm:space-y-2 max-sm:divide-y-0">
-            {shownRules.map((rule) =>
-              edit?.id === rule.id ? (
-                <Fragment key={rule.id}>
-                  <tr
-                    className={`align-top ${cardClass} ${editPreview ? 'border-b-0 max-sm:rounded-b-none max-sm:border-b-0' : ''}`}
-                  >
-                    <td className="py-2 pr-3 max-sm:block max-sm:p-0">
-                      <div className="flex flex-col gap-1">
-                        <input
-                          aria-label="Keyword"
-                          value={edit.keyword}
-                          onChange={(event) => setEdit({ ...edit, keyword: event.target.value })}
-                          aria-describedby={`rule-${rule.id}-keyword-error`}
-                          className={`${inputClass} w-full min-w-0`}
-                        />
-                        <span id={`rule-${rule.id}-keyword-error`} className="text-xs text-red-600 dark:text-red-300">
-                          {edit.fieldErrors.keyword}
-                        </span>
-                      </div>
-                    </td>
-                    <td className="py-2 pr-3 max-sm:block max-sm:p-0">
-                      <div className="flex flex-col gap-1">
-                        <select
-                          aria-label="Category"
-                          value={edit.categoryId}
-                          onChange={(event) => setEdit({ ...edit, categoryId: event.target.value })}
-                          aria-describedby={`rule-${rule.id}-category-error`}
-                          className={`${inputClass} w-full min-w-0`}
-                        >
-                          {categories.map((category) => (
-                            <option key={category.id} value={category.id}>
-                              {category.name}
-                            </option>
-                          ))}
-                        </select>
-                        <span id={`rule-${rule.id}-category-error`} className="text-xs text-red-600 dark:text-red-300">
-                          {edit.fieldErrors.categoryId}
-                        </span>
-                      </div>
-                    </td>
-                    <td className={`${countCellClass} sm:pt-4`}>
-                      <Count count={rule.transactionCount} noun="transaction" />
-                    </td>
-                    <td className={actionsCellClass}>
-                      <button
-                        type="button"
-                        disabled={isSaving}
-                        onClick={() => handleSave(edit)}
-                        className={smallButtonClass}
+            {shownRules.map((rule) => (
+              <tr key={rule.id} className={cardClass}>
+                <td className="py-2.5 pr-3 font-medium break-words max-sm:block max-sm:p-0">
+                  {rule.keyword}
+                  {rule.aiGenerated && (
+                    <>
+                      {' '}
+                      <span
+                        title="AI-generated rule"
+                        className={`${badgeClass} bg-violet-50 dark:bg-violet-950/40 text-violet-700 dark:text-violet-300 ring-violet-600/20 dark:ring-violet-400/30`}
                       >
-                        Save
-                      </button>
-                      <button type="button" onClick={cancelEdit} className={smallButtonClass}>
-                        Cancel
-                      </button>
-                    </td>
-                  </tr>
-                  {editPreview && (
-                    <tr className={editPreviewRowClass}>
-                      <td colSpan={4} className="pb-3 max-sm:block max-sm:p-0">
-                        <RuleChangePreview preview={editPreview} categories={categories} />
-                      </td>
-                    </tr>
+                        AI
+                      </span>
+                    </>
                   )}
-                </Fragment>
-              ) : (
-                <tr key={rule.id} className={cardClass}>
-                  <td className="py-2.5 pr-3 font-medium break-words max-sm:block max-sm:p-0">
-                    {rule.keyword}
-                    {rule.aiGenerated && (
-                      <>
-                        {' '}
-                        <span
-                          title="AI-generated rule"
-                          className={`${badgeClass} bg-violet-50 dark:bg-violet-950/40 text-violet-700 dark:text-violet-300 ring-violet-600/20 dark:ring-violet-400/30`}
-                        >
-                          AI
-                        </span>
-                      </>
-                    )}
-                    {rule.isNew && (
-                      <>
-                        {' '}
-                        <span
-                          title="Added by the last upload"
-                          className={`${badgeClass} bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 ring-emerald-600/20 dark:ring-emerald-400/30`}
-                        >
-                          New
-                        </span>
-                      </>
-                    )}
-                  </td>
-                  <td className="py-2.5 pr-3 text-slate-700 dark:text-slate-300 max-sm:block max-sm:p-0">
-                    <RuleCategory
-                      name={categoryName(rule.categoryId)}
-                      colour={categoryColour(rule.categoryId, categories, dark)}
-                    />
-                  </td>
-                  <td className={countCellClass}>
-                    <Count count={rule.transactionCount} noun="transaction" />
-                  </td>
-                  <td className={actionsCellClass}>
-                    <button type="button" onClick={() => startEdit(rule)} className={smallButtonClass}>
-                      Edit
-                    </button>
-                    <button
-                      type="button"
-                      disabled={isSaving}
-                      onClick={() => startDelete(rule)}
-                      className={smallButtonClass}
-                    >
-                      Delete
-                    </button>
-                  </td>
-                </tr>
-              ),
-            )}
+                  {rule.isNew && (
+                    <>
+                      {' '}
+                      <span
+                        title="Added by the last upload"
+                        className={`${badgeClass} bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 ring-emerald-600/20 dark:ring-emerald-400/30`}
+                      >
+                        New
+                      </span>
+                    </>
+                  )}
+                </td>
+                <td className="py-2.5 pr-3 text-slate-700 dark:text-slate-300 max-sm:block max-sm:p-0">
+                  <RuleCategory
+                    name={categoryName(rule.categoryId)}
+                    colour={categoryColour(rule.categoryId, categories, dark)}
+                  />
+                </td>
+                <td className={countCellClass}>
+                  <Count count={rule.transactionCount} noun="transaction" />
+                </td>
+                <td className={actionsCellClass}>
+                  <button type="button" onClick={() => openDialog({ kind: 'edit', rule })} className={smallButtonClass}>
+                    Edit
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isSaving}
+                    onClick={() => startDelete(rule)}
+                    className={smallButtonClass}
+                  >
+                    Delete
+                  </button>
+                </td>
+              </tr>
+            ))}
           </tbody>
         </table>
+      )}
+
+      {/* The add dialog starts on the Category the list is filtered to as it opens, or on none while all
+          are shown. */}
+      {dialog && (
+        <RuleDialog
+          rule={dialog.kind === 'edit' ? dialog.rule : undefined}
+          startingCategoryId={categoryFilter}
+          rules={rules}
+          categories={categories}
+          onCancel={() => setDialog(null)}
+          onSaved={(saved) => handleSaved(dialog, saved)}
+        />
       )}
 
       {deleting && (
