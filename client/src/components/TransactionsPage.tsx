@@ -51,8 +51,9 @@ const FOLDERS_LOAD_ERROR = 'Could not load the folders.'
 
 const smallButtonClass =
   'rounded-lg px-2 py-1 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:cursor-not-allowed disabled:text-slate-300 dark:disabled:text-slate-600'
+// Room at its left for the Category's dot, which sits inside its border.
 const categorySelectClass =
-  'rounded-lg border border-slate-300 dark:border-slate-700 px-2 py-1 disabled:cursor-not-allowed disabled:bg-slate-100 dark:disabled:bg-slate-800'
+  'rounded-lg border border-slate-300 dark:border-slate-700 py-1 pr-2 pl-7 disabled:cursor-not-allowed disabled:bg-slate-100 dark:disabled:bg-slate-800'
 
 // The set with the id added, or removed.
 function withId(ids: ReadonlySet<number>, id: number, present: boolean): ReadonlySet<number> {
@@ -590,7 +591,7 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
   }
 
   return (
-    <section className="w-full max-w-3xl">
+    <section className="w-full max-w-4xl">
       {/* The switch wraps under the heading when the line has no room for both. */}
       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
         <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Transactions</h2>
@@ -611,8 +612,14 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
         </div>
       </div>
 
+      {errorMessage ? (
+        <ErrorMessage className="mt-3">{errorMessage}</ErrorMessage>
+      ) : (
+        <StatusMessage message={statusMessage} className="mt-3" />
+      )}
+
       {list === 'bookmarks' && (
-        <div className="mt-4 flex flex-wrap gap-3">
+        <div className="mt-2 flex flex-wrap gap-3">
           {chosenFolder && folderAction === 'rename' ? (
             <FolderNameForm
               initialName={chosenFolder.name}
@@ -674,11 +681,10 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
         </div>
       )}
 
-      {/* One compact toolbar, named for screen readers rather than labelled, like the Rules page's. On a
-          phone the search takes its own line, with the Year, Month and Category wrapping under it. */}
+      {/* One compact toolbar, named for screen readers rather than labelled, like the Rules page's, but
+          with the search last. On a phone the search takes its own line under the Year, Month and Category. */}
       {list === 'all' && selected && (
-        <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2">
-          <ToolbarSearch placeholder="Search descriptions" value={search} onChange={chooseSearch} />
+        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2">
           <select
             aria-label="Year"
             value={selected.year}
@@ -724,13 +730,8 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
             ))}
             <option value={UNCATEGORIZED}>Uncategorized</option>
           </select>
+          <ToolbarSearch placeholder="Search descriptions" value={search} onChange={chooseSearch} />
         </div>
-      )}
-
-      {errorMessage ? (
-        <ErrorMessage className="mt-3">{errorMessage}</ErrorMessage>
-      ) : (
-        <StatusMessage message={statusMessage} className="mt-3" />
       )}
 
       {list === 'all' && selected && shownTransactions?.length === 0 && (
@@ -746,7 +747,7 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
       )}
 
       {shownTransactions && shownTransactions.length > 0 && (
-        <div className={`mt-4 ${panelClass}`}>
+        <div className={`mt-3 ${panelClass}`}>
           {/* On a phone each row is laid out as a card inside the panel instead, its column headers
               hidden, so the table never runs wider than the screen. */}
           <table className="w-full text-left text-sm max-sm:block">
@@ -755,7 +756,8 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
                 <SortableHeading column="date" sort={sort} onSort={chooseSort} className="py-2.5 pr-3 pl-4">
                   Date
                 </SortableHeading>
-                <SortableHeading column="description" sort={sort} onSort={chooseSort} className="py-2.5 pr-3">
+                {/* Description takes the room left over, so the other columns keep to their contents. */}
+                <SortableHeading column="description" sort={sort} onSort={chooseSort} className="w-full py-2.5 pr-3">
                   Description
                 </SortableHeading>
                 <SortableHeading column="category" sort={sort} onSort={chooseSort} className="py-2.5 pr-3">
@@ -779,36 +781,42 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
               {shownTransactions.map((transaction) => (
                 <Fragment key={transaction.id}>
                   <tr className="max-sm:grid max-sm:grid-cols-[1fr_auto_auto_auto] max-sm:items-center max-sm:gap-1 max-sm:px-4 max-sm:py-3">
-                    <td className="py-2 pr-3 pl-4 whitespace-nowrap max-sm:col-start-1 max-sm:row-start-1 max-sm:p-0">
+                    <td className="py-3 pr-3 pl-4 whitespace-nowrap max-sm:col-start-1 max-sm:row-start-1 max-sm:p-0">
                       {formatNorwegianDate(transaction.date)}
                     </td>
-                    <td className="py-2 pr-3 max-sm:col-span-4 max-sm:row-start-2 max-sm:p-0 max-sm:break-words">
+                    <td className="py-3 pr-3 max-sm:col-span-4 max-sm:row-start-2 max-sm:p-0 max-sm:break-words">
                       {transaction.description}
                     </td>
-                    <td className="py-2 pr-3 max-sm:col-start-1 max-sm:row-start-3 max-sm:p-0">
-                      {/* The dot is left out of what is read, since the select names the Category. */}
+                    <td className="py-3 pr-3 max-sm:col-start-1 max-sm:row-start-3 max-sm:p-0">
+                      {/* The dot sits inside the select's border, a click going through it to the select, and
+                          is left out of what is read, since the select names the Category. */}
                       <div className="flex items-center gap-2">
-                        <CategorySwatch colour={categoryColour(transaction.categoryId, categories, dark)} />
-                        <select
-                          aria-label={`Category for ${transaction.description}`}
-                          value={transaction.categoryId ?? ''}
-                          disabled={savingIds.has(transaction.id) || (isDeleting && confirmingDeleteId === transaction.id)}
-                          onChange={(event) => changeCategory(transaction, Number(event.target.value))}
-                          className={`${categorySelectClass} ${
-                            transaction.categoryId === null ? 'text-slate-400 dark:text-slate-500' : 'text-slate-900 dark:text-slate-100'
-                          }`}
-                        >
-                          {transaction.categoryId === null && (
-                            <option value="" disabled>
-                              Uncategorized
-                            </option>
-                          )}
-                          {categories.map((category) => (
-                            <option key={category.id} value={category.id} className="text-slate-900 dark:text-slate-100">
-                              {category.name}
-                            </option>
-                          ))}
-                        </select>
+                        <div className="relative flex">
+                          <CategorySwatch
+                            colour={categoryColour(transaction.categoryId, categories, dark)}
+                            className="pointer-events-none absolute top-1/2 left-2 -translate-y-1/2"
+                          />
+                          <select
+                            aria-label={`Category for ${transaction.description}`}
+                            value={transaction.categoryId ?? ''}
+                            disabled={savingIds.has(transaction.id) || (isDeleting && confirmingDeleteId === transaction.id)}
+                            onChange={(event) => changeCategory(transaction, Number(event.target.value))}
+                            className={`${categorySelectClass} ${
+                              transaction.categoryId === null ? 'text-slate-400 dark:text-slate-500' : 'text-slate-900 dark:text-slate-100'
+                            }`}
+                          >
+                            {transaction.categoryId === null && (
+                              <option value="" disabled>
+                                Uncategorized
+                              </option>
+                            )}
+                            {categories.map((category) => (
+                              <option key={category.id} value={category.id} className="text-slate-900 dark:text-slate-100">
+                                {category.name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
                         {transaction.locked && (
                           <span
                             role="img"
@@ -823,10 +831,10 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
                         )}
                       </div>
                     </td>
-                    <td className="py-2 text-right whitespace-nowrap tabular-nums max-sm:col-span-3 max-sm:col-start-2 max-sm:row-start-1 max-sm:p-0">
+                    <td className="py-3 text-right whitespace-nowrap tabular-nums max-sm:col-span-3 max-sm:col-start-2 max-sm:row-start-1 max-sm:p-0">
                       {formatAmount(transaction.amount)}
                     </td>
-                    <td className="relative py-2 pl-4 text-right max-sm:col-start-2 max-sm:row-start-3 max-sm:p-0">
+                    <td className="relative py-3 pl-4 text-right max-sm:col-start-2 max-sm:row-start-3 max-sm:p-0">
                       <button
                         ref={popup?.transactionId === transaction.id ? popupStarRef : undefined}
                         type="button"
@@ -868,7 +876,7 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
                         />
                       )}
                     </td>
-                    <td className="py-2 pl-1 text-right max-sm:col-start-3 max-sm:row-start-3 max-sm:p-0">
+                    <td className="py-3 pl-1 text-right max-sm:col-start-3 max-sm:row-start-3 max-sm:p-0">
                       <button
                         type="button"
                         aria-label={`${transaction.note ? 'Edit' : 'Add'} note for ${transaction.description}`}
@@ -893,7 +901,7 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
                         )}
                       </button>
                     </td>
-                    <td className="py-2 pr-4 pl-1 text-right max-sm:col-start-4 max-sm:row-start-3 max-sm:p-0">
+                    <td className="py-3 pr-4 pl-1 text-right max-sm:col-start-4 max-sm:row-start-3 max-sm:p-0">
                       <button
                         type="button"
                         aria-label={`Delete ${transaction.description}`}

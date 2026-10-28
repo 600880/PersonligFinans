@@ -1,5 +1,5 @@
-// The search that starts a list's toolbar, with the placeholder saying what it searches. On a phone it
-// takes the toolbar's first line, with the rest of the toolbar wrapping under it.
+// The search in a list's toolbar, with the placeholder saying what it searches. On a phone it takes a
+// line of the toolbar to itself, with the rest of the toolbar wrapping around it.
 export function ToolbarSearch({
   placeholder,
   value,

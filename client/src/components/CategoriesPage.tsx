@@ -41,7 +41,7 @@ const nameCellClass = 'py-3 pr-3 pl-4 max-sm:basis-full max-sm:min-w-0 max-sm:p-
 const descriptionCellClass = 'py-3 pr-3 max-sm:basis-full max-sm:min-w-0 max-sm:p-0 max-sm:wrap-anywhere'
 const transactionCountCellClass = 'py-3 pl-3 text-right whitespace-nowrap tabular-nums max-sm:p-0 max-sm:text-left'
 const ruleCountCellClass = 'py-3 pl-3 text-right whitespace-nowrap tabular-nums max-sm:p-0 max-sm:text-left'
-const actionsCellClass = 'py-2 pr-4 pl-3 text-right whitespace-nowrap max-sm:ml-auto max-sm:p-0'
+const actionsCellClass = 'py-2 pr-4 pl-8 text-right whitespace-nowrap max-sm:ml-auto max-sm:p-0'
 // A count that opens the page listing what it counts.
 const countLinkClass =
   'font-medium underline decoration-slate-300 dark:decoration-slate-600 underline-offset-2 hover:decoration-current'
@@ -184,7 +184,7 @@ export function CategoriesPage({
   }
 
   return (
-    <section className="w-full max-w-2xl">
+    <section className="w-full max-w-3xl">
       <div className="flex items-center justify-between gap-3">
         <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Categories</h2>
         <button
@@ -232,7 +232,7 @@ export function CategoriesPage({
                 <th className="py-2.5 pr-3 font-medium">Description</th>
                 <th className="py-2.5 pl-3 text-right font-medium">Transactions</th>
                 <th className="py-2.5 pl-3 text-right font-medium">Rules</th>
-                <th className="py-2.5 pr-4 pl-3">
+                <th className="py-2.5 pr-4 pl-8">
                   <span className="sr-only">Actions</span>
                 </th>
               </tr>

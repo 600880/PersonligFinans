@@ -3729,31 +3729,33 @@ describe('Transactions page', () => {
     expect(monthOptions.map((option) => option.textContent)).toEqual(['All months', ...monthNames])
   })
 
-  // The All view's toolbar: the search, then the Year, Month and Category selects, in that order.
+  // The All view's toolbar: the Year, Month and Category selects, then the search, in that order.
   function toolbarControls() {
     return [
-      screen.getByRole<HTMLInputElement>('searchbox', { name: 'Search' }),
       screen.getByRole<HTMLSelectElement>('combobox', { name: 'Year' }),
       screen.getByRole<HTMLSelectElement>('combobox', { name: 'Month' }),
       screen.getByRole<HTMLSelectElement>('combobox', { name: 'Filter by category' }),
+      screen.getByRole<HTMLInputElement>('searchbox', { name: 'Search' }),
     ]
   }
 
-  it('has a toolbar of the search for descriptions, then the Year, Month and Category selects, each named without a visible label', async () => {
+  it('has a toolbar of the Year, Month and Category selects, then the search for descriptions last, each named without a visible label', async () => {
     await openSeptember()
 
     const controls = toolbarControls()
-    expect(controls[0]).toHaveAttribute('placeholder', 'Search descriptions')
+    expect(controls.at(-1)).toHaveAttribute('placeholder', 'Search descriptions')
     for (const control of controls) expect(control.labels).toHaveLength(0)
     for (const [index, control] of controls.slice(1).entries()) {
       expect(controls[index].compareDocumentPosition(control) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     }
   })
 
-  it('wraps the toolbar on a phone, with the search on its own line, never scrolling sideways', async () => {
+  it('wraps the toolbar on a phone, with the search on its own line under the selects, never scrolling sideways', async () => {
     await openSeptember()
 
-    const [search, ...selects] = toolbarControls()
+    const controls = toolbarControls()
+    const selects = controls.slice(0, -1)
+    const search = controls.at(-1)!
     const searchLine = search.parentElement!
     const toolbar = searchLine.parentElement!
     expect(toolbar).toHaveClass('flex-wrap')
@@ -4305,7 +4307,7 @@ describe('Transactions page', () => {
       return found
     }
 
-    it("puts a dot before each Category select in the colour the Dashboard draws it in, or Uncategorized's grey", async () => {
+    it("puts a dot at the start of each Category select in the colour the Dashboard draws it in, or Uncategorized's grey", async () => {
       categoriesServed = [{ ...categories[0], colour: '#123456' }, categories[1]]
       months = [{ year: 2026, month: 9 }]
       handleListPeriod = () => Response.json([...otherCategoryTransactions, septemberTransactions[1]])
@@ -4318,6 +4320,21 @@ describe('Transactions page', () => {
       // Before the select, with the Locked icon still after it.
       expect(dot('Gave').compareDocumentPosition(categorySelect('Gave'))).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
       expect(categorySelect('Gave').compareDocumentPosition(lockMark('Gave')!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+    })
+
+    it("sits inside the select's border, at its left, letting a click through to the select", async () => {
+      await openSeptember()
+
+      expect(dot('Rema 1000').parentElement).toBe(categorySelect('Rema 1000').parentElement)
+      expect(dot('Rema 1000')).toHaveClass('absolute', 'pointer-events-none')
+      expect(categorySelect('Rema 1000')).toHaveClass('pl-7')
+    })
+
+    it('keeps the dot while the list of Categories is open, since only the options go without it', async () => {
+      const user = await openSeptember()
+
+      await user.click(categorySelect('Rema 1000'))
+      expect(dot('Rema 1000')).toHaveStyle({ backgroundColor: 'rgb(42, 120, 214)' })
     })
 
     it('leaves the dot out of what a screen reader reads, since the select names the Category', async () => {
@@ -4363,6 +4380,15 @@ describe('Transactions page', () => {
       expect(dot('Rema 1000').style.backgroundColor).toBe(onDashboard)
       expect(dot('Rema 1000')).not.toHaveStyle({ backgroundColor: 'rgb(16, 66, 129)' })
     })
+  })
+
+  it('gives Description the room left over, so Category, Amount and the icons keep their spacing', async () => {
+    await openSeptember()
+
+    const headings = within(screen.getByRole('table')).getAllByRole('columnheader')
+    expect(headings[1]).toHaveTextContent('Description')
+    expect(headings[1]).toHaveClass('w-full')
+    for (const heading of [headings[0], ...headings.slice(2)]) expect(heading).not.toHaveClass('w-full')
   })
 
   describe('panel', () => {
