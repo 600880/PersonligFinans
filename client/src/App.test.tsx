@@ -2457,7 +2457,7 @@ describe('Rules page', () => {
     const table = screen.getByRole('table')
     expect(table.parentElement).toHaveClass('rounded-lg', 'border', 'bg-white', 'dark:bg-slate-900', 'shadow-sm')
     const [head] = within(table).getAllByRole('rowgroup')
-    expect(head).toHaveClass('border-b')
+    expect(head).toHaveClass('border-b', 'text-sm')
     // The first and last columns keep their content off the panel's edges.
     const [firstHeading, ...otherHeadings] = within(head).getAllByRole('columnheader')
     expect(firstHeading).toHaveClass('pl-4')
@@ -2469,7 +2469,18 @@ describe('Rules page', () => {
     }
   })
 
-  it('stacks each rule as a phone shows its card inside the panel: keyword and badges, then its Category, then its actions', async () => {
+  it('has its toolbar as the top strip of the panel, ruled off above the column headers', async () => {
+    await openRulesPage()
+
+    const panel = screen.getByRole('table').parentElement!
+    const search = screen.getByRole('searchbox', { name: 'Search' })
+    const toolbar = search.parentElement!.parentElement!
+    expect(panel.firstElementChild).toBe(toolbar)
+    expect(toolbar).toHaveClass('border-b', 'px-4')
+    expect(toolbar).toContainElement(screen.getByRole('combobox', { name: 'Filter by category' }))
+  })
+
+  it('lays each rule out as a phone shows its two-line card inside the panel: keyword, badges and actions, then its Category', async () => {
     rules = [
       { id: 3, keyword: 'café løkka', categoryId: 13, aiGenerated: true, isNew: true },
       { id: 1, keyword: 'kiwi', categoryId: 1, aiGenerated: false, isNew: false },
@@ -2479,7 +2490,7 @@ describe('Rules page', () => {
     await user.click(screen.getByRole('button', { name: 'Rules' }))
     const card = await screen.findByRole('row', { name: /^café løkka/ })
 
-    // On a phone the cells stack as a card in the order they come in.
+    // The cells come in the table's order, and the card places them on its two lines.
     const [keyword, category, actions] = within(card).getAllByRole('cell')
     expect(keyword).toHaveTextContent('café løkka AI New')
     expect(within(category).getByRole('img', { name: 'Other colour' })).toBeInTheDocument()
@@ -2487,14 +2498,16 @@ describe('Rules page', () => {
     expect(within(actions).getAllByRole('button').map((button) => button.textContent)).toEqual(['Edit', 'Delete'])
 
     // jsdom applies no media queries, so the phone layout is checked by its classes: the table, its
-    // body and each row become blocks and a stacked card, with the column headers hidden.
+    // body become blocks and each row a card, with the column headers hidden.
     const table = screen.getByRole('table')
     const [head, body] = within(table).getAllByRole('rowgroup')
     expect(table).toHaveClass('max-sm:block')
     expect(head).toHaveClass('max-sm:hidden')
     expect(body).toHaveClass('max-sm:block')
-    expect(card).toHaveClass('max-sm:flex', 'max-sm:flex-col', 'max-sm:px-4')
-    for (const cell of [keyword, category]) expect(cell).toHaveClass('max-sm:block')
+    expect(card).toHaveClass('max-sm:grid', 'max-sm:px-4')
+    expect(keyword).toHaveClass('max-sm:col-start-1', 'max-sm:row-start-1')
+    expect(actions).toHaveClass('max-sm:col-start-2', 'max-sm:row-start-1')
+    expect(category).toHaveClass('max-sm:col-start-1', 'max-sm:row-start-2')
     // The cards sit in the one panel, ruled apart as the Categories' rows are, rather than each
     // floating as a box of its own.
     expect(body).toHaveClass('divide-y')
@@ -3021,8 +3034,10 @@ describe('Rules page', () => {
 
       expect(screen.getByText('No rules match')).toBeInTheDocument()
       expect(screen.queryByRole('table')).not.toBeInTheDocument()
-      // On the page, not in an empty panel.
-      expect(screen.getByText('No rules match').closest('[class*="bg-white"]')).toBeNull()
+      // In the panel, under its toolbar, so the search can still be changed.
+      const panel = screen.getByText('No rules match').parentElement!
+      expect(panel).toHaveClass('rounded-lg', 'bg-white', 'shadow-sm')
+      expect(panel).toContainElement(screen.getByRole('searchbox', { name: 'Search' }))
     })
   })
 
@@ -4408,6 +4423,46 @@ describe('Transactions page', () => {
       expectInPanel(screen.getByRole('table'))
     })
 
+    it('has the toolbar as the top strip of the panel in All, ruled off above the column headers', async () => {
+      await openSeptember()
+
+      const panel = screen.getByRole('table').parentElement!
+      const controls = toolbarControls()
+      const toolbar = controls[0].parentElement!
+      expect(panel.firstElementChild).toBe(toolbar)
+      // Unruled while it is all the panel holds, as it is while the Period loads.
+      expect(toolbar).toHaveClass('border-b', 'last:border-b-0', 'px-4')
+    })
+
+    it('says no Transactions match in the panel, under its toolbar, so the filters can still be changed', async () => {
+      const user = await openSeptember()
+
+      await user.type(screen.getByRole('searchbox', { name: 'Search' }), 'xyz')
+
+      expect(screen.queryByRole('table')).not.toBeInTheDocument()
+      const panel = screen.getByText('No transactions match').parentElement!
+      expect(panel).toHaveClass('rounded-lg', 'bg-white', 'shadow-sm')
+      for (const control of toolbarControls()) expect(panel).toContainElement(control)
+    })
+
+    it('says a Period has no Transactions in the panel, under its toolbar', async () => {
+      months = [{ year: 2026, month: 9 }]
+      handleListPeriod = () => Response.json([])
+      await openTransactionsPage()
+
+      const panel = (await screen.findByText('No transactions in September 2026')).parentElement!
+      expect(panel).toHaveClass('rounded-lg', 'bg-white', 'shadow-sm')
+      for (const control of toolbarControls()) expect(panel).toContainElement(control)
+    })
+
+    it('keeps the Date a little apart from the Description', async () => {
+      await openSeptember()
+
+      const [dateHeading] = within(screen.getByRole('table')).getAllByRole('columnheader')
+      expect(dateHeading).toHaveClass('pr-5')
+      expect(within(transactionRow('Rema 1000')).getAllByRole('cell')[0]).toHaveClass('pr-5')
+    })
+
     it('lays each Transaction out as a card inside the panel on a phone, never scrolling sideways', async () => {
       const user = await openSeptember()
       await user.click(screen.getByRole('button', { name: 'Add note for Rema 1000' }))
@@ -5416,6 +5471,10 @@ describe('Transactions page', () => {
 
       expect(await screen.findByText('No bookmarks')).toBeInTheDocument()
       expect(screen.queryByRole('table')).not.toBeInTheDocument()
+      // In the panel, under the Folder dropdown at its top, as All says it has none under its toolbar.
+      const panel = screen.getByText('No bookmarks').parentElement!
+      expect(panel).toHaveClass('rounded-lg', 'bg-white', 'shadow-sm')
+      expect(panel.firstElementChild).toContainElement(screen.getByLabelText('Folder'))
     })
 
     it('says when the bookmarks could not be loaded', async () => {
@@ -5824,6 +5883,23 @@ describe('Transactions page', () => {
         await screen.findByRole('cell', { name: 'Power' })
         return user
       }
+
+      it("has the Folder dropdown, Rename, Delete and the delete question as the panel's top strip, ruled off above the column headers", async () => {
+        const user = await showWarranty()
+
+        await user.click(screen.getByRole('button', { name: 'Delete' }))
+
+        const strip = screen.getByRole('table').parentElement!.firstElementChild!
+        expect(strip).toHaveClass('border-b', 'px-4')
+        for (const element of [
+          folderSelect(),
+          screen.getByRole('button', { name: 'Rename' }),
+          screen.getByRole('button', { name: 'Confirm delete' }),
+          screen.getByText("Delete 'Warranty' and its bookmarks?"),
+        ]) {
+          expect(strip).toContainElement(element)
+        }
+      })
 
       it('closes the open popup, Note editor or delete confirmation when Rename or Delete opens', async () => {
         const user = await showWarranty()

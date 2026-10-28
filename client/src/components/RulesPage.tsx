@@ -7,7 +7,7 @@ import { norwegian } from '../lib/norwegian'
 import { secondaryButtonClass } from './buttons'
 import { CategorySwatch } from './CategorySwatch'
 import { ErrorMessage, StatusMessage } from './Messages'
-import { panelClass, panelHeadClass, toolbarSelectClass } from './panel'
+import { panelClass, panelEmptyClass, panelHeadClass, panelToolbarClass, toolbarSelectClass } from './panel'
 import { RuleDeleteDialog, type RuleDeleted } from './RuleDeleteDialog'
 import { RuleDialog, type RuleSaved } from './RuleDialog'
 import { SortableHeading, type Sort } from './SortableHeading'
@@ -46,13 +46,16 @@ function matchesSearch(rule: CategorizationRule, search: string) {
 type OpenRuleDialog = { kind: 'add' } | { kind: 'edit'; rule: CategorizationRule }
 
 // On a phone each rule's row is laid out as a card inside the panel instead, ruled off from the next as
-// the Categories' rows are, and its cells stack inside it.
-const rowClass = 'max-sm:flex max-sm:flex-col max-sm:gap-2 max-sm:px-4 max-sm:py-3'
-const keywordCellClass = 'py-3 pr-3 pl-4 font-medium break-words max-sm:block max-sm:p-0'
-const categoryCellClass = 'py-3 pr-3 text-slate-700 dark:text-slate-300 max-sm:block max-sm:p-0'
-// The actions last in a card, at its right as they are in the table.
+// the Categories' rows are: two lines, so a list of hundreds stays short.
+const rowClass =
+  'max-sm:grid max-sm:grid-cols-[1fr_auto] max-sm:items-center max-sm:gap-x-3 max-sm:gap-y-0.5 max-sm:px-4 max-sm:py-2.5'
+const keywordCellClass = 'py-3 pr-3 pl-4 font-medium break-words max-sm:col-start-1 max-sm:row-start-1 max-sm:min-w-0 max-sm:p-0'
+const categoryCellClass =
+  'py-3 pr-3 text-slate-700 dark:text-slate-300 max-sm:col-start-1 max-sm:row-start-2 max-sm:p-0'
+// The actions at the right of the card's first line, beside the keyword, as they are at the right in
+// the table.
 const actionsCellClass =
-  'py-2 pr-4 pl-3 text-right whitespace-nowrap max-sm:flex max-sm:justify-end max-sm:gap-1 max-sm:p-0'
+  'py-2 pr-4 pl-3 text-right whitespace-nowrap max-sm:col-start-2 max-sm:row-start-1 max-sm:flex max-sm:gap-1 max-sm:p-0'
 const badgeClass = 'ml-1 inline-flex items-center rounded-md px-1.5 py-0.5 align-middle text-xs font-medium ring-1 ring-inset'
 const smallButtonClass =
   'rounded-lg px-2 py-1 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:cursor-not-allowed disabled:text-slate-300 dark:disabled:text-slate-600'
@@ -174,111 +177,114 @@ export function RulesPage({ target }: { target?: RulesTarget }) {
         <StatusMessage message={statusMessage} className="mt-3" />
       )}
 
-      {/* A toolbar for the table below. On a phone the search takes its own line, with the Category
-          filter and "Show only new" under it. */}
-      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2">
-        <ToolbarSearch placeholder="Search keywords" value={search} onChange={setSearch} />
-        <select
-          aria-label="Filter by category"
-          value={categoryFilter}
-          onChange={(event) => setCategoryFilter(event.target.value)}
-          className={toolbarSelectClass}
-        >
-          <option value="">All categories</option>
-          {categories.map((category) => (
-            <option key={category.id} value={category.id}>
-              {category.name}
-            </option>
-          ))}
-        </select>
-        {/* Why it is disabled is on the label, so hovering the words says it too, and on the checkbox,
-            so a screen reader says it. */}
-        <label
-          title={newOnlyDisabledReason}
-          className={`ml-auto flex shrink-0 items-center gap-2 text-sm font-medium ${
-            hasNewRules ? 'text-slate-700 dark:text-slate-300' : 'cursor-not-allowed text-slate-400 dark:text-slate-600'
-          }`}
-        >
-          <input
-            type="checkbox"
-            checked={isNewOnly}
-            disabled={!hasNewRules}
+      <div className={`mt-3 ${panelClass}`}>
+        {/* The panel's toolbar, above the table it filters. On a phone the search takes its own line, with
+            the Category filter and "Show only new" under it. */}
+        <div className={panelToolbarClass}>
+          <ToolbarSearch placeholder="Search keywords" value={search} onChange={setSearch} />
+          <select
+            aria-label="Filter by category"
+            value={categoryFilter}
+            onChange={(event) => setCategoryFilter(event.target.value)}
+            className={toolbarSelectClass}
+          >
+            <option value="">All categories</option>
+            {categories.map((category) => (
+              <option key={category.id} value={category.id}>
+                {category.name}
+              </option>
+            ))}
+          </select>
+          {/* Why it is disabled is on the label, so hovering the words says it too, and on the checkbox,
+              so a screen reader says it. */}
+          <label
             title={newOnlyDisabledReason}
-            onChange={(event) => setNewOnly(event.target.checked)}
-            className="size-4 rounded border-slate-300 dark:border-slate-700 disabled:cursor-not-allowed"
-          />
-          Show only new
-        </label>
-      </div>
-
-      {isFiltering && shownRules.length === 0 ? (
-        <p className="mt-6 text-sm text-slate-500 dark:text-slate-400">No rules match</p>
-      ) : (
-        <div className={`mt-3 ${panelClass}`}>
-          {/* On a phone each rule is a card instead, keyword and badges, then its Category, then its
-              actions, so nothing scrolls sideways or drops off the edge of the screen. */}
-          <table className="w-full text-left text-sm max-sm:block">
-            <thead className={panelHeadClass}>
-              <tr>
-                <SortableHeading column="keyword" sort={sort} onSort={chooseSort} className="py-2.5 pr-3 pl-4">
-                  Keyword
-                </SortableHeading>
-                <SortableHeading column="category" sort={sort} onSort={chooseSort} className="py-2.5 pr-3">
-                  Category
-                </SortableHeading>
-                <th className="py-2.5 pr-4 pl-3">
-                  <span className="sr-only">Actions</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-200 dark:divide-slate-800 text-slate-900 dark:text-slate-100 max-sm:block">
-              {shownRules.map((rule) => (
-                <tr key={rule.id} className={rowClass}>
-                  <td className={keywordCellClass}>
-                    {rule.keyword}
-                    {rule.aiGenerated && (
-                      <>
-                        {' '}
-                        <span
-                          title="AI-generated rule"
-                          className={`${badgeClass} bg-violet-50 dark:bg-violet-950/40 text-violet-700 dark:text-violet-300 ring-violet-600/20 dark:ring-violet-400/30`}
-                        >
-                          AI
-                        </span>
-                      </>
-                    )}
-                    {rule.isNew && (
-                      <>
-                        {' '}
-                        <span
-                          title="Added by the last upload"
-                          className={`${badgeClass} bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 ring-emerald-600/20 dark:ring-emerald-400/30`}
-                        >
-                          New
-                        </span>
-                      </>
-                    )}
-                  </td>
-                  <td className={categoryCellClass}>
-                    <RuleCategory
-                      name={categoryName(rule.categoryId)}
-                      colour={categoryColour(rule.categoryId, categories, dark)}
-                    />
-                  </td>
-                  <td className={actionsCellClass}>
-                    <button type="button" onClick={() => openDialog({ kind: 'edit', rule })} className={smallButtonClass}>
-                      Edit
-                    </button>
-                    <button type="button" onClick={() => setDeleting(rule)} className={smallButtonClass}>
-                      Delete
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+            className={`ml-auto flex shrink-0 items-center gap-2 text-sm font-medium ${
+              hasNewRules ? 'text-slate-700 dark:text-slate-300' : 'cursor-not-allowed text-slate-400 dark:text-slate-600'
+            }`}
+          >
+            <input
+              type="checkbox"
+              checked={isNewOnly}
+              disabled={!hasNewRules}
+              title={newOnlyDisabledReason}
+              onChange={(event) => setNewOnly(event.target.checked)}
+              className="size-4 rounded border-slate-300 dark:border-slate-700 disabled:cursor-not-allowed"
+            />
+            Show only new
+          </label>
         </div>
-      )}
+
+        {/* Said under the toolbar, so the search and filters can still be changed. */}
+        {isFiltering && shownRules.length === 0 ? (
+          <p className={panelEmptyClass}>No rules match</p>
+        ) : (
+          <>
+            {/* On a phone each rule is a card instead, keyword, badges and actions, then its Category, so
+                nothing scrolls sideways or drops off the edge of the screen. */}
+            <table className="w-full text-left text-sm max-sm:block">
+              <thead className={panelHeadClass}>
+                <tr>
+                  <SortableHeading column="keyword" sort={sort} onSort={chooseSort} className="py-2.5 pr-3 pl-4">
+                    Keyword
+                  </SortableHeading>
+                  <SortableHeading column="category" sort={sort} onSort={chooseSort} className="py-2.5 pr-3">
+                    Category
+                  </SortableHeading>
+                  <th className="py-2.5 pr-4 pl-3">
+                    <span className="sr-only">Actions</span>
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-200 dark:divide-slate-800 text-slate-900 dark:text-slate-100 max-sm:block">
+                {shownRules.map((rule) => (
+                  <tr key={rule.id} className={rowClass}>
+                    <td className={keywordCellClass}>
+                      {rule.keyword}
+                      {rule.aiGenerated && (
+                        <>
+                          {' '}
+                          <span
+                            title="AI-generated rule"
+                            className={`${badgeClass} bg-violet-50 dark:bg-violet-950/40 text-violet-700 dark:text-violet-300 ring-violet-600/20 dark:ring-violet-400/30`}
+                          >
+                            AI
+                          </span>
+                        </>
+                      )}
+                      {rule.isNew && (
+                        <>
+                          {' '}
+                          <span
+                            title="Added by the last upload"
+                            className={`${badgeClass} bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 ring-emerald-600/20 dark:ring-emerald-400/30`}
+                          >
+                            New
+                          </span>
+                        </>
+                      )}
+                    </td>
+                    <td className={categoryCellClass}>
+                      <RuleCategory
+                        name={categoryName(rule.categoryId)}
+                        colour={categoryColour(rule.categoryId, categories, dark)}
+                      />
+                    </td>
+                    <td className={actionsCellClass}>
+                      <button type="button" onClick={() => openDialog({ kind: 'edit', rule })} className={smallButtonClass}>
+                        Edit
+                      </button>
+                      <button type="button" onClick={() => setDeleting(rule)} className={smallButtonClass}>
+                        Delete
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </>
+        )}
+      </div>
 
       {/* The add dialog starts on the Category the list is filtered to as it opens, or on none while all
           are shown. */}

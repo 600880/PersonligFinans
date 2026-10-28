@@ -4,6 +4,11 @@
    device's setting directly, so Light can be chosen on a dark device. */
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* The phone layout, every max-sm: in the app, holds below 700px rather than Tailwind's 640px. */
+@theme {
+  --breakpoint-sm: 43.75rem;
+}
+
 body {
   font-family: system-ui, 'Segoe UI', Roboto, sans-serif;
 }
