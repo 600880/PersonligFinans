@@ -790,7 +790,12 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
                 <tbody className="divide-y divide-slate-200 dark:divide-slate-800 text-slate-900 dark:text-slate-100 max-sm:block">
                   {shownTransactions.map((transaction) => (
                     <Fragment key={transaction.id}>
-                      <tr className="max-sm:grid max-sm:grid-cols-[1fr_auto_auto_auto] max-sm:items-center max-sm:gap-1 max-sm:px-4 max-sm:py-3">
+                      {/* With its Note editor open the row drops its divider, so the editor sits in the same box. */}
+                      <tr
+                        className={`max-sm:grid max-sm:grid-cols-[1fr_auto_auto_auto] max-sm:items-center max-sm:gap-1 max-sm:px-4 max-sm:py-3 ${
+                          editingNoteId === transaction.id ? 'border-b-0' : ''
+                        }`}
+                      >
                         <td className="py-3 pr-5 pl-4 whitespace-nowrap max-sm:col-start-1 max-sm:row-start-1 max-sm:p-0">
                           {formatNorwegianDate(transaction.date)}
                         </td>
@@ -929,7 +934,7 @@ export function TransactionsPage({ target }: { target?: TransactionsTarget }) {
                       {editingNoteId === transaction.id && (
                         <tr className="max-sm:block">
                           <td colSpan={7} className="px-4 pb-3 max-sm:block max-sm:pt-1">
-                            <div className="flex flex-wrap items-end gap-2 rounded-lg bg-slate-50 dark:bg-slate-950 px-3 py-2">
+                            <div className="flex flex-wrap items-end gap-2">
                               {/* The Note with the kept Receipt to its left, or above it on a phone. The
                                   Receipt is loaded only now, so listing Transactions never loads one. */}
                               <div className="flex flex-1 flex-col gap-2 sm:flex-row sm:items-end">
