@@ -2,8 +2,9 @@ import { useId, useState, type FormEvent } from 'react'
 import { chooseAppearance, readAppearance, type Appearance } from '../lib/appearance'
 import { changePassword, signOut, type ChangePasswordRequest, type User } from '../lib/api'
 import { confirmPasswordError } from '../lib/confirmPassword'
+import { secondaryButtonClass } from './buttons'
 import { ConfirmPasswordField } from './ConfirmPasswordField'
-import { DeleteDataSection, secondaryButtonClass } from './DeleteDataSection'
+import { DeleteDataSection } from './DeleteDataSection'
 import { ErrorMessage, StatusMessage } from './Messages'
 import { Field, inputClassName } from './TransactionForm'
 
@@ -97,15 +98,15 @@ function AppearanceCard() {
       <div
         role="radiogroup"
         aria-labelledby={headingId}
-        className="flex w-fit gap-0.5 rounded-lg border border-slate-300 p-0.5 dark:border-slate-700"
+        className="flex w-fit gap-0.5 rounded-lg border border-slate-200 bg-slate-100 p-0.5 dark:border-slate-700 dark:bg-slate-800"
       >
         {APPEARANCES.map(({ value, label }) => (
           <label
             key={value}
             className={`cursor-pointer rounded-md px-4 py-1.5 text-sm font-medium has-focus-visible:outline-2 has-focus-visible:outline-offset-2 has-focus-visible:outline-slate-500 ${
               appearance === value
-                ? 'bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900'
-                : 'text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'
+                ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-900 dark:text-slate-100'
+                : 'text-slate-600 hover:bg-slate-200 dark:text-slate-400 dark:hover:bg-slate-700'
             }`}
           >
             <input
@@ -208,7 +209,7 @@ function ChangePasswordForm({ disabled }: ChangePasswordFormProps) {
             <button
               type="submit"
               disabled={isSubmitting}
-              className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-300 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-slate-300 dark:disabled:bg-slate-800 dark:disabled:text-slate-500"
+              className={secondaryButtonClass}
             >
               {isSubmitting ? 'Changing password…' : 'Change password'}
             </button>

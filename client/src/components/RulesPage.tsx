@@ -4,6 +4,7 @@ import { useIsDark } from '../lib/appearance'
 import { categoryColour } from '../lib/categoryColours'
 import { categoryFilterOf, matchesCategory } from '../lib/categoryFilter'
 import { norwegian } from '../lib/norwegian'
+import { secondaryButtonClass } from './buttons'
 import { CategorySwatch } from './CategorySwatch'
 import { ErrorMessage, StatusMessage } from './Messages'
 import { panelClass, panelHeadClass, toolbarSelectClass } from './panel'
@@ -161,7 +162,7 @@ export function RulesPage({ target }: { target?: RulesTarget }) {
         <button
           type="button"
           onClick={() => openDialog({ kind: 'add' })}
-          className="rounded-lg bg-slate-900 dark:bg-slate-100 px-4 py-2 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-700 dark:hover:bg-slate-300"
+          className={secondaryButtonClass}
         >
           Add rule
         </button>

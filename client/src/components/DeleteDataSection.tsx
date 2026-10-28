@@ -11,6 +11,7 @@ import {
 } from '../lib/api'
 import { counted, formatCount } from '../lib/count'
 import { formatNorwegianDate } from '../lib/date'
+import { secondaryButtonClass } from './buttons'
 import { ErrorMessage, StatusMessage } from './Messages'
 import { Field, inputClassName } from './TransactionForm'
 
@@ -32,9 +33,6 @@ type Confirming = 'bankStatements' | 'allTransactions' | 'allRules' | 'user'
 // How a confirmed delete went: the status line saying what it deleted, or why it failed.
 type DeleteOutcome = { ok: true; status: string } | { ok: false; message: string }
 
-// The User page's one secondary button, Sign out's too.
-export const secondaryButtonClass =
-  'rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-2 text-sm font-medium text-slate-900 dark:text-slate-100 shadow-sm hover:bg-slate-100 dark:hover:bg-slate-800 disabled:cursor-not-allowed disabled:border-slate-200 dark:disabled:border-slate-800 disabled:text-slate-400 dark:disabled:text-slate-600 disabled:shadow-none disabled:hover:bg-white dark:disabled:hover:bg-slate-900'
 const smallButtonClass =
   'rounded-lg px-2 py-1 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:cursor-not-allowed disabled:text-slate-300 dark:disabled:text-slate-600'
 // Confirm delete, the one choice in a question that stands out.
