@@ -285,7 +285,6 @@ export function RulesPage({ target }: { target?: RulesTarget }) {
         <RuleDialog
           rule={dialog.kind === 'edit' ? dialog.rule : undefined}
           startingCategoryId={categoryFilter}
-          rules={rules}
           categories={categories}
           onCancel={() => setDialog(null)}
           onSaved={(saved) => handleSaved(dialog, saved)}

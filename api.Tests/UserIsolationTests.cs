@@ -507,32 +507,6 @@ public class UserIsolationTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task ARulePreview_SeesOnlyThatUsersTransactionsRulesAndCategories()
-    {
-        Assert.Equal(HttpStatusCode.Created, (await Upload(_a, Statement(AccountNumber()))).StatusCode);
-        Assert.Equal(HttpStatusCode.Created, (await Upload(_a, Statement(AccountNumber(), "Varer 03.08 Kafé Nord"))).StatusCode);
-        Assert.Equal(HttpStatusCode.Created, (await Upload(_b, Statement(AccountNumber()))).StatusCode);
-        await AddTransaction(_a, _categoriesA.Other, "Kafé Torget");
-        await AddRule(_a, "sentrum", _categoriesA.Other);
-
-        var preview = await _b.PostAsJsonAsync(
-            "/api/categorization-rules/preview", new { keyword = "kafé", categoryId = _categoriesB.Restaurants });
-        var withAnotherUsersCategory = await _b.PostAsJsonAsync(
-            "/api/categorization-rules/preview", new { keyword = "kafé", categoryId = _categoriesA.Restaurants });
-        var withAnotherUsersKeyword = await _b.PostAsJsonAsync(
-            "/api/categorization-rules/preview", new { keyword = "sentrum", categoryId = _categoriesB.Restaurants });
-
-        Assert.Equal(HttpStatusCode.OK, preview.StatusCode);
-        var previewed = (await preview.Content.ReadFromJsonAsync<RulePreviewResponse>())!;
-        Assert.Equal(
-            (1, 0, (int?)null, (int?)_categoriesB.Restaurants),
-            (previewed.ChangedCount, previewed.LockedCount, previewed.Changes.Single().FromCategoryId, previewed.Changes.Single().ToCategoryId));
-        Assert.Equal((await August(_b)).Single().Id, previewed.Changes.Single().Id);
-        Assert.Equal(["Category does not exist."], (await ValidationErrors(withAnotherUsersCategory))["categoryId"]);
-        Assert.Equal(HttpStatusCode.OK, withAnotherUsersKeyword.StatusCode);
-    }
-
-    [Fact]
     public async Task ADeletePreview_SeesOnlyThatUsersRuleAndTransactions()
     {
         Assert.Equal(HttpStatusCode.Created, (await Upload(_a, Statement(AccountNumber()))).StatusCode);
@@ -550,27 +524,6 @@ public class UserIsolationTests : IAsyncLifetime
             (previewed.ChangedCount, previewed.Changes.Single().Id, previewed.Changes.Single().FromCategoryId, previewed.Changes.Single().ToCategoryId));
         Assert.Equal(HttpStatusCode.NotFound, ofAnotherUsersRule.StatusCode);
         Assert.Contains(await Rules(_a), r => r.Id == ruleA.Id);
-    }
-
-    [Fact]
-    public async Task AnEditPreview_SeesOnlyThatUsersOwnRule_AndTransactions()
-    {
-        Assert.Equal(HttpStatusCode.Created, (await Upload(_a, Statement(AccountNumber()))).StatusCode);
-        Assert.Equal(HttpStatusCode.Created, (await Upload(_b, Statement(AccountNumber()))).StatusCode);
-        var theirRule = await AddRule(_a, "sentrum", _categoriesA.Other);
-        var rule = await AddRule(_b, "sentrum", _categoriesB.Other);
-
-        var ofTheirRule = await _b.PutAsJsonAsync(
-            $"/api/categorization-rules/{theirRule.Id}/preview", new { keyword = "kafé", categoryId = _categoriesB.Restaurants });
-        var preview = await _b.PutAsJsonAsync(
-            $"/api/categorization-rules/{rule.Id}/preview", new { keyword = "kafé", categoryId = _categoriesB.Restaurants });
-
-        Assert.Equal(HttpStatusCode.NotFound, ofTheirRule.StatusCode);
-        Assert.Equal(HttpStatusCode.OK, preview.StatusCode);
-        var previewed = (await preview.Content.ReadFromJsonAsync<RulePreviewResponse>())!;
-        Assert.Equal(
-            ((await August(_b)).Single().Id, (int?)_categoriesB.Other, (int?)_categoriesB.Restaurants),
-            previewed.Changes.Select(c => (c.Id, c.FromCategoryId, c.ToCategoryId)).Single());
     }
 
     [Fact]

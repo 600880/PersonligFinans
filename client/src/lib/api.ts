@@ -1020,17 +1020,15 @@ export type DeleteRuleResult =
   | { ok: true; alreadyDeleted: boolean; transactionsChanged: number }
   | { ok: false; message: string }
 
-// What a rule change would do, without doing it. changedCount: how many Transactions would change
-// Category. lockedCount: how many Locked Transactions contain the keyword, which it leaves as they
-// are. changes: up to the server's Categorizer.PreviewedChangesMax of the Transactions that would
+// What deleting a rule would do, without doing it. changedCount: how many Transactions would change
+// Category. changes: up to the server's Categorizer.PreviewedChangesMax of the Transactions that would
 // change, newest first.
 export interface RulePreview {
   changedCount: number
-  lockedCount: number
   changes: RulePreviewChange[]
 }
 
-// A Transaction a rule change would move from one Category to another; null means Uncategorized.
+// A Transaction deleting a rule would move from one Category to another; null means Uncategorized.
 export interface RulePreviewChange {
   id: number
   date: string
@@ -1040,26 +1038,11 @@ export interface RulePreviewChange {
   toCategoryId: number | null
 }
 
-// What adding the rule would do. Fails when the server refuses it as addRule would, as for a keyword
-// another rule already has.
-export function previewAddingRule(request: CategorizationRuleRequest): Promise<RulePreview> {
-  return fetchRulePreview('/api/categorization-rules/preview', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(request),
-  })
-}
-
-// What deleting the rule would do. It brings in no keyword, so lockedCount is 0. Fails when the rule
-// is gone, as when it was deleted elsewhere.
-export function previewDeletingRule(id: number): Promise<RulePreview> {
-  return fetchRulePreview(`/api/categorization-rules/${id}/preview`, { method: 'DELETE' })
-}
-
-// A preview is a dry run of a rule change: the same request, to the change's URL followed by /preview.
-async function fetchRulePreview(url: string, init: RequestInit): Promise<RulePreview> {
-  const response = await apiFetch(url, init)
-  if (!response.ok) throw new Error(`Previewing the rule change failed (${response.status})`)
+// What deleting the rule would do: a dry run of the same request, to its URL followed by /preview.
+// Fails when the rule is gone, as when it was deleted elsewhere.
+export async function previewDeletingRule(id: number): Promise<RulePreview> {
+  const response = await apiFetch(`/api/categorization-rules/${id}/preview`, { method: 'DELETE' })
+  if (!response.ok) throw new Error(`Previewing the rule delete failed (${response.status})`)
   return (await response.json()) as RulePreview
 }
 
@@ -1075,16 +1058,6 @@ export function addRule(request: CategorizationRuleRequest): Promise<SaveRuleRes
 
 export function editRule(id: number, request: CategorizationRuleRequest): Promise<SaveRuleResult> {
   return saveRule(`/api/categorization-rules/${id}`, 'PUT', request)
-}
-
-// What editing the rule would do, including to the Transactions it would stop categorizing. Fails
-// when the server refuses it as editRule would, as for a keyword another rule already has.
-export function previewEditingRule(id: number, request: CategorizationRuleRequest): Promise<RulePreview> {
-  return fetchRulePreview(`/api/categorization-rules/${id}/preview`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(request),
-  })
 }
 
 export async function deleteRule(id: number): Promise<DeleteRuleResult> {

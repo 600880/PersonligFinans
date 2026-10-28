@@ -5,13 +5,12 @@ import { categoryName } from '../lib/categoryName'
 import { counted, formatCount } from '../lib/count'
 import { formatNorwegianDate } from '../lib/date'
 
-// "Would change 14 transactions · 3 Locked won't change", or that nothing would.
-function summary({ changedCount, lockedCount }: RulePreview) {
-  const changed = changedCount === 0 ? 'Nothing would change' : `Would change ${counted(changedCount, 'transaction')}`
-  return lockedCount === 0 ? changed : `${changed} · ${formatCount(lockedCount)} Locked won't change`
+// "Would change 14 transactions", or that nothing would.
+function summary({ changedCount }: RulePreview) {
+  return changedCount === 0 ? 'Nothing would change' : `Would change ${counted(changedCount, 'transaction')}`
 }
 
-// What saving a rule change would do: the summary, and the Transactions it would change, listed once
+// What deleting a rule would do: the summary, and the Transactions it would change, listed once
 // asked for, each with its old → new Category among the categories.
 export function RuleChangePreview({ preview, categories }: { preview: RulePreview; categories: Category[] }) {
   const [isListOpen, setIsListOpen] = useState(false)

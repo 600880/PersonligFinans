@@ -16,13 +16,12 @@ public record DeletedCategorizationRuleResponse(int TransactionsChanged);
 
 public record DeletedCategorizationRulesResponse(int RulesDeleted);
 
-// What a rule change would do, without doing it. ChangedCount: how many Transactions would change
-// Category. LockedCount: how many Locked Transactions contain the keyword, which it leaves as they
-// are. Changes: up to Categorizer.PreviewedChangesMax of the Transactions that would change, newest
-// posted date first.
-public record RulePreviewResponse(int ChangedCount, int LockedCount, List<RulePreviewChange> Changes);
+// What deleting a rule would do, without doing it. ChangedCount: how many Transactions would change
+// Category. Changes: up to Categorizer.PreviewedChangesMax of the Transactions that would change,
+// newest posted date first.
+public record RulePreviewResponse(int ChangedCount, List<RulePreviewChange> Changes);
 
-// A Transaction a rule change would change, from one Category to another; null means Uncategorized.
+// A Transaction deleting a rule would change, from one Category to another; null means Uncategorized.
 public record RulePreviewChange(
     int Id, DateOnly Date, string Description, decimal Amount, int? FromCategoryId, int? ToCategoryId);
 
@@ -43,12 +42,10 @@ public static class CategorizationRuleEndpoints
         });
 
         api.MapPost("/", AddRule);
-        // A preview is a dry run of a rule change: the same request, to the change's path followed by
-        // /preview. It validates exactly as the change does, but changes nothing and takes no lock.
-        api.MapPost("/preview", PreviewAddingRule);
         api.MapPut("/{id:int}", EditRule);
-        api.MapPut("/{id:int}/preview", PreviewEditingRule);
         api.MapDelete("/{id:int}", DeleteRule);
+        // A dry run of deleting the rule: the same request, to its path followed by /preview. It
+        // changes nothing and takes no lock.
         api.MapDelete("/{id:int}/preview", PreviewDeletingRule);
         // A DELETE rather than a POST: it takes no JSON, and another site's page can't send a DELETE
         // without a preflight, which the API never grants.
@@ -76,24 +73,9 @@ public static class CategorizationRuleEndpoints
         return Results.Created($"/api/categorization-rules/{rule.Id}", Saved(rule, latestUploadId: null, transactionsChanged));
     }
 
-    // What AddRule would do with the request: the saved rules, with the new one among them, as it
-    // would be created now.
-    private static async Task<IResult> PreviewAddingRule(CategorizationRuleRequest request, AppDbContext db)
-    {
-        var (keyword, errors) = await Validate(request, db, editedRuleId: null);
-        if (errors.Count > 0)
-            return Results.ValidationProblem(errors);
-
-        var rules = await db.CategorizationRules.AsNoTracking().ToListAsync<ICategorizationRule>();
-        // Created after every saved rule, so its id is greater than theirs.
-        rules.Add(new ProposedRule(int.MaxValue, keyword, request.CategoryId!.Value, DateTimeOffset.UtcNow));
-
-        return Results.Ok(Previewed(await Categorizer.PreviewAsync(db, rules, keyword)));
-    }
-
     private static RulePreviewResponse Previewed<TRule>(RuleChangePreview<TRule> preview)
         where TRule : class, ICategorizationRule =>
-        new(preview.ChangedCount, preview.LockedCount,
+        new(preview.ChangedCount,
             preview.Changes
                 .Select(c => new RulePreviewChange(
                     c.Transaction.Id, c.Transaction.PostedDate, c.Transaction.Description, c.Transaction.Amount,
@@ -121,24 +103,6 @@ public static class CategorizationRuleEndpoints
         return Results.Ok(Saved(rule, await LatestUploadId(db), transactionsChanged));
     }
 
-    // What EditRule would do with the request: the saved rules, with the edited one as the edit
-    // would leave it. It keeps its id and when it was created, which break ties as before.
-    private static async Task<IResult> PreviewEditingRule(int id, CategorizationRuleRequest request, AppDbContext db)
-    {
-        var rules = await db.CategorizationRules.AsNoTracking().ToListAsync<ICategorizationRule>();
-        if (rules.SingleOrDefault(r => r.Id == id) is not { } rule)
-            return Results.NotFound();
-
-        var (keyword, errors) = await Validate(request, db, editedRuleId: id);
-        if (errors.Count > 0)
-            return Results.ValidationProblem(errors);
-
-        rules.Remove(rule);
-        rules.Add(new ProposedRule(rule.Id, keyword, request.CategoryId!.Value, rule.CreatedAt));
-
-        return Results.Ok(Previewed(await Categorizer.PreviewAsync(db, rules, keyword)));
-    }
-
     private static async Task<IResult> DeleteRule(int id, AppDbContext db)
     {
         var rule = await db.CategorizationRules.FindAsync(id);
@@ -151,15 +115,14 @@ public static class CategorizationRuleEndpoints
         return Results.Ok(new DeletedCategorizationRuleResponse(transactionsChanged));
     }
 
-    // What DeleteRule would do: the saved rules, without the deleted one. Deleting brings in no
-    // keyword, so no Locked Transactions are counted.
+    // What DeleteRule would do: the saved rules, without the deleted one.
     private static async Task<IResult> PreviewDeletingRule(int id, AppDbContext db)
     {
         var rules = await db.CategorizationRules.AsNoTracking().ToListAsync<ICategorizationRule>();
         if (rules.RemoveAll(r => r.Id == id) == 0)
             return Results.NotFound();
 
-        return Results.Ok(Previewed(await Categorizer.PreviewAsync(db, rules, keyword: null)));
+        return Results.Ok(Previewed(await Categorizer.PreviewAsync(db, rules)));
     }
 
     // Deletes every rule of the User, seeded ones included, and re-matches against none, so every

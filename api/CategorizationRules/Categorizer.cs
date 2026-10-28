@@ -61,22 +61,18 @@ public static class Categorizer
     // What saving the proposed rules, held in memory, would do: the rule-eligible Transactions whose
     // Category it would change, worked out through Categorize just as the re-match after saving is,
     // so a preview never disagrees with the change. Only up to PreviewedChangesMax of them are
-    // listed, newest posted date first. It also counts the Locked Transactions whose description
-    // contains the keyword, which the change leaves as they are; with no keyword, as for deleting a
-    // rule, it counts none. It changes and locks nothing.
+    // listed, newest posted date first. It changes and locks nothing.
     public static async Task<RuleChangePreview<TRule>> PreviewAsync<TRule>(
-        AppDbContext db, IReadOnlyCollection<TRule> proposedRules, string? keyword)
+        AppDbContext db, IReadOnlyCollection<TRule> proposedRules)
         where TRule : class, ICategorizationRule
     {
         var transactions = await db.Transactions.AsNoTracking().ToListAsync();
         var changed = Categorize(transactions.Where(IsRuleEligibleInMemory), proposedRules)
             .Where(c => c.ChangesCategory)
             .ToList();
-        var lockedCount = keyword is null ? 0 : transactions.Count(t => IsLocked(t) && Matches(t.Description, keyword));
 
         return new(
             changed.Count,
-            lockedCount,
             changed
                 .OrderByDescending(c => c.Transaction.PostedDate)
                 .ThenByDescending(c => c.Transaction.Id)
@@ -269,7 +265,7 @@ public static class Categorizer
 }
 
 // What choosing a Categorization Rule needs of one: its keyword and Category, and when it was
-// created and its id, which break ties. A saved rule has them, and so does one only proposed.
+// created and its id, which break ties.
 public interface ICategorizationRule
 {
     int Id { get; }
@@ -290,13 +286,8 @@ public sealed record Categorized<TRule>(Transaction Transaction, TRule? Rule)
     public bool ChangesCategory => Transaction.CategoryId != CategoryId;
 }
 
-// A Categorization Rule only proposed, held in memory to preview a rule change: an added rule, or a
-// saved one as an edit would leave it.
-public sealed record ProposedRule(int Id, string Keyword, int CategoryId, DateTimeOffset CreatedAt) : ICategorizationRule;
-
-// What a rule change would do. ChangedCount: how many Transactions would change Category. LockedCount:
-// how many Locked Transactions match the change's keyword. Changes: up to PreviewedChangesMax of the
-// Transactions that would change, newest posted date first, each with the rule that would categorize
+// What a rule change would do. ChangedCount: how many Transactions would change Category. Changes:
+// up to PreviewedChangesMax of the Transactions that would change, newest posted date first, each with the rule that would categorize
 // it, or none when it would become Uncategorized.
-public sealed record RuleChangePreview<TRule>(int ChangedCount, int LockedCount, List<Categorized<TRule>> Changes)
+public sealed record RuleChangePreview<TRule>(int ChangedCount, List<Categorized<TRule>> Changes)
     where TRule : class, ICategorizationRule;

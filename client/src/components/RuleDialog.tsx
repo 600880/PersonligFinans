@@ -1,36 +1,8 @@
-import { useCallback, useId, useState, type FormEvent } from 'react'
-import {
-  addRule,
-  editRule,
-  previewAddingRule,
-  previewEditingRule,
-  type CategorizationRule,
-  type CategorizationRuleRequest,
-  type Category,
-  type RuleFieldErrors,
-} from '../lib/api'
-import { useRulePreview } from '../lib/useRulePreview'
+import { useId, useState, type FormEvent } from 'react'
+import { addRule, editRule, type CategorizationRule, type Category, type RuleFieldErrors } from '../lib/api'
 import { Dialog } from './Dialog'
 import { ErrorMessage } from './Messages'
-import { RuleChangePreview } from './RuleChangePreview'
 import { inputClassName } from './TransactionForm'
-
-// The shortest keyword the server accepts, since a one-letter keyword would match nearly everything.
-const KEYWORD_MIN_LENGTH = 2
-
-// The request to preview for a keyword and Category as typed so far, or null while they could not be
-// saved as one of the rules: the keyword is too short or is another rule's, ignoring case, or no
-// Category is chosen. Anything else the server refuses is told by the preview itself.
-function previewRequest(keyword: string, categoryId: string, otherRules: CategorizationRule[]) {
-  const trimmed = keyword.trim()
-  if (
-    trimmed.length < KEYWORD_MIN_LENGTH ||
-    categoryId === '' ||
-    otherRules.some((r) => r.keyword.toLowerCase() === trimmed.toLowerCase())
-  )
-    return null
-  return { keyword: trimmed, categoryId: Number(categoryId) }
-}
 
 // What a save did, once the server has answered.
 export interface RuleSaved {
@@ -44,39 +16,23 @@ interface RuleDialogProps {
   // The Category a new rule starts on, as the Category filter holds it: '' for none, so the User
   // chooses one. Read on opening only.
   startingCategoryId?: string
-  // Every rule, the edited one included, which the change would be made to.
-  rules: CategorizationRule[]
   categories: Category[]
   onCancel: () => void
   onSaved: (saved: RuleSaved) => void
 }
 
-// Adds a Categorization Rule, or edits one, by its Keyword and Category, previewing what saving would
-// change: the add preview for a new rule, and the edit preview for the edited one, whose own keyword is
-// no other rule's. A new rule starts on the given Category, or on "Choose…" with none; an edited one
-// starts filled in from the rule, so saving an AI-generated rule unchanged still removes its AI mark.
-// Closing the dialog without saving discards what was typed and chosen.
-export function RuleDialog({ rule, startingCategoryId = '', rules, categories, onCancel, onSaved }: RuleDialogProps) {
+// Adds a Categorization Rule, or edits one, by its Keyword and Category. A new rule starts on the given
+// Category, or on "Choose…" with none; an edited one starts filled in from the rule, so saving an
+// AI-generated rule unchanged still removes its AI mark. Closing the dialog without saving discards
+// what was typed and chosen.
+export function RuleDialog({ rule, startingCategoryId = '', categories, onCancel, onSaved }: RuleDialogProps) {
   const id = useId()
   const [keyword, setKeyword] = useState(rule?.keyword ?? '')
   const [categoryId, setCategoryId] = useState(rule ? String(rule.categoryId) : startingCategoryId)
   const [isSaving, setIsSaving] = useState(false)
   const [fieldErrors, setFieldErrors] = useState<RuleFieldErrors>({})
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
-
-  // The same function for as long as the dialog is open, so the preview hook only asks again when the
-  // keyword, the Category or the rules change.
   const ruleId = rule?.id
-  const askForPreview = useCallback(
-    (request: CategorizationRuleRequest) =>
-      ruleId === undefined ? previewAddingRule(request) : previewEditingRule(ruleId, request),
-    [ruleId],
-  )
-  const preview = useRulePreview(
-    previewRequest(keyword, categoryId, rules.filter((r) => r.id !== ruleId)),
-    askForPreview,
-    rules,
-  )
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault()
@@ -141,8 +97,6 @@ export function RuleDialog({ rule, startingCategoryId = '', rules, categories, o
             {fieldErrors.categoryId}
           </span>
         </div>
-
-        {preview && <RuleChangePreview preview={preview} categories={categories} />}
 
         <div className="mt-2 flex justify-end gap-3">
           <button
