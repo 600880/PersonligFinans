@@ -22,4 +22,11 @@
     <PackageReference Include="PdfPig" Version="0.1.16" />
   </ItemGroup>
 
+  <!-- The Guest snapshot, embedded rather than published beside the app, so it is found the same
+       way in the app and its tests. -->
+  <ItemGroup>
+    <Content Remove="Users\GuestSnapshot\**" />
+    <EmbeddedResource Include="Users\GuestSnapshot\**" LogicalName="GuestSnapshot/%(Filename)%(Extension)" />
+  </ItemGroup>
+
 </Project>

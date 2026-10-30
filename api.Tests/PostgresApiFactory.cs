@@ -45,6 +45,9 @@ public class PostgresApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
         // tests set small caps and a clock of their own.
         builder.UseSetting($"{PasswordResetLimit.SectionName}:{nameof(PasswordResetLimit.PerAddressMinutes)}", "0");
         builder.UseSetting($"{PasswordResetLimit.SectionName}:{nameof(PasswordResetLimit.PerDay)}", "1000000");
+        // Every test continuing as the Guest gets it Restored, however recently another test did. The
+        // cooldown's own tests set it and a clock of their own.
+        builder.UseSetting($"{GuestRestore.SectionName}:{nameof(GuestRestore.CooldownMinutes)}", "0");
     }
 
     public Task InitializeAsync() => _postgres.StartAsync();

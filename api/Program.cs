@@ -17,6 +17,7 @@ builder.Services.AddDatabase(builder.Configuration);
 builder.Services.AddRuleGenerator(builder.Configuration);
 builder.Services.AddEmail(builder.Configuration);
 builder.Services.AddUsers();
+builder.Services.AddGuestRestores(builder.Configuration);
 builder.Services.AddAntiforgeryTokens();
 builder.Services.AddAiRequestLedger(builder.Configuration);
 builder.Services.AddPasswordResetEmailLedger(builder.Configuration);

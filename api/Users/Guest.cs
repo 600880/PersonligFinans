@@ -20,23 +20,25 @@ public static class Guest
     public static bool IsReserved(string email) =>
         email.EndsWith("@" + ReservedDomain, StringComparison.OrdinalIgnoreCase);
 
-    // Creates the Guest, starting like any new User, unless it already exists. An existing Guest is
-    // never reset, so it keeps whatever visitors have added. Sign in never tries the Guest, and as
-    // well the Guest is exempt from the lockout Identity gives every new User, so nothing can lock
-    // it out.
-    public static async Task CreateIfMissingAsync(IServiceProvider services)
+    // Creates the Guest, starting like any new User, unless it already exists, and Restores it to the
+    // Guest snapshot either way. Sign in never tries the Guest, and as well the Guest is exempt from
+    // the lockout Identity gives every new User, so nothing can lock it out.
+    public static async Task CreateOrRestoreAsync(IServiceProvider services)
     {
         using var scope = services.CreateScope();
         var userManager = scope.ServiceProvider.GetRequiredService<UserManager<IdentityUser>>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var guest = await userManager.FindByNameAsync(Email);
         if (guest is null)
         {
             guest = new IdentityUser { UserName = Email, Email = Email };
-            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             ThrowIfFailed(await NewUser.CreateAsync(userManager, db, guest));
         }
         if (guest.LockoutEnabled)
             ThrowIfFailed(await userManager.SetLockoutEnabledAsync(guest, false));
+
+        scope.ServiceProvider.GetRequiredService<CurrentUser>().ActAs(guest.Id);
+        await scope.ServiceProvider.GetRequiredService<GuestRestores>().RestoreAsync(db);
     }
 
     private static void ThrowIfFailed(IdentityResult result)

@@ -43,6 +43,24 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, CurrentUser cu
     public string OwnerOfNewRows => CurrentUserId
         ?? throw new InvalidOperationException("Only a signed-in User can own new rows.");
 
+    // Deletes every row the current User owns, which the query filters limit each delete to, but
+    // never the User, nor their AI requests or sent reset emails. Owners' keys are Restrict, so each
+    // kind is deleted here, in an order that leaves nothing another row still refers to. Run it under
+    // the rule-change lock, so it can't interleave with an import, whose Transactions would be left
+    // behind.
+    public async Task DeleteEverythingOwnedAsync()
+    {
+        await Bookmarks.ExecuteDeleteAsync();
+        await Receipts.ExecuteDeleteAsync();
+        await LastUsedFolders.ExecuteDeleteAsync();
+        await Folders.ExecuteDeleteAsync();
+        await Transactions.ExecuteDeleteAsync();
+        await BankStatements.ExecuteDeleteAsync();
+        await LatestUploads.ExecuteDeleteAsync();
+        await CategorizationRules.ExecuteDeleteAsync();
+        await Categories.ExecuteDeleteAsync();
+    }
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);

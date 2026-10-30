@@ -131,17 +131,26 @@ public static class UserEndpoints
         return Results.Ok(UserResponse.Of(user!.Email!));
     }
 
-    // Signs in as the Guest, which the app created at start-up, for as long as any other sign-in.
-    // Like signing in and signing up, it takes only JSON, which another site's form can't send, so
-    // no other site can sign its visitors in as the Guest.
+    // Restores the Guest, which the app created at start-up, to the Guest snapshot, unless it was
+    // Restored within the cooldown, and signs in as it, for as long as any other sign-in. Whoever is
+    // already using the Guest stays signed in, and sees the restored data from their next request.
+    // Like signing in and signing up, it takes only JSON, which another site's form can't send, so no
+    // other site can sign its visitors in as the Guest, nor Restore it.
     private static async Task<IResult> ContinueAsGuest(
-        HttpRequest request, UserManager<IdentityUser> userManager, SignInManager<IdentityUser> signInManager)
+        HttpRequest request,
+        UserManager<IdentityUser> userManager,
+        SignInManager<IdentityUser> signInManager,
+        CurrentUser currentUser,
+        GuestRestores restores,
+        AppDbContext db)
     {
         if (!request.HasJsonContentType())
             return Results.StatusCode(StatusCodes.Status415UnsupportedMediaType);
 
         var guest = await userManager.FindByNameAsync(Guest.Email)
             ?? throw new InvalidOperationException("The Guest doesn't exist; the app creates it at start-up.");
+        currentUser.ActAs(guest.Id);
+        await restores.RestoreIfDueAsync(db);
         await signInManager.SignInAsync(guest, isPersistent: true);
         return Results.Ok(UserResponse.Of(guest.Email!));
     }
@@ -235,18 +244,7 @@ public static class UserEndpoints
         // whose Transactions would otherwise stop the User from being deleted.
         await using (var transaction = await Categorizer.BeginRuleChangeAsync(db))
         {
-            // Every row the User owns, which the query filters limit each delete to. Owners' keys are
-            // Restrict, so each kind is deleted here, in an order that leaves nothing another row
-            // still refers to, before the User itself.
-            await db.Bookmarks.ExecuteDeleteAsync();
-            await db.Receipts.ExecuteDeleteAsync();
-            await db.LastUsedFolders.ExecuteDeleteAsync();
-            await db.Folders.ExecuteDeleteAsync();
-            await db.Transactions.ExecuteDeleteAsync();
-            await db.BankStatements.ExecuteDeleteAsync();
-            await db.LatestUploads.ExecuteDeleteAsync();
-            await db.CategorizationRules.ExecuteDeleteAsync();
-            await db.Categories.ExecuteDeleteAsync();
+            await db.DeleteEverythingOwnedAsync();
 
             var result = await userManager.DeleteAsync(user);
             if (!result.Succeeded)

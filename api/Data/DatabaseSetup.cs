@@ -31,8 +31,9 @@ public static class DatabaseSetup
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         await db.Database.MigrateAsync();
 
-        // So the Guest exists on a fresh deployment, without anyone signing it up.
-        await Guest.CreateIfMissingAsync(app.Services);
+        // So the Guest exists on a fresh deployment, without anyone signing it up, and holds the Guest
+        // snapshot.
+        await Guest.CreateOrRestoreAsync(app.Services);
 
         // A migration may change the rules, whether applied here or by hand. Re-matching is
         // idempotent and cheap, so do it on every startup to keep the imported Transactions already

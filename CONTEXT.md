@@ -9,8 +9,16 @@ Someone who signs in with an email and password, or the Guest. Each User has the
 _Avoid_: Account, profile, member
 
 **Guest**:
-The one User anyone can sign in as without signing up, so everything in it is seen and changed by every visitor who uses it. It is for trying the app, not for real data, and otherwise works like any other User: it starts like a new User, is never reset, and has its own Daily AI limit, shared by everyone using it.
+The one User anyone can sign in as without signing up, so everything in it is seen and changed by every visitor who uses it. It is for trying the app, not for real data, and otherwise works like any other User, except that it is Restored when someone continues as it, at most once every 20 minutes, and whenever the app starts. It has its own Daily AI limit, shared by everyone using it, which a Restore leaves as it was.
 _Avoid_: Demo user, anonymous user, guest account
+
+**Guest snapshot**:
+The fixed Transactions, Bank Statements, Receipts, Categories, Categorization Rules, Bookmarks and Folders the Guest is Restored to, taken once from what the Guest held and kept until someone takes a new one. Its dates never move, so it ages until it is taken again.
+_Avoid_: Demo data, sample data, seed
+
+**Restore**:
+Replacing everything the Guest owns with the Guest snapshot, discarding whatever any visitor changed, including in the middle of another visitor's use of it. Only the Guest is ever Restored.
+_Avoid_: Reset, reseed, revert
 
 **Sign up**:
 Becoming a new User with an email and a password, which signs you straight in. The Guest is never signed up; the app creates it.
