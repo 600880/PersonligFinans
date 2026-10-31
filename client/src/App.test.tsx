@@ -317,6 +317,9 @@ beforeEach(() => {
   handleChangePassword = () => new Response(null, { status: 204 })
   handleDeleteYourUser = () => new Response(null, { status: 204 })
   vi.stubGlobal('fetch', fetchMock)
+  // The tab title index.html gives the page before the app loads, so each test starts as a fresh tab,
+  // whatever page the last one left named.
+  document.title = 'PersonligFinans'
 })
 
 afterEach(() => {
@@ -3566,6 +3569,92 @@ describe('Page addresses', () => {
 
     window.history.back()
     expect(await screen.findByRole('heading', { name: 'Categorization Rules' })).toBeInTheDocument()
+  })
+})
+
+describe('Tab title', () => {
+  it.each([
+    ['/transactions', 'Transactions', 'Transactions · PersonligFinans'],
+    ['/categories', 'Categories', 'Categories · PersonligFinans'],
+    ['/rules', 'Categorization Rules', 'Rules · PersonligFinans'],
+    ['/user', 'User', 'User · PersonligFinans'],
+  ])('names the page opened at %s, as on a refresh', async (path, heading, title) => {
+    await renderAppAt(path)
+
+    await screen.findByRole('heading', { name: heading })
+    expect(document.title).toBe(title)
+  })
+
+  it('is plain PersonligFinans on the Dashboard', async () => {
+    await renderAppAt('/')
+
+    expect(document.title).toBe('PersonligFinans')
+  })
+
+  it('follows the page reached by the header, a link, Back and Forward', async () => {
+    const user = userEvent.setup()
+    await renderAppAt('/')
+
+    await user.click(screen.getByRole('button', { name: 'Categories' }))
+    await screen.findByText('All groceries.')
+    expect(document.title).toBe('Categories · PersonligFinans')
+
+    await user.click(screen.getByRole('button', { name: 'Show rules for Groceries (3)' }))
+    await screen.findByRole('heading', { name: 'Categorization Rules' })
+    expect(document.title).toBe('Rules · PersonligFinans')
+
+    window.history.back()
+    await screen.findByText('All groceries.')
+    expect(document.title).toBe('Categories · PersonligFinans')
+
+    window.history.back()
+    await screen.findByRole('button', { name: 'Add transaction' })
+    expect(document.title).toBe('PersonligFinans')
+
+    window.history.forward()
+    await screen.findByText('All groceries.')
+    expect(document.title).toBe('Categories · PersonligFinans')
+
+    await user.click(screen.getByRole('button', { name: 'PersonligFinans' }))
+    expect(document.title).toBe('PersonligFinans')
+  })
+
+  it('is plain PersonligFinans on the landing page after Sign out', async () => {
+    const user = userEvent.setup()
+    await renderAppAt('/user')
+
+    await user.click(await screen.findByRole('button', { name: 'Sign out' }))
+
+    await screen.findByRole('heading', { name: 'Sign in' })
+    expect(document.title).toBe('PersonligFinans')
+  })
+
+  it('is plain PersonligFinans on the landing page after a call answers 401', async () => {
+    const user = userEvent.setup()
+    await renderAppAt('/rules')
+    categoriesServed = new Response(null, { status: 401 })
+
+    await user.click(screen.getByRole('button', { name: 'Categories' }))
+
+    await screen.findByRole('heading', { name: 'Sign in' })
+    expect(document.title).toBe('PersonligFinans')
+  })
+
+  it("is plain PersonligFinans on the landing page opened at a page's address", async () => {
+    currentUser = new Response(null, { status: 401 })
+    window.history.replaceState(null, '', '/rules')
+    render(<App />)
+
+    await screen.findByRole('heading', { name: 'Sign in' })
+    expect(document.title).toBe('PersonligFinans')
+  })
+
+  it('is plain PersonligFinans on the page to choose a new password', async () => {
+    window.history.replaceState(null, '', '/reset-password?email=me%40example.com&token=dG9rZW4')
+    render(<App />)
+
+    await screen.findByRole('heading', { name: 'Choose a new password' })
+    expect(document.title).toBe('PersonligFinans')
   })
 })
 
