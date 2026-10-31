@@ -9766,6 +9766,98 @@ describe('Signing in', () => {
     expect(screen.getByLabelText(/^email/i)).toHaveValue('me@example.com')
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
+
+  describe('at the address of a page', () => {
+    it.each(['/transactions', '/categories', '/rules', '/user', '/no-such-page'])(
+      'shows the landing page at %s, leaving the address as it is',
+      async (path) => {
+        currentUser = signedOut()
+        window.history.replaceState(null, '', path)
+        render(<App />)
+
+        expect(await landingPage()).toBeInTheDocument()
+        expect(screen.queryByRole('navigation')).not.toBeInTheDocument()
+        expect(window.location.pathname).toBe(path)
+      },
+    )
+
+    it('signs in to the page the address names', async () => {
+      currentUser = signedOut()
+      window.history.replaceState(null, '', '/rules')
+      const user = userEvent.setup()
+      render(<App />)
+      await landingPage()
+
+      await fillIn(user, 'me@example.com', 'my long passphrase')
+      await user.click(screen.getByRole('button', { name: 'Sign in' }))
+
+      expect(await screen.findByRole('heading', { name: 'Categorization Rules' })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Rules' })).toHaveAttribute('aria-current', 'page')
+      expect(window.location.pathname).toBe('/rules')
+    })
+
+    it('signs up to the page the address names', async () => {
+      currentUser = signedOut()
+      window.history.replaceState(null, '', '/categories')
+      const user = userEvent.setup()
+      render(<App />)
+      await landingPage()
+
+      await user.click(screen.getByRole('button', { name: 'Sign up' }))
+      await fillIn(user, 'new@example.com', 'my long passphrase')
+      await confirmPassword(user, 'my long passphrase')
+      await user.click(screen.getByRole('button', { name: 'Sign up' }))
+
+      expect(await screen.findByText('All groceries.')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Categories' })).toHaveAttribute('aria-current', 'page')
+      expect(window.location.pathname).toBe('/categories')
+    })
+
+    it('continues as the Guest to the page the address names', async () => {
+      currentUser = signedOut()
+      window.history.replaceState(null, '', '/user')
+      const user = userEvent.setup()
+      render(<App />)
+      await landingPage()
+
+      await user.click(screen.getByRole('button', { name: 'Continue as Guest' }))
+
+      expect(await screen.findByText(/signed in as/i)).toHaveTextContent('Signed in as Guest')
+      expect(screen.getByRole('button', { name: 'User' })).toHaveAttribute('aria-current', 'page')
+      expect(window.location.pathname).toBe('/user')
+    })
+
+    it("signs in on the Dashboard at the Dashboard's address from any other address", async () => {
+      currentUser = signedOut()
+      window.history.replaceState(null, '', '/no-such-page')
+      const user = userEvent.setup()
+      render(<App />)
+      await landingPage()
+
+      await fillIn(user, 'me@example.com', 'my long passphrase')
+      await user.click(screen.getByRole('button', { name: 'Sign in' }))
+
+      expect(await screen.findByRole('button', { name: 'Add transaction' })).toBeVisible()
+      expect(window.location.pathname).toBe('/')
+    })
+
+    it('keeps Sign in and Sign up one form at one address, adding no history entry on switching', async () => {
+      currentUser = signedOut()
+      window.history.replaceState(null, '', '/rules')
+      const user = userEvent.setup()
+      render(<App />)
+      await landingPage()
+      const entries = window.history.length
+
+      await user.click(screen.getByRole('button', { name: 'Sign up' }))
+      await landingPage('Sign up')
+      await user.click(screen.getByRole('button', { name: 'Sign in' }))
+      await landingPage()
+
+      expect(window.location.pathname).toBe('/rules')
+      expect(window.history.length).toBe(entries)
+    })
+  })
 })
 
 describe('User page', () => {
@@ -9797,7 +9889,7 @@ describe('User page', () => {
     expect(screen.queryByText(guest.email)).not.toBeInTheDocument()
   })
 
-  it('signs out to the landing page, and signing in again starts afresh', async () => {
+  it("signs out to the landing page at the Dashboard's address, and signing in again starts afresh on the Dashboard", async () => {
     const user = userEvent.setup()
     await renderApp()
     await user.click(screen.getByRole('button', { name: 'Rules' }))
@@ -9808,12 +9900,30 @@ describe('User page', () => {
     expect(await screen.findByRole('heading', { name: 'Sign in' })).toBeInTheDocument()
     expect(screen.queryByRole('navigation')).not.toBeInTheDocument()
     expect(fetchMock).toHaveBeenCalledWith('/api/user/sign-out', { method: 'POST' })
+    expect(window.location.pathname).toBe('/')
 
     await user.type(screen.getByLabelText(/^email/i), 'me@example.com')
     await user.type(screen.getByLabelText(/^password/i), 'my long passphrase')
     await user.click(screen.getByRole('button', { name: 'Sign in' }))
     await screen.findByRole('navigation')
     expect(screen.getByRole('button', { name: 'Rules' })).not.toHaveAttribute('aria-current')
+    expect(screen.getByRole('button', { name: 'Add transaction' })).toBeVisible()
+  })
+
+  it("puts the Dashboard's address in place of the page signed out on, so Back goes to the page before it", async () => {
+    const user = userEvent.setup()
+    await renderAppAt('/rules')
+    await user.click(userButton())
+
+    await user.click(screen.getByRole('button', { name: 'Sign out' }))
+    await screen.findByRole('heading', { name: 'Sign in' })
+    expect(window.location.pathname).toBe('/')
+
+    window.history.back()
+
+    await waitFor(() => expect(window.location.pathname).toBe('/rules'))
+    expect(screen.getByRole('heading', { name: 'Sign in' })).toBeInTheDocument()
+    expect(screen.queryByRole('navigation')).not.toBeInTheDocument()
   })
 
   it('sends none of the remaining Bank Statements of an Upload after signing out', async () => {
@@ -10985,6 +11095,26 @@ describe('Delete user and all data', () => {
     expect(JSON.parse(request[1]?.body as string)).toEqual({ password: 'my long passphrase' })
   })
 
+  it("puts the Dashboard's address in place of the User page, as Sign out does, so the next sign-in starts on the Dashboard", async () => {
+    const user = userEvent.setup()
+    await renderAppAt('/rules')
+    await user.click(screen.getByRole('button', { name: 'User' }))
+    await user.click(deleteYourUser())
+
+    await confirmWith(user, 'my long passphrase')
+    await screen.findByRole('heading', { name: 'Sign in' })
+    expect(window.location.pathname).toBe('/')
+
+    await user.type(screen.getByLabelText(/^email/i), 'new@example.com')
+    await user.type(screen.getByLabelText(/^password/i), 'my long passphrase')
+    await user.click(screen.getByRole('button', { name: 'Sign in' }))
+    expect(await screen.findByRole('button', { name: 'Add transaction' })).toBeVisible()
+    expect(window.location.pathname).toBe('/')
+
+    window.history.back()
+    await waitFor(() => expect(window.location.pathname).toBe('/rules'))
+  })
+
   it('shows a wrong password under the field, keeping the dialog open and the User signed in', async () => {
     handleDeleteYourUser = () => Response.json({ errors: { password: ['Wrong password.'] } }, { status: 400 })
     const user = await openUserPage()
@@ -11056,6 +11186,7 @@ describe('Signed out mid-session', () => {
 
     expect(await screen.findByRole('heading', { name: 'Sign in' })).toBeInTheDocument()
     expect(screen.queryByRole('navigation')).not.toBeInTheDocument()
+    expect(window.location.pathname).toBe('/categories')
 
     categoriesServed = categories
     await user.type(screen.getByLabelText(/^email/i), 'me@example.com')
@@ -11124,7 +11255,6 @@ describe('Antiforgery token', () => {
     await user.type(screen.getByLabelText(/^password/i), 'my long passphrase')
     await user.click(screen.getByRole('button', { name: 'Sign in' }))
     await screen.findByRole('navigation')
-    await user.click(screen.getByRole('button', { name: 'PersonligFinans' }))
     await user.upload(screen.getByLabelText(/bank statement pdf/i), statementPdf)
     await screen.findByRole('status')
 

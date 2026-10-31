@@ -82,7 +82,9 @@ interface LandingPageOrAppProps {
 
 // Asks who is signed in, unless told, and shows the landing page to nobody and the app to a User.
 // Being signed out, by Sign out or by any call answering 401, unmounts the app, so the next User
-// starts from nothing the previous one saw.
+// starts from nothing the previous one saw. The landing page shows at whatever address was opened,
+// leaving it as it is, so Sign in, Sign up and continuing as the Guest each land on the page it
+// names.
 function LandingPageOrApp({ signedIn }: LandingPageOrAppProps) {
   // undefined while asking, null when nobody is signed in.
   const [user, setUser] = useState<User | null | undefined>(signedIn)
@@ -119,7 +121,18 @@ function LandingPageOrApp({ signedIn }: LandingPageOrAppProps) {
   // A blank page while asking, so a signed-in User never sees the landing page flash by.
   if (user === undefined) return <div className="min-h-screen bg-slate-50 dark:bg-slate-950" />
   if (user === null) return <LandingPage onSignedIn={setUser} />
-  return <SignedInApp user={user} onSignedOut={() => setUser(null)} />
+  // Sign out and Delete your User put the Dashboard's address in place of the page left, so whoever
+  // signs in next on this device starts on the Dashboard rather than on the last User's page. A call
+  // answering 401 leaves the address alone, so signing back in returns to the same page.
+  return (
+    <SignedInApp
+      user={user}
+      onSignedOut={() => {
+        replacePage('home')
+        setUser(null)
+      }}
+    />
+  )
 }
 
 interface SignedInAppProps {
