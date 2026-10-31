@@ -28,8 +28,10 @@ public class AzureRuleGenerator(ChatClient chat, ILogger<AzureRuleGenerator> log
         name, in lowercase, copied literally from the description so that it matches this merchant's
         future transactions at any of its locations. Leave out city, area and place names, store
         numbers, dates, card numbers and payment prefixes. For example, "Kiwi 512 Bergen Sentrum"
-        gives "kiwi", and "Peppes Pizza Lille Torget" gives "peppes pizza". When the description
-        names no merchant, use its most distinctive words.
+        gives "kiwi", and "Peppes Pizza Lille Torget" gives "peppes pizza". The keyword only matches
+        whole words, so copy each of its words whole and never cut one short: "Vitusapotek Lagunen"
+        gives "vitusapotek", not "apotek". When the description names no merchant, use its most
+        distinctive words.
         """;
 
     private static readonly JsonSerializerOptions PromptJson = new(JsonSerializerDefaults.Web)

@@ -686,6 +686,10 @@ public class BankStatementEndpointsTests : IAsyncLifetime
         await AssertDropped("kaffe", "Restaurants");
 
     [Fact]
+    public async Task Post_ProposalWithKeywordOnlyPartOfAWordInItsDescription_IsDropped() =>
+        await AssertDropped("kafé", "Restaurants", description: "Kaféen Sentrum");
+
+    [Fact]
     public async Task Post_ProposalThatWouldChangeTheCategoryOfAStoredTransaction_IsDropped()
     {
         await AddRule("matkroken", _categories.Groceries);

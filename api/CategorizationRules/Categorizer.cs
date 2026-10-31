@@ -32,8 +32,9 @@ public static class Categorizer
     public static readonly Expression<Func<Transaction, bool>> IsCategorizedByARule =
         t => t.BankStatementId != null && t.CategorizationRuleId != null;
 
-    // The rule whose keyword the description contains, ignoring case. The longest keyword wins, so
-    // a specific rule overrides a general one; between equally long keywords the oldest rule wins.
+    // The rule whose keyword the description contains as whole words, ignoring case. The longest
+    // keyword wins, so a specific rule overrides a general one; between equally long keywords the
+    // oldest rule wins.
     public static TRule? ChooseRule<TRule>(string description, IEnumerable<TRule> rules)
         where TRule : class, ICategorizationRule =>
         rules
@@ -51,9 +52,22 @@ public static class Categorizer
         where TRule : class, ICategorizationRule =>
         eligible.Select(t => new Categorized<TRule>(t, ChooseRule(t.Description, rules))).ToList();
 
-    // Whether the description contains the keyword, ignoring case, as a rule matches it.
-    private static bool Matches(string description, string keyword) =>
-        description.Contains(keyword, StringComparison.OrdinalIgnoreCase);
+    // Whether the description contains the keyword as whole words, ignoring case, as a rule matches
+    // it: neither the character just before it nor the one just after it is a letter or digit.
+    // "vy" matches "VY kollektiv" and "VY.no", but not "Envy".
+    private static bool Matches(string description, string keyword)
+    {
+        for (var start = description.IndexOf(keyword, StringComparison.OrdinalIgnoreCase);
+             start >= 0;
+             start = description.IndexOf(keyword, start + 1, StringComparison.OrdinalIgnoreCase))
+        {
+            var end = start + keyword.Length;
+            if ((start == 0 || !char.IsLetterOrDigit(description[start - 1])) &&
+                (end == description.Length || !char.IsLetterOrDigit(description[end])))
+                return true;
+        }
+        return false;
+    }
 
     // The most Transactions a preview lists of those a rule change would change.
     public const int PreviewedChangesMax = 10;
@@ -121,8 +135,8 @@ public static class Categorizer
     // - no rule matches its row's description;
     // - its Category exists;
     // - its keyword, trimmed and lowercased, is within the length limits, is not a Payment Channel,
-    //   appears in the row's description ignoring case, and is unique among the User's rules
-    //   ignoring case;
+    //   appears in the row's description as whole words ignoring case, and is unique among the
+    //   User's rules ignoring case;
     // - it would change the Category of nothing that has one: no rule-eligible Transaction, and none
     //   of the descriptions about to be imported. It may only categorize what is Uncategorized.
     // Each added rule is saved at once, so that the uniqueness check is made by the database,
@@ -148,7 +162,7 @@ public static class Categorizer
                 !categoryIdByName.TryGetValue(proposal.CategoryName, out var categoryId) ||
                 keyword.Length is < KeywordMinLength or > AppDbContext.KeywordMaxLength ||
                 PaymentChannels.Contains(keyword) ||
-                !description.Contains(keyword, StringComparison.OrdinalIgnoreCase))
+                !Matches(description, keyword))
                 continue;
 
             var rule = new CategorizationRule

@@ -101,8 +101,12 @@ The state of a Transaction with no Category, awaiting a decision: an imported Tr
 _Avoid_: Unreviewed, pending
 
 **Categorization Rule**:
-A keyword paired with a Category: an imported Transaction whose description contains the keyword (ignoring case) is automatically assigned that Category, and reassigned whenever the rules change unless its Category was chosen manually; when several match, the longest keyword wins. Keywords are unique among the User's rules. Seeded with common merchants and visible to the user; correcting a Transaction's Category by hand never creates one. Never applied to manually-entered Transactions.
+A keyword paired with a Category: an imported Transaction whose description contains the keyword as whole words (ignoring case) is automatically assigned that Category, and reassigned whenever the rules change unless its Category was chosen manually; when several match, the longest keyword wins. Keywords are unique among the User's rules. Seeded with common merchants and visible to the user; correcting a Transaction's Category by hand never creates one. Never applied to manually-entered Transactions.
 _Avoid_: Mapping, pattern
+
+**Whole words**:
+How a Categorization Rule's keyword must appear in a description to match it: neither the character just before it nor the one just after it is a letter or digit (Æ, Ø and Å included). Any other character, or the start or end of the description, separates words. So "vy" matches "VY kollektiv" and "VY.no" but not "Envy", and "apotek" does not match "Vitusapotek".
+_Avoid_: Exact match, word boundary
 
 **AI-generated rule**:
 A Categorization Rule created by an LLM during import, for an imported Transaction that no existing rule matched. It behaves exactly like any other rule; the mark only lets the user spot and review it among the rules, and is removed once the user edits the rule (even saving it unchanged), after which it is an ordinary rule. It may have any Category, Other included, and is only created when it categorizes nothing that already has a Category; its keyword is never a Payment Channel. The LLM sees only the cleaned description and whether the Amount is negative or positive, along with each Category's name and description. It never declines: every Transaction it is asked about gets a keyword and a Category, and one whose rule cannot be added stays Uncategorized.

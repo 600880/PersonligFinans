@@ -182,6 +182,30 @@ public class CategorizationRuleEndpointsTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Post_Rule_MatchesTheKeywordOnlyAsWholeWords()
+    {
+        var ids = await Imported("Lux Sentrum", "Kafé LUX.no", "Kafé Lux", "Deluxe Kafé", "Luxus", "Lux1 Sentrum", "Luxø");
+
+        var changed = await TransactionsChangedByAdding("lux", _categories.Restaurants);
+
+        Assert.Equal(3, changed);
+        Assert.Equal(
+            [_categories.Restaurants, _categories.Restaurants, _categories.Restaurants, null, null, null, null],
+            await CategoriesOf(ids));
+    }
+
+    [Fact]
+    public async Task Post_Rule_MatchesAKeywordOfSeveralWordsOnlyAsWholeWords()
+    {
+        var ids = await Imported("Lux Kafé Sentrum", "Deluxe Kafé", "Lux Kaféen");
+
+        var changed = await TransactionsChangedByAdding("lux kafé", _categories.Restaurants);
+
+        Assert.Equal(1, changed);
+        Assert.Equal([_categories.Restaurants, null, null], await CategoriesOf(ids));
+    }
+
+    [Fact]
     public async Task Post_Rule_NeverChangesManuallyEnteredTransactions()
     {
         var response = await _client.PostAsJsonAsync("/api/transactions", new
@@ -302,8 +326,8 @@ public class CategorizationRuleEndpointsTests : IAsyncLifetime
     [Fact]
     public async Task Put_KeywordChange_ReleasesTransactionsAndPicksUpNewOnes()
     {
-        var ids = await Imported("Butikk Sentrum", "Butikk Nord", "Bakeri");
-        await AddedRuleId("sent", _categories.Other);
+        var ids = await Imported("Butikk Vest", "Butikk Nord", "Bakeri");
+        await AddedRuleId("vest", _categories.Other);
         var ruleId = await AddedRuleId("butikk", _categories.Groceries);
 
         var edited = await EditedRule(ruleId, "bakeri", _categories.Groceries);
@@ -455,8 +479,8 @@ public class CategorizationRuleEndpointsTests : IAsyncLifetime
     [Fact]
     public async Task Delete_Rule_HandsItsTransactionsToTheNextBestRuleOrLeavesThemUncategorized()
     {
-        var ids = await Imported("Butikk Sentrum", "Butikk Nord", "Annet");
-        await AddedRuleId("sent", _categories.Other);
+        var ids = await Imported("Butikk Vest", "Butikk Nord", "Annet");
+        await AddedRuleId("vest", _categories.Other);
         var ruleId = await AddedRuleId("butikk", _categories.Groceries);
 
         var changed = await TransactionsChangedByDeleting(ruleId);
@@ -635,10 +659,10 @@ public class CategorizationRuleEndpointsTests : IAsyncLifetime
     [Fact]
     public async Task DeletePreview_SaysWhatDeletingTheRuleThenDoes()
     {
-        // Without "butikk", the first goes to the rule for "sent", the second stays in Groceries through
+        // Without "butikk", the first goes to the rule for "vest", the second stays in Groceries through
         // the rule for "nord", the third becomes Uncategorized, and the fourth it never matched.
-        var ids = await Imported("Butikk Sentrum", "Butikk Nord", "Butikk Torget", "Annet");
-        await AddedRuleId("sent", _categories.Other);
+        var ids = await Imported("Butikk Vest", "Butikk Nord", "Butikk Torget", "Annet");
+        await AddedRuleId("vest", _categories.Other);
         await AddedRuleId("nord", _categories.Groceries);
         var ruleId = await AddedRuleId("butikk", _categories.Groceries);
         var before = await CategoriesOf(ids);
@@ -654,7 +678,7 @@ public class CategorizationRuleEndpointsTests : IAsyncLifetime
         Assert.Equal(
             [(ids[0], (int?)_categories.Groceries, (int?)_categories.Other), (ids[2], _categories.Groceries, null)],
             preview.Changes.Select(c => (c.Id, c.FromCategoryId, c.ToCategoryId)).Order());
-        Assert.Equal(["Butikk Sentrum", "Butikk Torget"], preview.Changes.Select(c => c.Description).Order());
+        Assert.Equal(["Butikk Torget", "Butikk Vest"], preview.Changes.Select(c => c.Description).Order());
     }
 
     [Fact]

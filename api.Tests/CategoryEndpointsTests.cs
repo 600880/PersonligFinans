@@ -531,9 +531,9 @@ public class CategoryEndpointsTests : IAsyncLifetime
     {
         var id = await CreateCategory("Garden");
         var otherCategoryId = await CreateCategory("Home");
-        var transactionIds = await Imported("Plantasjen Oslo", "Plant Shop");
-        await AddedRuleId("plant", otherCategoryId);
-        await AddedRuleId("plantasjen", id);
+        var transactionIds = await Imported("Plantasjen Oslo", "Plantasjen Shop");
+        await AddedRuleId("plantasjen", otherCategoryId);
+        await AddedRuleId("plantasjen oslo", id);
         Assert.Equal([id, otherCategoryId], await CategoriesOf(transactionIds));
 
         var changed = await TransactionsChangedByDeletingWithItsRules(id);
@@ -580,7 +580,7 @@ public class CategoryEndpointsTests : IAsyncLifetime
     {
         var id = await CreateCategory("Garden");
         var otherCategoryId = await CreateCategory("Home");
-        await AddedRuleId("plant", otherCategoryId);
+        await AddedRuleId("plantasjen", otherCategoryId);
         var manual = (await Imported("Plantasjen"))[0];
         await CategorizeManually(manual, id);
 
@@ -619,10 +619,10 @@ public class CategoryEndpointsTests : IAsyncLifetime
     {
         var id = await CreateCategory("Garden");
         var otherCategoryId = await CreateCategory("Home");
-        await AddedRuleId("plant", otherCategoryId);
-        var untouched = await Imported("Plant Shop");
+        await AddedRuleId("plantasjen", otherCategoryId);
+        var untouched = await Imported("Plantasjen Shop");
         var ruleCategorized = await Imported("Plantasjen Oslo", "Mester Grønn");
-        await AddedRuleId("plantasjen", id);
+        await AddedRuleId("plantasjen oslo", id);
         await AddedRuleId("mester", id);
         var manual = (await Imported("Hageland"))[0];
         await CategorizeManually(manual, id);
@@ -721,9 +721,9 @@ public class CategoryEndpointsTests : IAsyncLifetime
     {
         var id = await CreateCategory("Garden");
         var otherCategoryId = await CreateCategory("Home");
-        await AddedRuleId("plant", otherCategoryId);
-        await Imported("Plantasjen Oslo", "Mester Grønn", "Plant Shop");
-        await AddedRuleId("plantasjen", id);
+        await AddedRuleId("plantasjen", otherCategoryId);
+        await Imported("Plantasjen Oslo", "Mester Grønn", "Plantasjen Shop");
+        await AddedRuleId("plantasjen oslo", id);
         await AddedRuleId("mester", id);
         await ManuallyEntered("Felleskjøpet", id);
         await ManuallyEntered("Hageland", _categories.Groceries);
