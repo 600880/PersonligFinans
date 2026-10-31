@@ -30,6 +30,8 @@ import { useDismiss } from './lib/useDismiss'
 // Statement, with the reason the server gave; or a picked file left out of a Receipt scan, with why.
 type Rejection = { filename: string; message: string }
 
+const APP_NAME = 'PersonligFinans'
+
 const NAV_ITEMS: { view: Page; label: string }[] = [
   { view: 'transactions', label: 'Transactions' },
   { view: 'categories', label: 'Categories' },
@@ -228,6 +230,18 @@ function SignedInApp({ user, onSignedOut }: SignedInAppProps) {
 
   // The page the address bar names, followed as it changes by Back and Forward too.
   const view = useShownPage(handlePageChange)
+
+  // The tab title names the page shown, such as "Rules · PersonligFinans", so tabs and the browser's
+  // history list tell the pages apart. The Dashboard's is plain PersonligFinans, as index.html names
+  // the landing page and the reset-password page, and being signed out, by Sign out or a 401, puts
+  // the plain title back as the app unmounts, so the landing page never names a page it doesn't show.
+  useEffect(() => {
+    const label = NAV_ITEMS.find((item) => item.view === view)?.label
+    document.title = label ? `${label} · ${APP_NAME}` : APP_NAME
+    return () => {
+      document.title = APP_NAME
+    }
+  }, [view])
 
   // Choosing the page already shown changes nothing but closing the menu of pages.
   function chooseView(next: Page) {
