@@ -397,6 +397,14 @@ async function fillValidForm(user: ReturnType<typeof userEvent.setup>) {
   await user.selectOptions(screen.getByLabelText(/category/i), 'Groceries')
 }
 
+// Whether refreshing or closing the tab now would ask the browser's own "Leave site?" question
+// first, which it does when the beforeunload event is cancelled.
+function leavingTheSiteAsks() {
+  const event = new Event('beforeunload', { cancelable: true })
+  window.dispatchEvent(event)
+  return event.defaultPrevented
+}
+
 // Chooses the Bookmark once the Folders are loaded.
 async function chooseBookmark(user: ReturnType<typeof userEvent.setup>, name: string) {
   await user.selectOptions(screen.getByLabelText(/^bookmark/i), await screen.findByRole('option', { name }))
@@ -9280,6 +9288,18 @@ describe('Scan receipts', () => {
     })
   })
 
+  it('asks "Leave site?" while the scan is open, even with every Receipt read, and no longer once it closes', async () => {
+    const user = await scanUntilFormIsReady([kiwi, rema])
+
+    expect(leavingTheSiteAsks()).toBe(true)
+    await user.click(screen.getByRole('button', { name: 'Skip' }))
+    expect(leavingTheSiteAsks()).toBe(true)
+
+    await user.click(screen.getByRole('button', { name: 'Skip' }))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(leavingTheSiteAsks()).toBe(false)
+  })
+
   describe('leaving partway', () => {
     function confirmation() {
       return screen.queryByRole('alertdialog')
@@ -11109,5 +11129,51 @@ describe('Antiforgery token', () => {
     await screen.findByRole('status')
 
     expect(tokensSentTo('/api/bank-statements')).toEqual(['token-1', 'token-2'])
+  })
+})
+
+describe('Leave site?', () => {
+  it('is never asked with nothing under way, on any page', async () => {
+    const user = userEvent.setup()
+    await renderApp()
+    expect(leavingTheSiteAsks()).toBe(false)
+
+    await user.click(screen.getByRole('button', { name: 'Rules' }))
+
+    expect(leavingTheSiteAsks()).toBe(false)
+  })
+
+  it('is no longer asked after signing out during an Upload', async () => {
+    handleUpload = () => new Promise(() => {})
+    const user = userEvent.setup()
+    await renderApp()
+    await user.upload(screen.getByLabelText(/bank statement pdf/i), statementPdf)
+    expect(leavingTheSiteAsks()).toBe(true)
+
+    await user.click(screen.getByRole('button', { name: 'User' }))
+    await user.click(screen.getByRole('button', { name: 'Sign out' }))
+    await screen.findByRole('heading', { name: 'Sign in' })
+
+    expect(leavingTheSiteAsks()).toBe(false)
+  })
+
+  it('is asked while an Upload is under way, and no longer once it finishes', async () => {
+    const responders: ((response: Response) => void)[] = []
+    handleUpload = () => new Promise((resolve) => responders.push(resolve))
+    const user = userEvent.setup()
+    await renderApp()
+
+    await user.upload(screen.getByLabelText(/bank statement pdf/i), [statementPdf, statementPdf])
+
+    expect(leavingTheSiteAsks()).toBe(true)
+    responders[0](Response.json(importedStatement, { status: 201 }))
+    await waitFor(() => expect(responders).toHaveLength(2))
+    expect(leavingTheSiteAsks()).toBe(true)
+
+    responders[1](Response.json(importedStatement, { status: 201 }))
+    await screen.findByRole('status')
+    // The question stops once the app has caught up with the finished Upload, which can be just
+    // after its summary shows.
+    await waitFor(() => expect(leavingTheSiteAsks()).toBe(false))
   })
 })

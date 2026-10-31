@@ -170,6 +170,22 @@ function SignedInApp({ user, onSignedOut }: SignedInAppProps) {
       hasSignedOutRef.current = true
     }
   }, [])
+  // While an Upload is under way or a Receipt scan is open, refreshing or closing the tab asks the
+  // browser's own "Leave site?" question first, worded by the browser rather than the app. Doing so
+  // would stop sending the Bank Statements not yet sent, or discard the Receipts not yet saved, which
+  // have already cost AI requests and would cost more to read again. Moving between pages never asks,
+  // as it interrupts neither, and nothing asks once the User has signed out.
+  const isScanOpen = scan !== null
+  useEffect(() => {
+    if (!isUploading && !isScanOpen) return
+    function askBeforeLeaving(event: BeforeUnloadEvent) {
+      event.preventDefault()
+      // Older browsers ask only when a returnValue is set.
+      event.returnValue = true
+    }
+    window.addEventListener('beforeunload', askBeforeLeaving)
+    return () => window.removeEventListener('beforeunload', askBeforeLeaving)
+  }, [isUploading, isScanOpen])
   const closeNav = useCallback(() => setIsNavOpen(false), [])
   const closeAddMenu = useCallback(() => setIsAddMenuOpen(false), [])
   useDismiss(headerRef, isNavOpen, closeNav)
