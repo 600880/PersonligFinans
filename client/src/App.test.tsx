@@ -325,6 +325,9 @@ afterEach(() => {
   // The Appearance picked is remembered in the browser, so each test starts as a fresh browser.
   localStorage.clear()
   document.documentElement.classList.remove('dark')
+  // Each page has its own address, so each test starts at the Dashboard's, whichever page the last
+  // one was left on.
+  window.history.replaceState(null, '', '/')
 })
 
 const importedStatement = {
@@ -342,6 +345,12 @@ const importedStatement = {
 async function renderApp() {
   render(<App />)
   await screen.findByRole('navigation')
+}
+
+// Renders the app at an address, as opening a bookmark to it, or refreshing there, does.
+async function renderAppAt(path: string) {
+  window.history.replaceState(null, '', path)
+  await renderApp()
 }
 
 // The device's light or dark setting, which System follows and can be changed while the app is open.
@@ -1077,6 +1086,41 @@ describe('App', () => {
 
       await user.click(screen.getByRole('button', { name: 'PersonligFinans' }))
 
+      expect(screen.getByRole('status')).toHaveTextContent('Imported 38 transactions')
+    })
+
+    it('clears the import summary when left by Back, so it is gone when Forward returns', async () => {
+      const user = userEvent.setup()
+      await renderAppAt('/rules')
+      await user.click(screen.getByRole('button', { name: 'PersonligFinans' }))
+      await user.upload(screen.getByLabelText(/bank statement pdf/i), statementPdf)
+      expect(await screen.findByRole('status')).toHaveTextContent('Imported 38 transactions')
+
+      window.history.back()
+      await screen.findByRole('heading', { name: 'Categorization Rules' })
+      window.history.forward()
+
+      expect(await screen.findByRole('button', { name: 'Add transaction' })).toBeInTheDocument()
+      expect(screen.getByRole('status')).toBeEmptyDOMElement()
+    })
+
+    it('still shows an upload that finished while away when Back returns', async () => {
+      let respond: (response: Response) => void = () => {}
+      handleUpload = () => new Promise((resolve) => (respond = resolve))
+      const user = userEvent.setup()
+      await renderApp()
+      await user.upload(screen.getByLabelText(/bank statement pdf/i), statementPdf)
+      await user.click(screen.getByRole('button', { name: 'Transactions' }))
+      const response = Response.json(importedStatement, { status: 201 })
+      const read = vi.spyOn(response, 'json')
+      respond(response)
+      // Lets the upload finish while away.
+      await waitFor(() => expect(read).toHaveBeenCalled())
+      await act(async () => {})
+
+      window.history.back()
+
+      expect(await screen.findByRole('button', { name: /upload transactions/i })).toBeEnabled()
       expect(screen.getByRole('status')).toHaveTextContent('Imported 38 transactions')
     })
   })
@@ -3401,6 +3445,122 @@ describe('Rules page', () => {
   })
 })
 
+describe('Page addresses', () => {
+  // The header items marked as the page being shown.
+  function markedPages() {
+    return within(screen.getByRole('navigation'))
+      .getAllByRole('button')
+      .filter((item) => item.getAttribute('aria-current') === 'page')
+      .map((item) => item.textContent)
+  }
+
+  it.each([
+    ['/transactions', 'Transactions', 'Transactions'],
+    ['/categories', 'Categories', 'Categories'],
+    ['/rules', 'Rules', 'Categorization Rules'],
+    ['/user', 'User', 'User'],
+  ])('opens %s on the %s page, marked in the header', async (path, page, heading) => {
+    await renderAppAt(path)
+
+    expect(await screen.findByRole('heading', { name: heading })).toBeInTheDocument()
+    expect(markedPages()).toEqual([page])
+    expect(screen.queryByRole('button', { name: 'Add transaction' })).not.toBeInTheDocument()
+    expect(window.location.pathname).toBe(path)
+  })
+
+  it('opens / on the Dashboard, with no page marked in the header', async () => {
+    await renderAppAt('/')
+
+    expect(screen.getByRole('button', { name: 'Add transaction' })).toBeVisible()
+    expect(markedPages()).toEqual([])
+    expect(window.location.pathname).toBe('/')
+  })
+
+  it("opens any other address on the Dashboard, putting the Dashboard's address in its place", async () => {
+    // Rules was visited before, so Back shows whether an entry was added for the Dashboard.
+    window.history.replaceState(null, '', '/rules')
+    window.history.pushState(null, '', '/no-such-page')
+    await renderApp()
+
+    expect(screen.getByRole('button', { name: 'Add transaction' })).toBeVisible()
+    expect(markedPages()).toEqual([])
+    expect(window.location.pathname).toBe('/')
+
+    window.history.back()
+    expect(await screen.findByRole('heading', { name: 'Categorization Rules' })).toBeInTheDocument()
+  })
+
+  it('puts the page chosen in the header in the address bar, and refreshing stays on it', async () => {
+    const user = userEvent.setup()
+    await renderAppAt('/')
+
+    await user.click(screen.getByRole('button', { name: 'Rules' }))
+    expect(window.location.pathname).toBe('/rules')
+
+    cleanup()
+    await renderApp()
+    expect(await screen.findByRole('heading', { name: 'Categorization Rules' })).toBeInTheDocument()
+    expect(markedPages()).toEqual(['Rules'])
+  })
+
+  it('steps through the pages visited with Back and Forward, marking each in the header', async () => {
+    const user = userEvent.setup()
+    await renderAppAt('/')
+    await user.click(screen.getByRole('button', { name: 'Transactions' }))
+    await user.click(screen.getByRole('button', { name: 'Categories' }))
+    await screen.findByRole('heading', { name: 'Categories' })
+
+    window.history.back()
+    expect(await screen.findByRole('heading', { name: 'Transactions' })).toBeInTheDocument()
+    expect(markedPages()).toEqual(['Transactions'])
+    expect(window.location.pathname).toBe('/transactions')
+
+    window.history.back()
+    expect(await screen.findByRole('button', { name: 'Add transaction' })).toBeInTheDocument()
+    expect(markedPages()).toEqual([])
+    expect(window.location.pathname).toBe('/')
+
+    window.history.forward()
+    expect(await screen.findByRole('heading', { name: 'Transactions' })).toBeInTheDocument()
+    expect(markedPages()).toEqual(['Transactions'])
+  })
+
+  it('adds no entry for choosing the page already shown in the header', async () => {
+    const user = userEvent.setup()
+    await renderAppAt('/rules')
+    await user.click(screen.getByRole('button', { name: 'Categories' }))
+
+    await user.click(screen.getByRole('button', { name: 'Categories' }))
+
+    window.history.back()
+    expect(await screen.findByRole('heading', { name: 'Categorization Rules' })).toBeInTheDocument()
+  })
+
+  it('adds no entry for a dialog', async () => {
+    const user = userEvent.setup()
+    await renderAppAt('/rules')
+    await user.click(screen.getByRole('button', { name: 'PersonligFinans' }))
+    await user.click(screen.getByRole('button', { name: 'Add transaction' }))
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: /cancel/i }))
+
+    window.history.back()
+
+    expect(await screen.findByRole('heading', { name: 'Categorization Rules' })).toBeInTheDocument()
+  })
+
+  it('goes to the Dashboard with the PersonligFinans title, adding no entry while already there', async () => {
+    const user = userEvent.setup()
+    await renderAppAt('/rules')
+    await user.click(screen.getByRole('button', { name: 'PersonligFinans' }))
+    expect(window.location.pathname).toBe('/')
+
+    await user.click(screen.getByRole('button', { name: 'PersonligFinans' }))
+
+    window.history.back()
+    expect(await screen.findByRole('heading', { name: 'Categorization Rules' })).toBeInTheDocument()
+  })
+})
+
 describe('Header', () => {
   function navItems() {
     return within(screen.getByRole('navigation')).getAllByRole('button')
@@ -3513,6 +3673,18 @@ describe('Header', () => {
       await user.click(screen.getByRole('main'))
       expect(menuButton()).toHaveAttribute('aria-expanded', 'false')
     })
+
+    it('closes when Back changes the page', async () => {
+      const user = userEvent.setup()
+      await renderAppAt('/rules')
+      await user.click(screen.getByRole('button', { name: 'PersonligFinans' }))
+      await user.click(menuButton())
+
+      window.history.back()
+
+      expect(await screen.findByRole('heading', { name: 'Categorization Rules' })).toBeInTheDocument()
+      expect(menuButton()).toHaveAttribute('aria-expanded', 'false')
+    })
   })
 })
 
@@ -3555,6 +3727,19 @@ describe('Add transactions menu on a narrow screen', () => {
     await user.click(menuButton())
     await user.click(screen.getByRole('banner'))
     expect(menuButton()).toHaveAttribute('aria-expanded', 'false')
+  })
+
+  it('is closed on returning to the Dashboard after Back changed the page while it was open', async () => {
+    const user = userEvent.setup()
+    await renderAppAt('/rules')
+    await user.click(screen.getByRole('button', { name: 'PersonligFinans' }))
+    await user.click(menuButton())
+
+    window.history.back()
+    await screen.findByRole('heading', { name: 'Categorization Rules' })
+    window.history.forward()
+
+    expect(await screen.findByRole('button', { name: 'Add transactions' })).toHaveAttribute('aria-expanded', 'false')
   })
 
   it("shows an upload's progress, and still opens on the other ways while Upload transactions waits", async () => {
@@ -6253,6 +6438,22 @@ describe("Transactions page from a Category's Transactions count", () => {
     expect(await screen.findByRole('cell', { name: 'Rema 1000' })).toBeInTheDocument()
     expect(chosenFilters()).toEqual(['2026', 'March', 'All categories'])
   })
+
+  it('adds an entry, so Back returns to Categories, and Forward opens Transactions as from the header', async () => {
+    const user = await openCategoriesPage()
+    await user.click(screen.getByRole('button', { name: 'Show transactions in Other (1)' }))
+    await screen.findByRole('cell', { name: 'Elkjøp' })
+    expect(window.location.pathname).toBe('/transactions')
+    expect(window.location.search).toBe('')
+
+    window.history.back()
+    expect(await screen.findByText('All groceries.')).toBeInTheDocument()
+    expect(window.location.pathname).toBe('/categories')
+
+    window.history.forward()
+    expect(await screen.findByRole('cell', { name: 'Rema 1000' })).toBeInTheDocument()
+    expect(chosenFilters()).toEqual(['2026', 'March', 'All categories'])
+  })
 })
 
 describe("Rules page from a Category's rule count", () => {
@@ -6361,6 +6562,23 @@ describe("Rules page from a Category's rule count", () => {
     expect(screen.getByRole('combobox', { name: 'Filter by category' })).toHaveDisplayValue('All categories')
     const dialog = await openAddDialog(user)
     expect(dialog.getByLabelText('Category')).toHaveDisplayValue('Choose…')
+  })
+
+  it('adds an entry, so Back returns to Categories, and Forward opens all rules as from the header', async () => {
+    const user = await openCategoriesPage()
+    await user.click(screen.getByRole('button', { name: 'Show rules for Other (1)' }))
+    await screen.findByRole('cell', { name: 'apotek' })
+    expect(window.location.pathname).toBe('/rules')
+    expect(window.location.search).toBe('')
+
+    window.history.back()
+    expect(await screen.findByText('All groceries.')).toBeInTheDocument()
+    expect(window.location.pathname).toBe('/categories')
+
+    window.history.forward()
+    expect(await screen.findByRole('cell', { name: 'kiwi' })).toBeInTheDocument()
+    expect(keywords()).toEqual(['apotek', 'kiwi', 'rema'])
+    expect(screen.getByRole('combobox', { name: 'Filter by category' })).toHaveDisplayValue('All categories')
   })
 })
 
@@ -6682,6 +6900,32 @@ describe('Dashboard', () => {
       ])
     })
 
+    it('keeps the Granularity, Period and Include savings, and fetches the Spending again, by Back', async () => {
+      months = [
+        { year: 2026, month: 9 },
+        { year: 2026, month: 3 },
+      ]
+      const user = userEvent.setup()
+      await renderApp()
+      await waitFor(() => expect(centreTotal()).toBe('Total 0,00 kr'))
+      await user.selectOptions(within(dashboard()).getByLabelText('Granularity'), 'Quarter')
+      await user.selectOptions(screen.getByLabelText('Period'), 'Q1 2026')
+      await user.click(within(dashboard()).getByRole('checkbox', { name: 'Include savings' }))
+      await user.click(screen.getByRole('button', { name: 'Rules' }))
+      const requestsBefore = requestedSpending().length
+      handleSpending = () => Response.json(septemberSpending)
+
+      window.history.back()
+
+      await waitFor(() => expect(centreTotal()).toBe('Total 1 570,50 kr'))
+      expect(within(dashboard()).getByLabelText('Granularity')).toHaveDisplayValue('Quarter')
+      expect(screen.getByLabelText('Period')).toHaveValue('2026-Q1')
+      expect(within(dashboard()).getByRole('checkbox', { name: 'Include savings' })).toBeChecked()
+      expect(requestedSpending().slice(requestsBefore)).toEqual([
+        '/api/spending?year=2026&quarter=1&includeSavings=true',
+      ])
+    })
+
     it('keeps the Granularity, Period and Include savings after a visit to the User page', async () => {
       months = [
         { year: 2026, month: 9 },
@@ -6985,6 +7229,23 @@ describe('Dashboard', () => {
       expect(listedDescriptions()).toEqual(['Rema 1000'])
       expect(chosenFilters()).toEqual(['2025', 'December', 'Groceries'])
       expect(requestedPeriods()).toEqual(['/api/transactions?year=2025&month=12'])
+    })
+
+    it('adds an entry, so Back returns to the Dashboard, and Forward opens Transactions as from the header', async () => {
+      const user = await openDashboard()
+      await user.selectOptions(screen.getByLabelText('Period'), 'December 2025')
+      await user.click(await legendButton('Groceries'))
+      await screen.findByRole('cell', { name: 'Rema 1000' })
+      expect(window.location.pathname).toBe('/transactions')
+      expect(window.location.search).toBe('')
+
+      window.history.back()
+      expect(await screen.findByRole('region', { name: 'Spending' })).toBeInTheDocument()
+      expect(window.location.pathname).toBe('/')
+
+      window.history.forward()
+      expect(await screen.findByRole('cell', { name: 'Ukjent butikk' })).toBeInTheDocument()
+      expect(chosenFilters()).toEqual(['2026', 'September', 'All categories'])
     })
 
     it('opens the whole year for a year Period', async () => {
@@ -8420,6 +8681,20 @@ describe('Scan receipts', () => {
     expect(within(dialog).getByLabelText(/category/i)).toHaveValue('')
   })
 
+  it('adds no history entry, and stays open when Back changes the page', async () => {
+    const user = userEvent.setup()
+    await renderAppAt('/rules')
+    await user.click(screen.getByRole('button', { name: 'PersonligFinans' }))
+    await user.upload(screen.getByLabelText(/^receipts$/i), [kiwi, rema])
+    await formIsReady()
+
+    window.history.back()
+
+    await waitFor(() => expect(window.location.pathname).toBe('/rules'))
+    expect(await screen.findByRole('button', { name: 'Rules', current: 'page' })).toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: 'Receipt 1 of 2' })).toBeInTheDocument()
+  })
+
   it('moves the focus into the window when it opens', async () => {
     await scan([kiwi])
 
@@ -9519,7 +9794,6 @@ describe('User page', () => {
     await user.click(screen.getByRole('button', { name: 'Sign in' }))
     await screen.findByRole('navigation')
     expect(screen.getByRole('button', { name: 'Rules' })).not.toHaveAttribute('aria-current')
-    expect(screen.getByRole('button', { name: 'Add transaction' })).toBeVisible()
   })
 
   it('sends none of the remaining Bank Statements of an Upload after signing out', async () => {
@@ -10752,7 +11026,7 @@ describe('Delete user and all data', () => {
 })
 
 describe('Signed out mid-session', () => {
-  it('returns to the landing page when a call answers 401, and signing in again starts afresh', async () => {
+  it('returns to the landing page when a call answers 401, and signing in again starts afresh on the same page', async () => {
     const user = userEvent.setup()
     await renderApp()
     await user.click(screen.getByRole('button', { name: 'Rules' }))
@@ -10768,8 +11042,9 @@ describe('Signed out mid-session', () => {
     await user.type(screen.getByLabelText(/^password/i), 'my long passphrase')
     await user.click(screen.getByRole('button', { name: 'Sign in' }))
     await screen.findByRole('navigation')
-    expect(screen.getByRole('button', { name: 'Categories' })).not.toHaveAttribute('aria-current')
-    expect(screen.getByRole('button', { name: 'Add transaction' })).toBeVisible()
+    expect(await screen.findByText('All groceries.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Categories' })).toHaveAttribute('aria-current', 'page')
+    expect(window.location.pathname).toBe('/categories')
   })
 })
 
@@ -10829,6 +11104,7 @@ describe('Antiforgery token', () => {
     await user.type(screen.getByLabelText(/^password/i), 'my long passphrase')
     await user.click(screen.getByRole('button', { name: 'Sign in' }))
     await screen.findByRole('navigation')
+    await user.click(screen.getByRole('button', { name: 'PersonligFinans' }))
     await user.upload(screen.getByLabelText(/bank statement pdf/i), statementPdf)
     await screen.findByRole('status')
 

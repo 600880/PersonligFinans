@@ -20,18 +20,17 @@ import {
 import { followAppearance } from './lib/appearance'
 import { counted } from './lib/count'
 import { formatNorwegianDate } from './lib/date'
+import { goToPage, replacePage, useShownPage, type Page } from './lib/pages'
 import { resetLinkAt } from './lib/passwordReset'
 import { checkReceiptPick, NOT_A_RECEIPT_IMAGE, RECEIPT_IMAGE_TYPES } from './lib/receiptPick'
 import { reduceReceipt } from './lib/reduceReceipt'
 import { useDismiss } from './lib/useDismiss'
 
-type View = 'home' | 'transactions' | 'categories' | 'rules' | 'user'
-
 // A picked PDF the server rejected, named by its filename since it may not be a readable Bank
 // Statement, with the reason the server gave; or a picked file left out of a Receipt scan, with why.
 type Rejection = { filename: string; message: string }
 
-const NAV_ITEMS: { view: View; label: string }[] = [
+const NAV_ITEMS: { view: Page; label: string }[] = [
   { view: 'transactions', label: 'Transactions' },
   { view: 'categories', label: 'Categories' },
   { view: 'rules', label: 'Rules' },
@@ -45,8 +44,9 @@ const ADD_ACTION_CLASS =
 
 // Opened at the link in a reset email, shows the page to choose a new password, whoever is signed in,
 // so it never asks who is. Otherwise, or once the page is done, the landing page or the app. The
-// app has no router: the reset email's link is the only address besides its own. Leaving the page
-// puts / in the address bar, so reloading doesn't open it again.
+// link is read once, here, apart from the app's pages, which each have an address of their own that
+// the app follows as the User moves between them. Leaving the page puts the Dashboard's address, /,
+// in place of the link, so neither Back nor reloading opens it again.
 function App() {
   const [resetLink, setResetLink] = useState(() => resetLinkAt(window.location))
   // The User the new password signed in as, so the app shows without asking who is signed in.
@@ -56,7 +56,7 @@ function App() {
   useEffect(() => followAppearance(), [])
 
   function leaveResetPage() {
-    window.history.replaceState(null, '', '/')
+    replacePage('home')
     setResetLink(null)
   }
 
@@ -128,7 +128,6 @@ interface SignedInAppProps {
 }
 
 function SignedInApp({ user, onSignedOut }: SignedInAppProps) {
-  const [view, setView] = useState<View>('home')
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [showSavedMessage, setShowSavedMessage] = useState(false)
   // How many of the picked Bank Statements have finished, out of how many; null when not uploading.
@@ -184,25 +183,38 @@ function SignedInApp({ user, onSignedOut }: SignedInAppProps) {
     setReceiptPickError(null)
   }
 
+  // Every page change, whether chosen in the app or reached by Back or Forward, behaves the same.
   // Leaving home clears its messages. An upload that finishes while away sets them again, so they
   // are seen on return. The home view stays mounted while away, so the Dashboard is kept as it was
-  // left, and coming back reloads it, so changes made on the other pages show up.
-  function chooseView(next: View) {
-    if (view === 'home' && next !== 'home') clearHomeMessages()
-    if (view !== 'home' && next === 'home') setDashboardVersion((version) => version + 1)
+  // left, and coming back reloads it, so changes made on the other pages show up. The Transactions
+  // and Rules pages open without a target unless a link gives one as it goes there.
+  function handlePageChange(from: Page, to: Page) {
+    if (from === 'home') clearHomeMessages()
+    if (to === 'home') setDashboardVersion((version) => version + 1)
     setTransactionsTarget(undefined)
     setRulesTarget(undefined)
     setIsNavOpen(false)
-    setView(next)
+    setIsAddMenuOpen(false)
   }
 
+  // The page the address bar names, followed as it changes by Back and Forward too.
+  const view = useShownPage(handlePageChange)
+
+  // Choosing the page already shown changes nothing but closing the menu of pages.
+  function chooseView(next: Page) {
+    setIsNavOpen(false)
+    goToPage(next)
+  }
+
+  // The target is set after going to the page, so it outlasts the page change dropping the old one.
+  // It stays out of the address, so Back, Forward or a refresh open the page without it.
   function openTransactions(target: TransactionsTarget) {
-    chooseView('transactions')
+    goToPage('transactions')
     setTransactionsTarget(target)
   }
 
   function openRules(target: RulesTarget) {
-    chooseView('rules')
+    goToPage('rules')
     setRulesTarget(target)
   }
 
