@@ -20,7 +20,7 @@ import {
 import { followAppearance } from './lib/appearance'
 import { counted } from './lib/count'
 import { formatNorwegianDate } from './lib/date'
-import { goToPage, replacePage, useShownPage, type Page } from './lib/pages'
+import { goToPage, replaceWithDashboardAddress, useShownPage, type Page } from './lib/pages'
 import { resetLinkAt } from './lib/passwordReset'
 import { checkReceiptPick, NOT_A_RECEIPT_IMAGE, RECEIPT_IMAGE_TYPES } from './lib/receiptPick'
 import { reduceReceipt } from './lib/reduceReceipt'
@@ -32,11 +32,11 @@ type Rejection = { filename: string; message: string }
 
 const APP_NAME = 'PersonligFinans'
 
-const NAV_ITEMS: { view: Page; label: string }[] = [
-  { view: 'transactions', label: 'Transactions' },
-  { view: 'categories', label: 'Categories' },
-  { view: 'rules', label: 'Rules' },
-  { view: 'user', label: 'User' },
+const NAV_ITEMS: { page: Page; label: string }[] = [
+  { page: 'transactions', label: 'Transactions' },
+  { page: 'categories', label: 'Categories' },
+  { page: 'rules', label: 'Rules' },
+  { page: 'user', label: 'User' },
 ]
 
 // The look of each way to add Transactions: a button of its own on a wide screen, an item in the
@@ -58,7 +58,7 @@ function App() {
   useEffect(() => followAppearance(), [])
 
   function leaveResetPage() {
-    replacePage('home')
+    replaceWithDashboardAddress()
     setResetLink(null)
   }
 
@@ -130,7 +130,7 @@ function LandingPageOrApp({ signedIn }: LandingPageOrAppProps) {
     <SignedInApp
       user={user}
       onSignedOut={() => {
-        replacePage('home')
+        replaceWithDashboardAddress()
         setUser(null)
       }}
     />
@@ -216,12 +216,12 @@ function SignedInApp({ user, onSignedOut }: SignedInAppProps) {
 
   // Every page change, whether chosen in the app or reached by Back or Forward, behaves the same.
   // Leaving home clears its messages. An upload that finishes while away sets them again, so they
-  // are seen on return. The home view stays mounted while away, so the Dashboard is kept as it was
+  // are seen on return. The Dashboard stays mounted while away, so the Dashboard is kept as it was
   // left, and coming back reloads it, so changes made on the other pages show up. The Transactions
   // and Rules pages open without a target unless a link gives one as it goes there.
   function handlePageChange(from: Page, to: Page) {
-    if (from === 'home') clearHomeMessages()
-    if (to === 'home') setDashboardVersion((version) => version + 1)
+    if (from === 'dashboard') clearHomeMessages()
+    if (to === 'dashboard') setDashboardVersion((version) => version + 1)
     setTransactionsTarget(undefined)
     setRulesTarget(undefined)
     setIsNavOpen(false)
@@ -229,22 +229,22 @@ function SignedInApp({ user, onSignedOut }: SignedInAppProps) {
   }
 
   // The page the address bar names, followed as it changes by Back and Forward too.
-  const view = useShownPage(handlePageChange)
+  const page = useShownPage(handlePageChange)
 
   // The tab title names the page shown, such as "Rules · PersonligFinans", so tabs and the browser's
   // history list tell the pages apart. The Dashboard's is plain PersonligFinans, as index.html names
   // the landing page and the reset-password page, and being signed out, by Sign out or a 401, puts
   // the plain title back as the app unmounts, so the landing page never names a page it doesn't show.
   useEffect(() => {
-    const label = NAV_ITEMS.find((item) => item.view === view)?.label
+    const label = NAV_ITEMS.find((item) => item.page === page)?.label
     document.title = label ? `${label} · ${APP_NAME}` : APP_NAME
     return () => {
       document.title = APP_NAME
     }
-  }, [view])
+  }, [page])
 
   // Choosing the page already shown changes nothing but closing the menu of pages.
-  function chooseView(next: Page) {
+  function choosePage(next: Page) {
     setIsNavOpen(false)
     goToPage(next)
   }
@@ -382,7 +382,7 @@ function SignedInApp({ user, onSignedOut }: SignedInAppProps) {
         className="relative flex items-center justify-between border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-6 py-4 max-sm:px-4"
       >
         <h1 className="text-xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">
-          <button type="button" onClick={() => chooseView('home')}>
+          <button type="button" onClick={() => choosePage('dashboard')}>
             PersonligFinans
           </button>
         </h1>
@@ -413,12 +413,12 @@ function SignedInApp({ user, onSignedOut }: SignedInAppProps) {
         >
           {NAV_ITEMS.map((item) => (
             <button
-              key={item.view}
+              key={item.page}
               type="button"
-              onClick={() => chooseView(item.view)}
-              aria-current={view === item.view ? 'page' : undefined}
+              onClick={() => choosePage(item.page)}
+              aria-current={page === item.page ? 'page' : undefined}
               className={`rounded-lg px-3 py-1.5 text-sm font-medium max-sm:py-3 max-sm:text-left max-sm:text-base ${
-                view === item.view ? 'bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+                page === item.page ? 'bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
               }`}
             >
               {item.label}
@@ -438,19 +438,19 @@ function SignedInApp({ user, onSignedOut }: SignedInAppProps) {
         </p>
       )}
 
-      {view === 'transactions' ? (
+      {page === 'transactions' ? (
         <main className="flex flex-col items-center px-6 py-10 max-sm:px-4">
           <TransactionsPage target={transactionsTarget} />
         </main>
-      ) : view === 'categories' ? (
+      ) : page === 'categories' ? (
         <main className="flex flex-col items-center px-6 py-10 max-sm:px-4">
           <CategoriesPage onOpenTransactions={openTransactions} onOpenRules={openRules} />
         </main>
-      ) : view === 'rules' ? (
+      ) : page === 'rules' ? (
         <main className="flex flex-col items-center px-6 py-10 max-sm:px-4">
           <RulesPage target={rulesTarget} />
         </main>
-      ) : view === 'user' ? (
+      ) : page === 'user' ? (
         <main className="flex flex-col items-center px-6 py-10 max-sm:px-4">
           <UserPage
             user={user}
@@ -462,7 +462,7 @@ function SignedInApp({ user, onSignedOut }: SignedInAppProps) {
       ) : null}
 
       {/* Hidden rather than unmounted while away, so the Dashboard keeps its choices. */}
-      <main hidden={view !== 'home'} className="flex flex-col items-center gap-4 px-6 py-10 max-sm:px-4">
+      <main hidden={page !== 'dashboard'} className="flex flex-col items-center gap-4 px-6 py-10 max-sm:px-4">
         <div ref={addMenuRef} className="relative">
           {/* Shows the upload's progress too, since Upload transactions is hidden in the menu. The
               menu still opens meanwhile, for the other ways to add Transactions. */}

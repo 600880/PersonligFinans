@@ -4,17 +4,17 @@ import { useEffect, useEffectEvent, useRef, useState } from 'react'
 // is shown, refreshing stays on it, and Back and Forward step between the pages visited. Only the
 // page is in the address, never what was chosen on it. This is the only code that changes the
 // address for a page; the reset email's link is read on its own, once, when the app starts.
-export type Page = 'home' | 'transactions' | 'categories' | 'rules' | 'user'
+export type Page = 'dashboard' | 'transactions' | 'categories' | 'rules' | 'user'
 
 const PATHS: Record<Page, string> = {
-  home: '/',
+  dashboard: '/',
   transactions: '/transactions',
   categories: '/categories',
   rules: '/rules',
   user: '/user',
 }
 
-// Told each time the address changes to another entry, by going to a page or replacing the address.
+// Told each time going to a page adds a history entry.
 const addressListeners = new Set<() => void>()
 
 // The page the address bar names, or undefined for any other address.
@@ -30,11 +30,12 @@ export function goToPage(page: Page) {
   addressListeners.forEach((listener) => listener())
 }
 
-// Puts the page's address in place of the current history entry, so Back never returns to the one
-// replaced.
-export function replacePage(page: Page) {
-  window.history.replaceState(null, '', PATHS[page])
-  addressListeners.forEach((listener) => listener())
+// Puts the Dashboard's address in place of the current history entry, so Back never returns to the
+// one replaced. It tells no page shown, since it is only for leaving the app — by Sign out, Delete
+// your User or leaving the reset-password page — or for an address that names no page, where the
+// Dashboard is shown anyway; so the app being left never acts on it as a page change.
+export function replaceWithDashboardAddress() {
+  window.history.replaceState(null, '', PATHS.dashboard)
 }
 
 // The page to show: the one the address bar names, or the Dashboard for any other address, which is
@@ -43,15 +44,15 @@ export function replacePage(page: Page) {
 // page shown before, in the same update that shows the next, so whatever it changes shows with the
 // page.
 export function useShownPage(onPageChange: (from: Page, to: Page) => void): Page {
-  const [page, setPage] = useState<Page>(() => pageAtAddress() ?? 'home')
+  const [page, setPage] = useState<Page>(() => pageAtAddress() ?? 'dashboard')
   // The page shown, kept as it changes rather than once rendered, so two changes in a row each start
   // from the right page.
   const shownRef = useRef(page)
 
   const followAddress = useEffectEvent(() => {
     const addressed = pageAtAddress()
-    if (addressed === undefined) window.history.replaceState(null, '', PATHS.home)
-    const next = addressed ?? 'home'
+    if (addressed === undefined) replaceWithDashboardAddress()
+    const next = addressed ?? 'dashboard'
     const from = shownRef.current
     if (next === from) return
     shownRef.current = next
