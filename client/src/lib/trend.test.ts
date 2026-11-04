@@ -14,7 +14,7 @@ function month(number: number, slices: SpendingSlice[] = []): MonthSpending {
 }
 
 describe('trendPoints', () => {
-  it("nets a Category over a quarter's months, so a refund in a later month reduces the quarter's Spending", () => {
+  it("nets a Category over a quarter's months, so a refund in a later month reduces the quarter's Spending, below zero when it outweighs it", () => {
     const monthly = [
       month(1, [{ categoryId: SHOPPING, amount: 500 }, { categoryId: GROCERIES, amount: 300 }]),
       month(2, [{ categoryId: SHOPPING, amount: -700 }]),
@@ -23,12 +23,12 @@ describe('trendPoints', () => {
 
     const [q1] = trendPoints(monthly, 'quarter')
 
-    expect(q1.values[String(SHOPPING)] ?? 0).toBe(0)
+    expect(q1.values[String(SHOPPING)]).toBe(-200 / 3)
     expect(q1.values[String(GROCERIES)]).toBe(80)
-    expect(q1.values.total).toBe(80)
+    expect(q1.values.total).toBe(40 / 3)
   })
 
-  it("nets Savings and Income over a quarter's months, never counting them in Total", () => {
+  it("nets Savings and Income over a quarter's months, below zero when they net the other way, never counting them in Total", () => {
     const monthly = [
       { ...month(1), savings: { categoryId: SAVINGS, amount: 5000 }, income: { categoryId: INCOME, amount: 3000 } },
       { ...month(2), savings: { categoryId: SAVINGS, amount: -2000 } },
@@ -38,7 +38,7 @@ describe('trendPoints', () => {
     const [q1] = trendPoints(monthly, 'quarter')
 
     expect(q1.values[String(SAVINGS)]).toBe(1000)
-    expect(q1.values[String(INCOME)] ?? 0).toBe(0)
+    expect(q1.values[String(INCOME)]).toBe(-200)
     expect(q1.values.total).toBe(0)
   })
 
@@ -51,14 +51,63 @@ describe('trendPoints', () => {
     expect(q1.values[String(SHOPPING)]).toBe(150)
   })
 
-  it('leaves out a month that nets the other way, at Month granularity', () => {
+  it('keeps a Category that nets the other way below zero, divided by the months the point covers', () => {
+    const monthly = [month(2, [{ categoryId: SHOPPING, amount: 900 }]), month(3, [{ categoryId: SHOPPING, amount: -1500 }])]
+
+    const [q1] = trendPoints(monthly, 'quarter')
+
+    expect(q1.values[String(SHOPPING)]).toBe(-300)
+  })
+
+  it('keeps a month that nets the other way below zero at Month granularity, as Total does', () => {
     const monthly = [month(1, [{ categoryId: SHOPPING, amount: 500 }]), month(2, [{ categoryId: SHOPPING, amount: -700 }])]
 
     const [january, february] = trendPoints(monthly, 'month')
 
     expect(january.values[String(SHOPPING)]).toBe(500)
-    expect(february.values[String(SHOPPING)]).toBe(0)
-    expect(february.values.total).toBe(0)
+    expect(february.values[String(SHOPPING)]).toBe(-700)
+    expect(february.values.total).toBe(-700)
+  })
+
+  it('keeps Savings and Income below zero when they net the other way', () => {
+    const monthly = [
+      { ...month(1), savings: { categoryId: SAVINGS, amount: -5000 }, income: { categoryId: INCOME, amount: -200 } },
+      { ...month(2), savings: { categoryId: SAVINGS, amount: 1000 } },
+    ]
+
+    const [january] = trendPoints(monthly, 'month')
+
+    expect(january.values[String(SAVINGS)]).toBe(-5000)
+    expect(january.values[String(INCOME)]).toBe(-200)
+    expect(january.values.total).toBe(0)
+  })
+
+  it('makes Total the net of every Category, so a refund in one lowers it, never counting Savings or Income', () => {
+    const monthly = [
+      {
+        ...month(1, [{ categoryId: SHOPPING, amount: -1200 }, { categoryId: GROCERIES, amount: 400 }, { categoryId: null, amount: 100 }]),
+        savings: { categoryId: SAVINGS, amount: 5000 },
+        income: { categoryId: INCOME, amount: 30000 },
+      },
+    ]
+
+    const [january] = trendPoints(monthly, 'month')
+
+    expect(january.values.total).toBe(-700)
+    expect(january.values[String(SHOPPING)] + january.values[String(GROCERIES)] + january.values.uncategorized).toBe(-700)
+  })
+
+  it('counts what is left over from adding up Amounts that cancel to the øre as no figure', () => {
+    const monthly = [
+      month(1, [{ categoryId: SHOPPING, amount: 10.1 }, { categoryId: GROCERIES, amount: 0.1 }]),
+      month(2, [{ categoryId: SHOPPING, amount: 20.2 }, { categoryId: GROCERIES, amount: 0.2 }]),
+      month(3, [{ categoryId: SHOPPING, amount: -30.3 }, { categoryId: GROCERIES, amount: -0.3 }]),
+    ]
+
+    const [q1] = trendPoints(monthly, 'quarter')
+
+    expect(trendCategories(monthly, 'quarter')).toEqual([])
+    expect(Object.is(q1.values.total, 0)).toBe(true)
   })
 })
 
@@ -68,12 +117,30 @@ describe('trendCategories', () => {
     { ...month(2, [{ categoryId: SHOPPING, amount: -700 }, { categoryId: GROCERIES, amount: 100 }]), savings: { categoryId: SAVINGS, amount: -6000 } },
   ]
 
-  it('lists the Categories with Spending in a point, largest summed over the points first, then Savings and Income', () => {
-    expect(trendCategories(monthly, 'month')).toEqual([SHOPPING, GROCERIES, SAVINGS])
+  it('lists the Categories with a figure in some point, largest signed figure summed over the points first, then Savings and Income', () => {
+    expect(trendCategories(monthly, 'month')).toEqual([GROCERIES, SHOPPING, SAVINGS])
   })
 
-  it('leaves out a Category, Savings or Income that nets the other way in every point', () => {
-    expect(trendCategories(monthly, 'quarter')).toEqual([GROCERIES])
+  it('lists a Category, Savings or Income that only nets the other way', () => {
+    expect(trendCategories(monthly, 'quarter')).toEqual([GROCERIES, SHOPPING, SAVINGS])
+  })
+
+  it('leaves out a Category, Savings or Income that is zero in every point', () => {
+    const zeroes = [
+      { ...month(1, [{ categoryId: SHOPPING, amount: 500 }]), savings: { categoryId: SAVINGS, amount: 300 } },
+      { ...month(2, [{ categoryId: SHOPPING, amount: -500 }, { categoryId: GROCERIES, amount: 100 }]), savings: { categoryId: SAVINGS, amount: -300 } },
+    ]
+
+    expect(trendCategories(zeroes, 'quarter')).toEqual([GROCERIES])
+  })
+
+  it('orders the Spending Categories by their signed figures summed over the points, largest first, then Savings and Income', () => {
+    const refunds = [
+      { ...month(1, [{ categoryId: SHOPPING, amount: 500 }, { categoryId: GROCERIES, amount: 100 }]), income: { categoryId: INCOME, amount: 9000 } },
+      { ...month(2, [{ categoryId: SHOPPING, amount: -700 }, { categoryId: null, amount: -50 }]), savings: { categoryId: SAVINGS, amount: -6000 } },
+    ]
+
+    expect(trendCategories(refunds, 'month')).toEqual([GROCERIES, null, SHOPPING, SAVINGS, INCOME])
   })
 })
 

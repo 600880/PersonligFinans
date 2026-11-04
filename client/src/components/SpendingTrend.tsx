@@ -4,6 +4,7 @@ import {
   getRelativeCoordinate,
   Line,
   LineChart,
+  ReferenceLine,
   Tooltip,
   useYAxisInverseScale,
   XAxis,
@@ -101,8 +102,9 @@ function YAxisInverseScale({ onScale }: { onScale: (scale: InverseScaleFunction 
 }
 
 // The Total row, then one per Category with Spending in some point of the trend at the granularity,
-// largest first, then Savings and Income when they have a figure in some point. The Categories wait
-// for their names, so a Category is never shown without its name.
+// above zero or below it, largest summed over the points first, then Savings and Income when they have
+// a figure in some point. The Categories wait for their names, so a Category is never shown without
+// its name.
 function trendRows(
   monthly: MonthSpending[],
   granularity: Granularity,
@@ -130,12 +132,15 @@ function trendRows(
 // How Spending, Savings and Income changed over a Span, as lines with a point per Period of its own
 // Granularity, Month at first, and a table of the first and last points for Total and each Category,
 // Savings and Income after the Spending ones and never in Total. Each row switches its line on and
-// off; Total starts on and the Categories off, and they stay as switched when the Span changes. `months` are the months with Transactions, newest first, which decide the months
-// offered. Opens on the 12 months ending at the latest of them. When they are reloaded, after
-// Transactions are saved or on coming back to home, it fetches its Spending again, keeping the Span
-// if both its ends are still offered and otherwise going back to the 12 months; its Granularity and
-// switched-on lines are kept. Clicking the chart opens the Transactions of the line nearest the
-// click, in the Period of the point clicked.
+// off; Total starts on and the Categories off, and they stay as switched when the Span changes. Each
+// figure that nets the other way is drawn below zero, and Total is the sum of every Category's
+// Spending, so a refund in one lowers it. A line marks zero while a line drawn goes below it.
+// `months` are the months with Transactions, newest first, which decide the months offered. Opens on
+// the 12 months ending at the latest of them. When they are reloaded, after Transactions are saved or
+// on coming back to home, it fetches its Spending again, keeping the Span if both its ends are still
+// offered and otherwise going back to the 12 months; its Granularity and switched-on lines are kept.
+// Clicking the chart opens the Transactions of the line nearest the click, in the Period of the point
+// clicked.
 export function SpendingTrend({
   months,
   categories,
@@ -184,6 +189,9 @@ export function SpendingTrend({
   const last = points[points.length - 1]
   const rows = current?.monthly ? trendRows(current.monthly, granularity, categories, dark) : []
   const drawn = rows.filter((row) => switchedOn.has(row.key))
+  // Whether a drawn line goes below zero in some point. The chart then marks zero with a line in the
+  // axes' colour, and its y axis reaches below zero on its own.
+  const drawnBelowZero = drawn.some((row) => points.some((point) => point.values[row.key] < 0))
   const yValueAt = useRef<InverseScaleFunction | undefined>(undefined)
 
   // Opens the Transactions of the drawn line nearest the click, in the Period of the point clicked;
@@ -295,6 +303,7 @@ export function SpendingTrend({
                     fill: colours.label,
                   }}
                 />
+                {drawnBelowZero && <ReferenceLine y={0} stroke={colours.axis} />}
                 <Tooltip
                   cursor={{ stroke: colours.cursor }}
                   content={({ active, payload }) => {

@@ -8476,6 +8476,150 @@ describe('Dashboard', () => {
       })
     })
 
+    describe('Negative figures', () => {
+      // August and September 2026. Groceries has Spending in both; Other has a refund in September
+      // that outweighs its Spending in August, Uncategorized only a refund, Savings a withdrawal and
+      // Income a repayment.
+      beforeEach(() => {
+        categoriesServed = [...categories, { id: 12, name: 'Savings' }, { id: 14, name: 'Income' }]
+        months = [
+          { year: 2026, month: 9 },
+          { year: 2026, month: 8 },
+        ]
+        handleMonthlySpending = (from, to) =>
+          Response.json(
+            monthlySpending(
+              from,
+              to,
+              {
+                '2026-8': [
+                  { categoryId: 1, amount: 400 },
+                  { categoryId: 13, amount: 100 },
+                ],
+                '2026-9': [
+                  { categoryId: 1, amount: 500 },
+                  { categoryId: 13, amount: -300 },
+                  { categoryId: null, amount: -50 },
+                ],
+              },
+              { '2026-9': { savings: { categoryId: 12, amount: -1500 }, income: { categoryId: 14, amount: -200 } } },
+            ),
+          )
+      })
+
+      // The names of the rows switched on, in table order.
+      function switchedOn() {
+        return within(within(trend()).getByRole('table'))
+          .getAllByRole('checkbox')
+          .filter((checkbox) => (checkbox as HTMLInputElement).checked)
+          .map((checkbox) => checkbox.closest('tr')!.firstElementChild!.textContent)
+      }
+
+      it('shows each figure that nets the other way below zero, the rows adding up to Total', async () => {
+        await renderApp()
+
+        await waitFor(() =>
+          expect(trendTable()).toEqual([
+            ['', 'August 2026', 'September 2026', 'Change'],
+            ['Total', '500,00 kr', '150,00 kr', '▼ −70,0 %'],
+            ['Groceries', '400,00 kr', '500,00 kr', '▲ +25,0 %'],
+            ['Uncategorized', '0,00 kr', '-50,00 kr', 'New'],
+            ['Other', '100,00 kr', '-300,00 kr', '▼ −400,0 %'],
+            ['Savings', '0,00 kr', '-1 500,00 kr', 'New'],
+            ['Income', '0,00 kr', '-200,00 kr', 'New'],
+          ]),
+        )
+      })
+
+      it('shows a figure below zero by Quarter, divided by the months its point covers', async () => {
+        // Every month from January to September 2026 is offered.
+        months = [
+          { year: 2026, month: 9 },
+          { year: 2026, month: 1 },
+        ]
+        const user = userEvent.setup()
+        await renderApp()
+        await waitFor(() => expect(trendTable()[0]).toEqual(['', 'January 2026', 'September 2026', 'Change']))
+
+        await user.selectOptions(within(trend()).getByLabelText('Granularity'), 'Quarter')
+
+        await waitFor(() => expect(trendTable()[0]).toEqual(['', 'Q1 2026', 'Q3 2026', 'Change']))
+        expect(trendTable()[3]).toEqual(['Uncategorized', '0,00 kr', '-16,67 kr', 'New'])
+      })
+
+      describe('zero line', () => {
+        // The trend's chart is as wide as its container, which jsdom can't measure, so recharts draws
+        // nothing without a size. The stubs are undone after each test: the global by the file's
+        // afterEach.
+        let measure: { mockRestore: () => void }
+        beforeEach(() => {
+          vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
+          measure = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
+            x: 0, y: 0, top: 0, left: 0, right: 600, bottom: 280, width: 600, height: 280, toJSON: () => ({}),
+          })
+        })
+
+        afterEach(() => measure.mockRestore())
+
+        // The horizontal line drawn at zero, if any.
+        function zeroLine() {
+          return trend().querySelector('.recharts-reference-line-line')
+        }
+
+        // Waits for the chart, then switches the named lines on, or Total off.
+        async function openTrend(...lines: string[]) {
+          const user = userEvent.setup()
+          await renderApp()
+          await waitFor(() => expect(trend().querySelector('.recharts-line')).not.toBeNull())
+          for (const line of lines) await user.click(within(trend()).getByRole('checkbox', { name: line }))
+          return user
+        }
+
+        it('is drawn while a switched-on line is below zero', async () => {
+          await openTrend('Other')
+
+          expect(zeroLine()).not.toBeNull()
+        })
+
+        it('goes when that line is switched off, leaving nothing drawn below zero', async () => {
+          const user = await openTrend('Other')
+
+          await user.click(within(trend()).getByRole('checkbox', { name: 'Other' }))
+
+          expect(trend().querySelector('.recharts-line')).not.toBeNull()
+          expect(zeroLine()).toBeNull()
+        })
+
+        it('is not drawn for a line below zero that is switched off', async () => {
+          // Uncategorized, Other, Savings and Income go below zero in September, but only Total is on.
+          await openTrend()
+
+          expect(switchedOn()).toEqual(['Total'])
+          expect(zeroLine()).toBeNull()
+        })
+
+        it.each(['light', 'dark'])('is drawn in the colour of the axes in %s', async (appearance) => {
+          localStorage.setItem('appearance', appearance)
+          await openTrend('Other')
+
+          const axis = trend().querySelector('.recharts-yAxis .recharts-cartesian-axis-line')!
+          expect(zeroLine()).toHaveAttribute('stroke', axis.getAttribute('stroke'))
+        })
+
+        it('has the y axis reach below zero, so the points below it are drawn inside the chart', async () => {
+          // Savings is -1 500 kr in September, its lowest dot.
+          await openTrend('Savings')
+
+          const axis = trend().querySelector('.recharts-yAxis .recharts-cartesian-axis-line')!
+          const lowest = Math.max(
+            ...[...trend().querySelectorAll('.recharts-line-dot')].map((dot) => Number(dot.getAttribute('cy'))),
+          )
+          expect(lowest).toBeGreaterThan(Number(zeroLine()!.getAttribute('y1')))
+          expect(lowest).toBeLessThanOrEqual(Number(axis.getAttribute('y2')))
+        })
+      })
+    })
+
     describe('Drilling down', () => {
       // Every month from October 2025 to June 2026 is offered. Groceries has Transactions and Spending
       // in November, January and March, Uncategorized in February and Other in March.
@@ -8652,6 +8796,32 @@ describe('Dashboard', () => {
 
         expect(await screen.findByRole('cell', { name: 'Meny' })).toBeInTheDocument()
         expect(chosenFilters()).toEqual(['2026', 'March', category])
+      })
+
+      it('opens the Category of a dot below zero, finding the nearest line by the figures drawn', async () => {
+        // A refund outweighs Groceries' Spending in March, so its dot there is below zero, beneath
+        // Total's at zero, where Other's Spending nets it out.
+        handleMonthlySpending = (from, to) =>
+          Response.json(
+            monthlySpending(from, to, {
+              '2025-11': [{ categoryId: 1, amount: 100 }],
+              '2026-1': [{ categoryId: 1, amount: 100 }],
+              '2026-3': [
+                { categoryId: 1, amount: -100 },
+                { categoryId: 13, amount: 100 },
+              ],
+            }),
+          )
+        const user = userEvent.setup()
+        await renderApp()
+        await waitFor(() => expect(trendTable()).toHaveLength(4))
+        await user.click(within(trend()).getByRole('checkbox', { name: 'Groceries' }))
+        await waitFor(() => expect(dots(GROCERIES_COLOUR)).toHaveLength(9))
+
+        await clickNear(dots(GROCERIES_COLOUR)[5])
+
+        expect(await screen.findByRole('cell', { name: 'Meny' })).toBeInTheDocument()
+        expect(chosenFilters()).toEqual(['2026', 'March', 'Groceries'])
       })
     })
   })
