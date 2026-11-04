@@ -587,14 +587,15 @@ export async function fetchTransactions(period: YearOrMonth): Promise<Transactio
   return (await response.json()) as Transaction[]
 }
 
-// categoryId is null for the Uncategorized slice. A Period's Amounts are positive; a month's of a Span
-// are negative when its group nets the other way.
+// categoryId is null for the Uncategorized slice. Its Amount is negative when its group nets the other
+// way, in a Period as in a month of a Span.
 export interface SpendingSlice {
   categoryId: number | null
   amount: number
 }
 
-// A Period's Spending: the total and one slice per group with Spending, largest first.
+// A Period's Spending: one slice per group whose Amounts don't net to zero, largest first so those
+// below zero come last, and the total of them all, which can be zero or below.
 export interface Spending {
   total: number
   slices: SpendingSlice[]

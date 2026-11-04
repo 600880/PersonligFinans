@@ -35,9 +35,12 @@ public static class SpendingEndpoints
         app.MapGet("/api/spending/monthly", MonthlySpendingOfSpan);
     }
 
-    // A Period's Spending: one slice per group with Spending in it, its Amounts over the whole Period
-    // netted together, largest first. The Period is a year with a quarter, a year with a month, or a
-    // year alone for the whole year.
+    // A Period's Spending: one slice per group whose Amounts over the whole Period don't net to zero,
+    // netted together as what it cost, negative when the group nets the other way. Ordered by Amount,
+    // largest first, so the negative slices come last and the most negative at the end. Its Total is
+    // the sum of every slice, so a refund in one Category lowers it, and it can be zero or below.
+    // Savings, when included, nets like any group. The Period is a year with a quarter, a year with a
+    // month, or a year alone for the whole year.
     private static async Task<IResult> SpendingOfPeriod(
         int? year, int? quarter, int? month, AppDbContext db, bool includeSavings = false)
     {
@@ -49,7 +52,7 @@ public static class SpendingEndpoints
         var slices = await SpendingTransactions(db, first, next, includeSavings)
             .GroupBy(t => t.CategoryId)
             .Select(g => new { CategoryId = g.Key, Amount = -g.Sum(t => t.Amount) })
-            .Where(s => s.Amount > 0)
+            .Where(s => s.Amount != 0)
             .OrderByDescending(s => s.Amount)
             .Select(s => new SpendingSliceResponse(s.CategoryId, s.Amount))
             .ToListAsync();

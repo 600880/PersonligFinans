@@ -84,7 +84,7 @@ public class SpendingEndpointsTests : IAsyncLifetime
             $"/api/spending/monthly?fromYear={fromYear}&fromMonth={fromMonth}&toYear={toYear}&toMonth={toMonth}"))!;
 
     [Fact]
-    public async Task Get_Spending_SumsTheAmountsOfEachCategoryAsPositiveFiguresLargestFirst()
+    public async Task Get_Spending_NetsTheAmountsOfEachCategoryAsWhatItCost_LargestFirst()
     {
         await AddManualTransaction("2051-03-02", -100m, _categories.Groceries);
         await AddManualTransaction("2051-03-15", -50.50m, _categories.Groceries);
@@ -158,18 +158,85 @@ public class SpendingEndpointsTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Get_Spending_LeavesOutACategoryWhoseAmountsNetToZeroOrMore_WithoutReducingTheTotal()
+    public async Task Get_Spending_GivesACategoryWhoseAmountsNetTheOtherWayANegativeSlice_ThatReducesTheTotal()
     {
         await AddManualTransaction("2058-09-02", -100m, _categories.Shopping);
         await AddManualTransaction("2058-09-20", 150m, _categories.Shopping);
-        await AddManualTransaction("2058-09-03", -40m, _categories.Restaurants);
-        await AddManualTransaction("2058-09-21", 40m, _categories.Restaurants);
-        await AddManualTransaction("2058-09-04", -10m, _categories.Groceries);
+        await AddManualTransaction("2058-09-04", -80m, _categories.Groceries);
 
         var spending = await SpendingOf(2058, 9);
 
+        Assert.Equal(
+            [new SpendingSliceResponse(_categories.Groceries, 80m), new SpendingSliceResponse(_categories.Shopping, -50m)],
+            spending.Slices);
+        Assert.Equal(30m, spending.Total);
+    }
+
+    [Fact]
+    public async Task Get_Spending_LeavesOutACategoryWhoseAmountsNetToZero()
+    {
+        await AddManualTransaction("2063-09-03", -40m, _categories.Restaurants);
+        await AddManualTransaction("2063-09-21", 40m, _categories.Restaurants);
+        await AddManualTransaction("2063-09-04", -10m, _categories.Groceries);
+
+        var spending = await SpendingOf(2063, 9);
+
         Assert.Equal([new SpendingSliceResponse(_categories.Groceries, 10m)], spending.Slices);
         Assert.Equal(10m, spending.Total);
+    }
+
+    [Fact]
+    public async Task Get_Spending_HasTheNegativeSlicesLast_MostNegativeAtTheEnd()
+    {
+        await AddManualTransaction("2064-03-02", 300m, _categories.Clothing);
+        await AddManualTransaction("2064-03-03", -20m, _categories.Restaurants);
+        await AddManualTransaction("2064-03-04", -60m, _categories.Shopping);
+        await AddManualTransaction("2064-03-05", 110m, _categories.Shopping);
+        await AddManualTransaction("2064-03-06", -100m, _categories.Groceries);
+
+        var spending = await SpendingOf(2064, 3);
+
+        Assert.Equal(
+            [
+                new SpendingSliceResponse(_categories.Groceries, 100m),
+                new SpendingSliceResponse(_categories.Restaurants, 20m),
+                new SpendingSliceResponse(_categories.Shopping, -50m),
+                new SpendingSliceResponse(_categories.Clothing, -300m),
+            ],
+            spending.Slices);
+        Assert.Equal(-230m, spending.Total);
+    }
+
+    [Fact]
+    public async Task Get_Spending_OfAPeriodWithOnlyRefunds_IsNegative()
+    {
+        await ImportStatement("01.11.2065 - 30.11.2065", ("0311", 50m));
+        await AddManualTransaction("2065-11-10", 300m, _categories.Clothing);
+
+        var spending = await SpendingOf(2065, 11);
+
+        Assert.Equal(
+            [new SpendingSliceResponse(null, -50m), new SpendingSliceResponse(_categories.Clothing, -300m)],
+            spending.Slices);
+        Assert.Equal(-350m, spending.Total);
+    }
+
+    [Fact]
+    public async Task Get_SpendingIncludingSavings_GivesSavingsANegativeSlice_ThatReducesTheTotal_WhenMoreWasTakenOutThanPutIn()
+    {
+        await AddManualTransaction("2066-05-03", -1000m, _categories.Savings);
+        await AddManualTransaction("2066-05-20", 3000m, _categories.Savings);
+        await AddManualTransaction("2066-05-05", -10m, _categories.Groceries);
+
+        var including = await SpendingOf(2066, 5, includeSavings: true);
+        var excluding = await SpendingOf(2066, 5);
+
+        Assert.Equal(
+            [new SpendingSliceResponse(_categories.Groceries, 10m), new SpendingSliceResponse(_categories.Savings, -2000m)],
+            including.Slices);
+        Assert.Equal(-1990m, including.Total);
+        Assert.Equal([new SpendingSliceResponse(_categories.Groceries, 10m)], excluding.Slices);
+        Assert.Equal(10m, excluding.Total);
     }
 
     [Fact]
@@ -253,7 +320,7 @@ public class SpendingEndpointsTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Get_SpendingOfQuarter_NetsEachCategoryOverTheWholeQuarter_SoARefundReducesTheQuartersSpendingButNotAnEarlierMonths()
+    public async Task Get_SpendingOfQuarter_NetsEachCategoryOverTheWholeQuarter_SoItsTotalIsTheSumOfItsMonths()
     {
         await AddManualTransaction("2075-07-10", -500m, _categories.Shopping);
         await AddManualTransaction("2075-08-03", 700m, _categories.Shopping);
@@ -263,12 +330,20 @@ public class SpendingEndpointsTests : IAsyncLifetime
 
         var quarter = await SpendingOf("year=2075&quarter=3");
         var july = await SpendingOf(2075, 7);
+        var august = await SpendingOf(2075, 8);
+        var september = await SpendingOf(2075, 9);
 
-        Assert.Equal([new SpendingSliceResponse(_categories.Groceries, 250m)], quarter.Slices);
-        Assert.Equal(250m, quarter.Total);
+        Assert.Equal(
+            [new SpendingSliceResponse(_categories.Groceries, 250m), new SpendingSliceResponse(_categories.Shopping, -200m)],
+            quarter.Slices);
+        Assert.Equal(50m, quarter.Total);
         Assert.Equal(
             [new SpendingSliceResponse(_categories.Shopping, 500m), new SpendingSliceResponse(_categories.Groceries, 300m)],
             july.Slices);
+        Assert.Equal(
+            [new SpendingSliceResponse(_categories.Groceries, -100m), new SpendingSliceResponse(_categories.Shopping, -700m)],
+            august.Slices);
+        Assert.Equal(quarter.Total, july.Total + august.Total + september.Total);
     }
 
     [Fact]
@@ -336,6 +411,32 @@ public class SpendingEndpointsTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         var problem = await response.Content.ReadFromJsonAsync<ValidationProblemDetails>();
         Assert.Contains(field, problem!.Errors.Keys);
+    }
+
+    // The Dashboard's donut shows a Period's Spending and its trend nets the months of the same Span,
+    // so for a month without Savings included the two must give the same figures.
+    [Fact]
+    public async Task Get_Spending_OfAMonth_HasTheSameSlicesAndTotalAsThatMonthOfAMonthlySpan()
+    {
+        await AddManualTransaction("2091-05-03", -400m, _categories.Groceries);
+        await AddManualTransaction("2091-05-10", -200m, _categories.Shopping);
+        await AddManualTransaction("2091-05-20", 500m, _categories.Shopping);
+        await AddManualTransaction("2091-05-25", 30000m, _categories.Income);
+        await AddManualTransaction("2091-05-26", 5000m, _categories.Savings);
+        await ImportStatement("01.05.2091 - 31.05.2091", ("0705", -40m), ("0905", 10m));
+
+        var period = await SpendingOf(2091, 5);
+        var month = (await MonthlySpendingOf(2091, 4, 2091, 5)).Single(m => m.Month == 5);
+
+        Assert.Equal(
+            [
+                new SpendingSliceResponse(_categories.Groceries, 400m),
+                new SpendingSliceResponse(null, 30m),
+                new SpendingSliceResponse(_categories.Shopping, -300m),
+            ],
+            period.Slices);
+        Assert.Equal(period.Slices, month.Slices);
+        Assert.Equal(period.Total, month.Slices.Sum(s => s.Amount));
     }
 
     [Fact]

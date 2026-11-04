@@ -41,15 +41,18 @@ const RING_COLOURS = {
 // Shared by the Spending ring and the empty ring.
 const RING = { innerRadius: 76, outerRadius: 116, isAnimationActive: false } as const
 
-// One slice as the chart and the legend show it.
-interface SliceView {
+// One slice of the Spending as the legend shows it. A slice whose Spending is above zero is in the
+// ring, with its share of the sum of those slices; one below zero has no part of the ring, and no
+// share.
+interface SliceViewBase {
   key: string
   categoryId: number | null
   name: string
   amount: number
-  share: number
   colour: string
 }
+type RingSliceView = SliceViewBase & { inRing: true; share: number }
+type SliceView = RingSliceView | (SliceViewBase & { inRing: false })
 
 // A Period's Spending, remembered with the Period and Include savings setting it was loaded for.
 interface LoadedSpending {
@@ -58,23 +61,31 @@ interface LoadedSpending {
   spending: Spending
 }
 
+// The slices in the order the API gives them, largest first, so those below zero come last.
 function toSliceViews(spending: Spending, categories: Category[], dark: boolean): SliceView[] {
-  return spending.slices.map(({ categoryId, amount }) => ({
-    key: String(categoryId),
-    categoryId,
-    name: categoryName(categoryId, categories),
-    amount,
-    share: amount / spending.total,
-    colour: categoryColour(categoryId, categories, dark),
-  }))
+  const ringTotal = spending.slices.reduce((sum, { amount }) => (amount > 0 ? sum + amount : sum), 0)
+  return spending.slices.map(({ categoryId, amount }) => {
+    const base = {
+      key: String(categoryId),
+      categoryId,
+      name: categoryName(categoryId, categories),
+      amount,
+      colour: categoryColour(categoryId, categories, dark),
+    }
+    return amount > 0 ? { ...base, inRing: true, share: amount / ringTotal } : { ...base, inRing: false }
+  })
 }
 
 // Spending by Category for one Period, with the Spending trend over a Span below it. Opens on the
 // latest month with Transactions and the Savings Category left out. A new version, after
 // Transactions are saved or on coming back to home, reloads it in place, keeping the chosen Period
-// and Include savings. Its choices last until the browser reloads, never longer. Clicking a slice
-// or its legend row opens that Category's Transactions in the Period, as a trend dot does for its
-// point.
+// and Include savings. Its choices last until the browser reloads, never longer.
+//
+// The ring is drawn from the Categories whose Spending is above zero, each with its share of their
+// sum, or is the empty ring when there are none. The legend lists every Category with Spending in
+// the Period, those below zero last with a hollow swatch and no share, and the centre shows the
+// Period's total, the net of them all, which can be zero or below. Clicking a slice or a legend row
+// opens that Category's Transactions in the Period, as a trend dot does for its point.
 export function Dashboard({
   version,
   onOpenTransactions,
@@ -156,6 +167,7 @@ export function Dashboard({
       ? loaded.spending
       : null
   const slices = spending && categories ? toSliceViews(spending, categories, dark) : []
+  const ringSlices = slices.filter((slice): slice is RingSliceView => slice.inRing)
   const periodOptions = selected ? periodsOfMonths(months, selected.granularity) : []
   // The Period the slices lead to, once its Spending shows. The Transactions page finds a quarter's
   // first month where the Category has Transactions.
@@ -222,18 +234,18 @@ export function Dashboard({
         <div className="mt-6 flex flex-col items-center gap-8 sm:flex-row sm:items-start">
           <div className="relative shrink-0" style={{ width: CHART_SIZE, height: CHART_SIZE }}>
             <PieChart width={CHART_SIZE} height={CHART_SIZE}>
-              {slices.length > 0 ? (
+              {ringSlices.length > 0 ? (
                 <Pie
-                  data={slices}
+                  data={ringSlices}
                   dataKey="amount"
                   nameKey="name"
                   {...RING}
                   stroke={ringColours.border}
                   strokeWidth={2}
-                  onClick={(_sector, index) => openSlice(slices[index])}
+                  onClick={(_sector, index) => openSlice(ringSlices[index])}
                   style={targetPeriod ? { cursor: 'pointer' } : undefined}
                 >
-                  {slices.map((slice) => (
+                  {ringSlices.map((slice) => (
                     <Cell key={slice.key} fill={slice.colour} />
                   ))}
                 </Pie>
@@ -246,10 +258,10 @@ export function Dashboard({
                   stroke="none"
                 />
               )}
-              {slices.length > 0 && (
+              {ringSlices.length > 0 && (
                 <Tooltip
                   content={({ active, payload }) => {
-                    const slice = active ? (payload?.[0]?.payload as SliceView | undefined) : undefined
+                    const slice = active ? (payload?.[0]?.payload as RingSliceView | undefined) : undefined
                     if (!slice) return null
                     return (
                       <div className="rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3 py-2 text-sm shadow-sm">
@@ -295,7 +307,7 @@ export function Dashboard({
                       {formatAmount(slice.amount)}
                     </td>
                     <td className="py-2 text-right whitespace-nowrap text-slate-500 dark:text-slate-400 tabular-nums">
-                      {percent.format(slice.share)}
+                      {slice.inRing ? percent.format(slice.share) : '–'}
                     </td>
                   </tr>
                 ))}
@@ -313,11 +325,20 @@ export function Dashboard({
   )
 }
 
-// A legend row's swatch and Category name.
+// A legend row's swatch and Category name. The swatch is filled for a slice in the ring, and hollow,
+// an outline in the Category's colour, for one below zero, which has no part of the ring.
 function LegendLabel({ slice }: { slice: SliceView }) {
   return (
     <>
-      <span aria-hidden="true" className="size-3 shrink-0 rounded-sm" style={{ backgroundColor: slice.colour }} />
+      <span
+        aria-hidden="true"
+        className={slice.inRing ? 'size-3 shrink-0 rounded-sm' : 'size-3 shrink-0 rounded-sm border-2'}
+        style={
+          slice.inRing
+            ? { backgroundColor: slice.colour }
+            : { borderColor: slice.colour, backgroundColor: 'transparent' }
+        }
+      />
       {slice.name}
     </>
   )

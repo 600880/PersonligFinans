@@ -6908,6 +6908,149 @@ describe('Dashboard', () => {
     expect(within(dashboard()).queryByText(/savings/i, { ignore: 'label, option' })).toBeNull()
   })
 
+  describe('a Category with negative Spending', () => {
+    const clothing = { id: 14, name: 'Clothing', colour: '#eb6834' }
+
+    beforeEach(() => {
+      categoriesServed = [...categories, clothing]
+      months = [{ year: 2026, month: 9 }]
+    })
+
+    // The legend swatch of the named row: its fill and its outline, as CSS colours.
+    function swatch(name: string) {
+      const row = within(dashboard()).getByRole('row', { name: new RegExp(`^${name}`) })
+      const { backgroundColor, borderColor } = (row.querySelector('[aria-hidden="true"]') as HTMLElement).style
+      return { fill: backgroundColor, outline: borderColor }
+    }
+
+    // The fill of each part of the ring: its slices, or the empty ring.
+    function ringFills() {
+      return [...dashboard().querySelectorAll('.recharts-pie-sector path')].map((sector) => sector.getAttribute('fill'))
+    }
+
+    it('is listed after the slices with a hollow swatch and "–" for its share, with no slice, beside the netted Total', async () => {
+      handleSpending = () =>
+        Response.json({
+          total: 1270.5,
+          slices: [...septemberSpending.slices, { categoryId: 14, amount: -300 }],
+        })
+
+      await renderApp()
+
+      await waitFor(() => expect(legendRows()).toHaveLength(4))
+      expect(legendRows()).toEqual([
+        ['Other', '1 000,00 kr', '63,7 %'],
+        ['Uncategorized', '450,50 kr', '28,7 %'],
+        ['Groceries', '120,00 kr', '7,6 %'],
+        ['Clothing', '-300,00 kr', '–'],
+      ])
+      expect(centreTotal()).toBe('Total 1 270,50 kr')
+      expect(swatch('Clothing')).toEqual({ fill: 'transparent', outline: 'rgb(235, 104, 52)' })
+      expect(swatch('Groceries').fill).toBe('rgb(42, 120, 214)')
+      expect(ringFills()).toEqual(['#9085e9', '#94a3b8', '#2a78d6'])
+    })
+
+    it('lists the Categories with negative Spending after the slices with the most negative last, as the API orders them', async () => {
+      categoriesServed = [...categories, clothing, { id: 15, name: 'Shopping', colour: '#1baf7a' }]
+      handleSpending = () =>
+        Response.json({
+          total: -230,
+          slices: [
+            { categoryId: 1, amount: 100 },
+            { categoryId: 15, amount: -30 },
+            { categoryId: 14, amount: -300 },
+          ],
+        })
+
+      await renderApp()
+
+      await waitFor(() =>
+        expect(legendRows()).toEqual([
+          ['Groceries', '100,00 kr', '100,0 %'],
+          ['Shopping', '-30,00 kr', '–'],
+          ['Clothing', '-300,00 kr', '–'],
+        ]),
+      )
+      expect(centreTotal()).toBe('Total -230,00 kr')
+    })
+
+    it('shows the empty ring, the negative Total and the negative rows when no Category is above zero', async () => {
+      handleSpending = () =>
+        Response.json({
+          total: -350,
+          slices: [
+            { categoryId: null, amount: -50 },
+            { categoryId: 14, amount: -300 },
+          ],
+        })
+
+      await renderApp()
+
+      await waitFor(() =>
+        expect(legendRows()).toEqual([
+          ['Uncategorized', '-50,00 kr', '–'],
+          ['Clothing', '-300,00 kr', '–'],
+        ]),
+      )
+      expect(centreTotal()).toBe('Total -350,00 kr')
+      expect(swatch('Uncategorized')).toEqual({ fill: 'transparent', outline: 'rgb(148, 163, 184)' })
+      expect(ringFills()).toEqual(['#e2e8f0'])
+    })
+
+    it('shows the coloured ring and a Total of 0 when the Categories net to exactly zero', async () => {
+      handleSpending = () =>
+        Response.json({
+          total: 0,
+          slices: [
+            { categoryId: 1, amount: 300 },
+            { categoryId: 14, amount: -300 },
+          ],
+        })
+
+      await renderApp()
+
+      await waitFor(() =>
+        expect(legendRows()).toEqual([
+          ['Groceries', '300,00 kr', '100,0 %'],
+          ['Clothing', '-300,00 kr', '–'],
+        ]),
+      )
+      expect(centreTotal()).toBe('Total 0,00 kr')
+      expect(ringFills()).toEqual(['#2a78d6'])
+    })
+
+    it('gives Savings a negative row beside the netted Total while Include savings is on, when more was taken out than put in', async () => {
+      categoriesServed = [...categories, { id: 12, name: 'Savings', colour: '#1baf7a' }]
+      handleSpending = (_year, _month, _quarter, includeSavings) =>
+        Response.json(
+          includeSavings
+            ? {
+                total: -1500,
+                slices: [
+                  { categoryId: 1, amount: 500 },
+                  { categoryId: 12, amount: -2000 },
+                ],
+              }
+            : { total: 500, slices: [{ categoryId: 1, amount: 500 }] },
+        )
+      const user = userEvent.setup()
+      await renderApp()
+      await waitFor(() => expect(legendRows()).toEqual([['Groceries', '500,00 kr', '100,0 %']]))
+
+      await user.click(within(dashboard()).getByRole('checkbox', { name: 'Include savings' }))
+
+      await waitFor(() =>
+        expect(legendRows()).toEqual([
+          ['Groceries', '500,00 kr', '100,0 %'],
+          ['Savings', '-2 000,00 kr', '–'],
+        ]),
+      )
+      expect(centreTotal()).toBe('Total -1 500,00 kr')
+      expect(swatch('Savings')).toEqual({ fill: 'transparent', outline: 'rgb(27, 175, 122)' })
+      expect(ringFills()).toEqual(['#2a78d6'])
+    })
+  })
+
   it('says when the Spending could not be loaded', async () => {
     handleSpending = () => new Response(null, { status: 500 })
 
@@ -7378,6 +7521,26 @@ describe('Dashboard', () => {
 
       expect(await screen.findByRole('cell', { name: 'Ukjent butikk' })).toBeInTheDocument()
       expect(screen.getByLabelText('Search')).toHaveValue('')
+    })
+
+    it("opens the Transactions of a Category with negative Spending from its legend row, though it has no slice", async () => {
+      categoriesServed = [...categories, { id: 14, name: 'Clothing', colour: '#eb6834' }]
+      months = [{ year: 2026, month: 9 }]
+      handleSpending = () =>
+        Response.json({ total: -180, slices: [{ categoryId: 1, amount: 120 }, { categoryId: 14, amount: -300 }] })
+      handleListPeriod = () =>
+        Response.json([
+          ...groceriesAndUncategorized,
+          { ...groceriesAndUncategorized[0], id: 6, description: 'Zalando retur', amount: 300, categoryId: 14 },
+        ])
+      const user = userEvent.setup()
+      await renderApp()
+
+      await user.click(await legendButton('Clothing'))
+
+      expect(await screen.findByRole('cell', { name: 'Zalando retur' })).toBeInTheDocument()
+      expect(listedDescriptions()).toEqual(['Zalando retur'])
+      expect(chosenFilters()).toEqual(['2026', 'September', 'Clothing'])
     })
 
     // The donut's slice in the Category's colour. The chart has a fixed size, so recharts draws its
@@ -7965,6 +8128,26 @@ describe('Dashboard', () => {
         await waitFor(() => expect(trendTable()[0]).toEqual(['', 'Q4 2025', 'Q3 2026', 'Change']))
         expect(selectedGranularity()).toBe('Quarter')
       })
+    })
+
+    it("gives the same Total as the donut for the donut's month while Include savings is off", async () => {
+      categoriesServed = [...categories, { id: 14, name: 'Clothing', colour: '#eb6834' }]
+      months = [
+        { year: 2026, month: 9 },
+        { year: 2026, month: 8 },
+      ]
+      const september = [
+        { categoryId: 1, amount: 500 },
+        { categoryId: 14, amount: -300 },
+      ]
+      handleSpending = () => Response.json({ total: 200, slices: september })
+      handleMonthlySpending = (from, to) => Response.json(monthlySpending(from, to, { '2026-9': september }))
+
+      await renderApp()
+
+      await waitFor(() => expect(trendTable()[0]).toEqual(['', 'August 2026', 'September 2026', 'Change']))
+      await waitFor(() => expect(centreTotal()).toBe('Total 200,00 kr'))
+      expect(trendTable()[1][2]).toBe('200,00 kr')
     })
 
     it('says when the trend could not be loaded, leaving the Spending by Category shown', async () => {
