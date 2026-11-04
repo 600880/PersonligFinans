@@ -91,12 +91,13 @@ export function coverageNote({ monthsCovered, monthsInPeriod }: TrendPoint): str
 }
 
 // The change from the first point's monthly value to the last's, e.g. "▲ +12,3 %" or "▼ −8,0 %".
-// Positive means a larger figure. "New" when there was none at first, "−100 %" when there is none at
-// last, "–" when there was none at all, and no arrow or sign when the change rounds to zero.
+// It is measured against the size of the first figure, so positive means a larger figure even when the
+// first is below zero: −300 → 900 is "▲ +400,0 %", and a figure that falls to zero is "▼ −100,0 %" from
+// above it and "▲ +100,0 %" from below it. "New" when there was none at first, "–" when there was none
+// at all, and no arrow or sign when the change rounds to zero.
 export function formatChange(first: number, last: number): string {
   if (first === 0) return last === 0 ? '–' : 'New'
-  if (last === 0) return '−100 %'
-  const change = (last - first) / first
+  const change = (last - first) / Math.abs(first)
   const size = percent.format(Math.abs(change))
   if (size === percent.format(0)) return size
   return change > 0 ? `▲ +${size}` : `▼ −${size}`

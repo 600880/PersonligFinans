@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { MonthSpending, SpendingSlice } from './api'
-import { trendCategories, trendPoints } from './trend'
+import { formatChange, trendCategories, trendPoints } from './trend'
 
 const GROCERIES = 1
 const SHOPPING = 2
@@ -74,5 +74,30 @@ describe('trendCategories', () => {
 
   it('leaves out a Category, Savings or Income that nets the other way in every point', () => {
     expect(trendCategories(monthly, 'quarter')).toEqual([GROCERIES])
+  })
+})
+
+describe('formatChange', () => {
+  it.each([
+    ['grew from below zero to above it', -300, 900, '▲ +400,0 %'],
+    ['fell further below zero', -300, -600, '▼ −100,0 %'],
+    ['rose from below zero to zero', -300, 0, '▲ +100,0 %'],
+    ['fell from above zero to zero', 400, 0, '▼ −100,0 %'],
+  ])('measures a change against the size of the first figure, when it %s', (_case, first, last, shown) => {
+    expect(formatChange(first, last)).toBe(shown)
+  })
+
+  it('shows "New" when there was no figure at first', () => {
+    expect(formatChange(0, 500)).toBe('New')
+    expect(formatChange(0, -500)).toBe('New')
+  })
+
+  it('shows "–" when there was no figure at either end', () => {
+    expect(formatChange(0, 0)).toBe('–')
+  })
+
+  it('shows no arrow or sign when the change rounds to zero', () => {
+    expect(formatChange(-300, -300.1)).toBe('0,0 %')
+    expect(formatChange(1000, 1000.4)).toBe('0,0 %')
   })
 })

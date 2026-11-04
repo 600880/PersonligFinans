@@ -7593,8 +7593,8 @@ describe('Dashboard', () => {
           ['', 'October 2025', 'September 2026', 'Change'],
           ['Total', '1 000,00 kr', '1 123,00 kr', '▲ +12,3 %'],
           ['Other', '0,00 kr', '1 123,00 kr', 'New'],
-          ['Groceries', '600,00 kr', '0,00 kr', '−100 %'],
-          ['Uncategorized', '400,00 kr', '0,00 kr', '−100 %'],
+          ['Groceries', '600,00 kr', '0,00 kr', '▼ −100,0 %'],
+          ['Uncategorized', '400,00 kr', '0,00 kr', '▼ −100,0 %'],
         ]),
       )
       expect(selectedMonth('From')).toBe('10.2025')
@@ -7647,7 +7647,7 @@ describe('Dashboard', () => {
       ['less Spending', 1000, 920, '1 000,00 kr', '920,00 kr', '▼ −8,0 %'],
       ['the same Spending', 250, 250, '250,00 kr', '250,00 kr', '0,0 %'],
       ['Spending that is new', 0, 500, '0,00 kr', '500,00 kr', 'New'],
-      ['Spending that stopped', 400, 0, '400,00 kr', '0,00 kr', '−100 %'],
+      ['Spending that stopped', 400, 0, '400,00 kr', '0,00 kr', '▼ −100,0 %'],
       ['no Spending at either end', 0, 0, '0,00 kr', '0,00 kr', '–'],
     ])('shows the first and last monthly totals and the change for %s', async (_case, first, last, firstShown, lastShown, change) => {
       months = [
@@ -8229,7 +8229,7 @@ describe('Dashboard', () => {
             ['Total', '150,00 kr', '190,00 kr', '▲ +26,7 %'],
             ['Other', '0,00 kr', '0,00 kr', '–'],
             ['Groceries', '100,00 kr', '150,00 kr', '▲ +50,0 %'],
-            ['Uncategorized', '50,00 kr', '0,00 kr', '−100 %'],
+            ['Uncategorized', '50,00 kr', '0,00 kr', '▼ −100,0 %'],
             ['Transport', '0,00 kr', '40,00 kr', 'New'],
           ]),
         )
