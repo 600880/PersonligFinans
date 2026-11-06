@@ -3590,10 +3590,10 @@ describe('Page addresses', () => {
 
 describe('Tab title', () => {
   it.each([
-    ['/transactions', 'Transactions', 'Transactions · PersonligFinans'],
-    ['/categories', 'Categories', 'Categories · PersonligFinans'],
-    ['/rules', 'Categorization Rules', 'Rules · PersonligFinans'],
-    ['/user', 'User', 'User · PersonligFinans'],
+    ['/transactions', 'Transactions', 'Transactions - PersonligFinans'],
+    ['/categories', 'Categories', 'Categories - PersonligFinans'],
+    ['/rules', 'Categorization Rules', 'Rules - PersonligFinans'],
+    ['/user', 'User', 'User - PersonligFinans'],
   ])('names the page opened at %s, as on a refresh', async (path, heading, title) => {
     await renderAppAt(path)
 
@@ -3613,15 +3613,15 @@ describe('Tab title', () => {
 
     await user.click(screen.getByRole('button', { name: 'Categories' }))
     await screen.findByText('All groceries.')
-    expect(document.title).toBe('Categories · PersonligFinans')
+    expect(document.title).toBe('Categories - PersonligFinans')
 
     await user.click(screen.getByRole('button', { name: 'Show rules for Groceries (3)' }))
     await screen.findByRole('heading', { name: 'Categorization Rules' })
-    expect(document.title).toBe('Rules · PersonligFinans')
+    expect(document.title).toBe('Rules - PersonligFinans')
 
     window.history.back()
     await screen.findByText('All groceries.')
-    expect(document.title).toBe('Categories · PersonligFinans')
+    expect(document.title).toBe('Categories - PersonligFinans')
 
     window.history.back()
     await screen.findByRole('button', { name: 'Add transaction' })
@@ -3629,7 +3629,7 @@ describe('Tab title', () => {
 
     window.history.forward()
     await screen.findByText('All groceries.')
-    expect(document.title).toBe('Categories · PersonligFinans')
+    expect(document.title).toBe('Categories - PersonligFinans')
 
     await user.click(screen.getByRole('button', { name: 'PersonligFinans' }))
     expect(document.title).toBe('PersonligFinans')
@@ -9210,7 +9210,7 @@ describe('Dashboard', () => {
 
         await user.click(within(budgetDialog()).getByRole('button', { name: 'Save' }))
 
-        expect(budgetInput('Groceries')).toHaveAccessibleDescription('Enter a whole number from 0 to 10 000 000.')
+        expect(budgetInput('Groceries')).toHaveAccessibleDescription('Enter a whole number from 0 to 10 000 000.')
         expect(budgetInput('Groceries')).toBeInvalid()
         expect(budgetInput('Housing')).toBeValid()
         expect(budgetDialog()).toBeInTheDocument()

@@ -40,6 +40,15 @@ import {
 } from '../lib/trend'
 import { GranularitySelect } from './GranularitySelect'
 import { ErrorMessage } from './Messages'
+import {
+  cardBodyClass,
+  cardHeaderClass,
+  cardTableHeadClass,
+  cardTitleClass,
+  fieldLabelClass,
+  fieldSelectClass,
+  panelClass,
+} from './panel'
 import type { TransactionsTarget } from './TransactionsPage'
 
 const LOAD_ERROR = 'Could not load the Spending trend.'
@@ -54,25 +63,25 @@ const TOO_FEW_PERIODS: Record<Granularity, string> = {
 const CHART_HEIGHT = 280
 
 // The chart's own colours, switched with the theme. The Total line is slate outside the Category
-// palette, dark in Light and pale in Dark, so it stands apart from every Category. Light keeps
-// recharts' own greys for the axes, their label and the line following the pointer, and its white
-// ring round the dot under the pointer, which Dark gives the page's colour.
+// palette, dark in Light and pale in Dark, so it stands apart from every Category. The axes, their
+// figures and label, the grid and the line following the pointer are recessive slates, and each dot
+// has a ring in the colour of the card behind the chart, so the dots stand clear of the lines.
 const CHART_COLOURS = {
   light: {
     total: '#1e293b',
-    grid: '#e2e8f0',
-    axis: '#666666',
-    label: '#808080',
-    cursor: '#cccccc',
+    grid: '#f1f5f9',
+    axis: '#cbd5e1',
+    label: '#64748b',
+    cursor: '#cbd5e1',
     ring: '#ffffff',
   },
   dark: {
     total: '#e2e8f0',
     grid: '#1e293b',
-    axis: '#94a3b8',
+    axis: '#475569',
     label: '#94a3b8',
     cursor: '#475569',
-    ring: '#020617',
+    ring: '#0f172a',
   },
 }
 
@@ -239,154 +248,176 @@ export function SpendingTrend({
   }
 
   return (
-    <section aria-labelledby={headingId} className="mt-10 w-full max-w-3xl">
-      <h2 id={headingId} className="text-lg font-semibold text-slate-900 dark:text-slate-100">
-        Spending trend
-      </h2>
+    <section aria-labelledby={headingId} className={`mt-2 w-full max-w-4xl ${panelClass}`}>
+      <div className={cardHeaderClass}>
+        <h2 id={headingId} className={cardTitleClass}>
+          Spending trend
+        </h2>
 
-      {offered.length < 2 ? (
-        <p className="mt-4 text-sm text-slate-600 dark:text-slate-400">{TOO_FEW_PERIODS.month}</p>
-      ) : (
-        <div className="mt-4 flex flex-wrap gap-4">
-          <GranularitySelect value={granularity} onChange={chooseGranularity} />
-          {span &&
-            (['from', 'to'] as const).map((end) => (
-              <label key={end} className="flex w-fit flex-col gap-1 text-sm font-medium text-slate-700 dark:text-slate-300">
-                {end === 'from' ? 'From' : 'To'}
-                <select
-                  value={monthValue(span[end])}
-                  onChange={(event) => chooseMonth(end, event.target.value)}
-                  className="rounded-lg border border-slate-300 dark:border-slate-700 px-3 py-2 font-normal"
-                >
-                  {offered.map((option) => (
-                    <option key={monthValue(option)} value={monthValue(option)}>
-                      {monthLabel(option)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            ))}
-        </div>
-      )}
-
-      {offered.length >= 2 && !span && (
-        <p className="mt-4 text-sm text-slate-600 dark:text-slate-400">{TOO_FEW_PERIODS[granularity]}</p>
-      )}
-
-      {span && (
-        <>
-          {current && !current.monthly && <ErrorMessage className="mt-3">{LOAD_ERROR}</ErrorMessage>}
-
-          {first && last && (
-            <>
-              <LineChart
-                responsive
-                data={points}
-                margin={{ top: 8, right: 16, bottom: 8, left: 16 }}
-                className="mt-6"
-                style={{ width: '100%', height: CHART_HEIGHT, cursor: drawn.length > 0 ? 'pointer' : undefined }}
-                onClick={openNearestLine}
-              >
-                <YAxisInverseScale onScale={(scale) => (yValueAt.current = scale)} />
-                <CartesianGrid stroke={colours.grid} vertical={false} />
-                <XAxis dataKey="label" stroke={colours.axis} tick={{ fontSize: 12 }} />
-                <YAxis
-                  tickFormatter={(value: number) => wholeKroner.format(value)}
-                  stroke={colours.axis}
-                  tick={{ fontSize: 12 }}
-                  width={72}
-                  label={{
-                    value: 'NOK per month',
-                    angle: -90,
-                    position: 'insideLeft',
-                    fontSize: 12,
-                    fill: colours.label,
-                  }}
-                />
-                {drawnBelowZero && <ReferenceLine y={0} stroke={colours.axis} />}
-                <Tooltip
-                  cursor={{ stroke: colours.cursor }}
-                  content={({ active, payload }) => {
-                    const point = active ? (payload?.[0]?.payload as TrendPoint | undefined) : undefined
-                    if (!point) return null
-                    return (
-                      <div className="rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3 py-2 text-sm shadow-sm">
-                        <p className="font-medium text-slate-900 dark:text-slate-100">
-                          {point.label}
-                          {coverageNote(point)}
-                        </p>
-                        {drawn.map((row) => (
-                          <p key={row.key} className="text-slate-600 dark:text-slate-400 tabular-nums">
-                            {row.name} {formatAmount(point.values[row.key])} per month
-                          </p>
-                        ))}
-                      </div>
-                    )
-                  }}
-                />
-                {/* Backwards, so the Total line is drawn on top. It is slightly thicker than the rest. */}
-                {drawn.toReversed().map((row) => (
-                  <Line
-                    key={row.key}
-                    dataKey={(point: TrendPoint) => point.values[row.key]}
-                    name={row.name}
-                    stroke={row.colour}
-                    strokeWidth={row.key === TOTAL_ROW ? 3 : 2}
-                    dot={{ r: row.key === TOTAL_ROW ? 3 : 2, fill: row.colour }}
-                    activeDot={{ stroke: colours.ring }}
-                    isAnimationActive={false}
-                  />
-                ))}
-              </LineChart>
-
-              {/* On a phone the table scrolls sideways on its own, so the page never runs wider than the screen. */}
-              <div className="mt-4 max-sm:overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="text-slate-500 dark:text-slate-400">
-                    <tr>
-                      <th />
-                      <th className="py-2 pr-3 text-right font-medium">{first.label}</th>
-                      <th className="py-2 pr-3 text-right font-medium">{last.label}</th>
-                      <th className="py-2 text-right font-medium">Change</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-200 dark:divide-slate-800 text-slate-900 dark:text-slate-100">
-                    {rows.map((row) => (
-                      <tr key={row.key}>
-                        <td className="py-2 pr-3">
-                          <label className="flex w-fit items-center gap-2">
-                            <input
-                              type="checkbox"
-                              checked={switchedOn.has(row.key)}
-                              onChange={(event) => switchRow(row.key, event.target.checked)}
-                              className="size-4 rounded border-slate-300 dark:border-slate-700"
-                            />
-                            <span
-                              aria-hidden="true"
-                              className="size-3 shrink-0 rounded-sm"
-                              style={{ backgroundColor: row.colour }}
-                            />
-                            {row.name}
-                          </label>
-                        </td>
-                        <td className="py-2 pr-3 text-right whitespace-nowrap tabular-nums">
-                          {formatAmount(first.values[row.key])}
-                        </td>
-                        <td className="py-2 pr-3 text-right whitespace-nowrap tabular-nums">
-                          {formatAmount(last.values[row.key])}
-                        </td>
-                        <td className="py-2 text-right whitespace-nowrap text-slate-600 dark:text-slate-400 tabular-nums">
-                          {formatChange(first.values[row.key], last.values[row.key])}
-                        </td>
-                      </tr>
+        {offered.length >= 2 && (
+          <div className="flex flex-wrap gap-3">
+            <GranularitySelect value={granularity} onChange={chooseGranularity} />
+            {span &&
+              (['from', 'to'] as const).map((end) => (
+                <label key={end} className={fieldLabelClass}>
+                  {end === 'from' ? 'From' : 'To'}
+                  <select
+                    value={monthValue(span[end])}
+                    onChange={(event) => chooseMonth(end, event.target.value)}
+                    className={fieldSelectClass}
+                  >
+                    {offered.map((option) => (
+                      <option key={monthValue(option)} value={monthValue(option)}>
+                        {monthLabel(option)}
+                      </option>
                     ))}
-                  </tbody>
-                </table>
-              </div>
-            </>
-          )}
-        </>
-      )}
+                  </select>
+                </label>
+              ))}
+          </div>
+        )}
+      </div>
+
+      <div className={cardBodyClass}>
+        {offered.length < 2 && (
+          <p className="text-sm text-slate-600 dark:text-slate-400">{TOO_FEW_PERIODS.month}</p>
+        )}
+
+        {offered.length >= 2 && !span && (
+          <p className="text-sm text-slate-600 dark:text-slate-400">{TOO_FEW_PERIODS[granularity]}</p>
+        )}
+
+        {span && (
+          <>
+            {current && !current.monthly && <ErrorMessage className="mb-3">{LOAD_ERROR}</ErrorMessage>}
+
+            {first && last && (
+              <>
+                <LineChart
+                  responsive
+                  data={points}
+                  margin={{ top: 12, right: 12, bottom: 4, left: 8 }}
+                  style={{ width: '100%', height: CHART_HEIGHT, cursor: drawn.length > 0 ? 'pointer' : undefined }}
+                  onClick={openNearestLine}
+                >
+                  <YAxisInverseScale onScale={(scale) => (yValueAt.current = scale)} />
+                  <CartesianGrid stroke={colours.grid} vertical={false} />
+                  <XAxis
+                    dataKey="label"
+                    stroke={colours.axis}
+                    tick={{ fontSize: 12, fill: colours.label }}
+                    tickLine={false}
+                    tickMargin={8}
+                  />
+                  <YAxis
+                    tickFormatter={(value: number) => wholeKroner.format(value)}
+                    stroke={colours.axis}
+                    tick={{ fontSize: 12, fill: colours.label }}
+                    tickLine={false}
+                    tickMargin={6}
+                    width={72}
+                    label={{
+                      value: 'NOK per month',
+                      angle: -90,
+                      position: 'insideLeft',
+                      fontSize: 12,
+                      fill: colours.label,
+                    }}
+                  />
+                  {drawnBelowZero && <ReferenceLine y={0} stroke={colours.axis} />}
+                  <Tooltip
+                    cursor={{ stroke: colours.cursor }}
+                    content={({ active, payload }) => {
+                      const point = active ? (payload?.[0]?.payload as TrendPoint | undefined) : undefined
+                      if (!point) return null
+                      return (
+                        <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm shadow-md">
+                          <p className="mb-1 font-medium text-slate-900 dark:text-slate-100">
+                            {point.label}
+                            {coverageNote(point)}
+                          </p>
+                          {drawn.map((row) => (
+                            <p key={row.key} className="flex items-center gap-2 text-slate-600 dark:text-slate-400 tabular-nums">
+                              <span aria-hidden="true" className="size-2.5 shrink-0 rounded-full" style={{ backgroundColor: row.colour }} />
+                              <span>
+                                {row.name}{' '}
+                                <span className="font-medium text-slate-900 dark:text-slate-100">
+                                  {formatAmount(point.values[row.key])}
+                                </span>{' '}
+                                per month
+                              </span>
+                            </p>
+                          ))}
+                        </div>
+                      )
+                    }}
+                  />
+                  {/* Backwards, so the Total line is drawn on top. It is slightly thicker than the rest. */}
+                  {drawn.toReversed().map((row) => (
+                    <Line
+                      key={row.key}
+                      dataKey={(point: TrendPoint) => point.values[row.key]}
+                      name={row.name}
+                      stroke={row.colour}
+                      strokeWidth={row.key === TOTAL_ROW ? 2.5 : 2}
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      dot={{ r: row.key === TOTAL_ROW ? 4.5 : 3.5, fill: row.colour, stroke: colours.ring, strokeWidth: 2 }}
+                      activeDot={{ r: 6, stroke: colours.ring, strokeWidth: 2 }}
+                      isAnimationActive={false}
+                    />
+                  ))}
+                </LineChart>
+
+                {/* On a phone the table scrolls sideways on its own, so the page never runs wider than the screen. */}
+                <div className="mt-5 max-sm:-mx-4 max-sm:overflow-x-auto max-sm:px-4">
+                  <table className="w-full text-sm">
+                    <thead className={`border-b border-slate-200 dark:border-slate-800 ${cardTableHeadClass}`}>
+                      <tr>
+                        <th />
+                        <th className="pt-1 pr-3 pb-2 text-right whitespace-nowrap">{first.label}</th>
+                        <th className="pt-1 pr-3 pb-2 text-right whitespace-nowrap">{last.label}</th>
+                        <th className="pt-1 pb-2 text-right">Change</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-slate-900 dark:text-slate-100">
+                      {rows.map((row) => (
+                        <tr key={row.key}>
+                          <td className="py-2.5 pr-3">
+                            <label className="flex w-fit cursor-pointer items-center gap-2.5">
+                              <input
+                                type="checkbox"
+                                checked={switchedOn.has(row.key)}
+                                onChange={(event) => switchRow(row.key, event.target.checked)}
+                                className="size-4 rounded border-slate-300 dark:border-slate-700"
+                              />
+                              <span
+                                aria-hidden="true"
+                                className="size-3 shrink-0 rounded-full"
+                                style={{ backgroundColor: row.colour }}
+                              />
+                              <span className={row.key === TOTAL_ROW ? 'font-semibold' : undefined}>{row.name}</span>
+                            </label>
+                          </td>
+                          <td className="py-2.5 pr-3 text-right whitespace-nowrap tabular-nums">
+                            {formatAmount(first.values[row.key])}
+                          </td>
+                          <td className="py-2.5 pr-3 text-right whitespace-nowrap tabular-nums">
+                            {formatAmount(last.values[row.key])}
+                          </td>
+                          <td className="py-2.5 text-right whitespace-nowrap text-slate-500 dark:text-slate-400 tabular-nums">
+                            {formatChange(first.values[row.key], last.values[row.key])}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+          </>
+        )}
+      </div>
     </section>
   )
 }

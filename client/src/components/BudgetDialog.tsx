@@ -12,7 +12,7 @@ import { inputClassName } from './TransactionForm'
 const MAX_BUDGET = 10_000_000
 
 // Shown by an input whose Budget is refused at Save.
-const INVALID_BUDGET = 'Enter a whole number from 0 to 10 000 000.'
+const INVALID_BUDGET = `Enter a whole number from 0 to ${new Intl.NumberFormat('nb-NO').format(MAX_BUDGET)}.`
 
 // What was typed as a Budget in whole kroner: empty is 0, and anything but a whole number from 0 to
 // MAX_BUDGET is null.

@@ -1,4 +1,5 @@
 import { GRANULARITIES, type Granularity } from '../lib/period'
+import { fieldLabelClass, fieldSelectClass } from './panel'
 
 // The "Granularity" dropdown, offering Year, Quarter and Month.
 export function GranularitySelect({
@@ -9,12 +10,12 @@ export function GranularitySelect({
   onChange: (granularity: Granularity) => void
 }) {
   return (
-    <label className="flex w-fit flex-col gap-1 text-sm font-medium text-slate-700 dark:text-slate-300">
+    <label className={fieldLabelClass}>
       Granularity
       <select
         value={value}
         onChange={(event) => onChange(event.target.value as Granularity)}
-        className="rounded-lg border border-slate-300 dark:border-slate-700 px-3 py-2 font-normal"
+        className={fieldSelectClass}
       >
         {GRANULARITIES.map(({ value, label }) => (
           <option key={value} value={value}>

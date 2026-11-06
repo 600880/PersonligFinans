@@ -62,7 +62,9 @@ export function Dialog({ title, onCancel, width = 'md', children }: DialogProps)
   }, [onCancel])
 
   return (
-    <div className="fixed inset-0 flex items-center justify-center bg-slate-900/40 dark:bg-slate-950/70 p-4">
+    // Above everything positioned on the page, such as a chart that comes after it, which would otherwise
+    // be painted over it.
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 dark:bg-slate-950/70 p-4">
       <div
         ref={panelRef}
         role="dialog"

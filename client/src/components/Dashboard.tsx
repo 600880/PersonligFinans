@@ -18,6 +18,15 @@ import { currentMonth } from '../lib/month'
 import { BudgetDialog } from './BudgetDialog'
 import { GranularitySelect } from './GranularitySelect'
 import { ErrorMessage } from './Messages'
+import {
+  cardBodyClass,
+  cardHeaderClass,
+  cardTableHeadClass,
+  cardTitleClass,
+  fieldLabelClass,
+  fieldSelectClass,
+  panelClass,
+} from './panel'
 import { SpendingTrend } from './SpendingTrend'
 import type { TransactionsTarget } from './TransactionsPage'
 import {
@@ -33,15 +42,15 @@ const LOAD_ERROR = 'Could not load the Spending.'
 
 const CHART_SIZE = 240
 
-// The empty ring, and the borders between slices in the colour behind the donut, switched with the
-// theme.
+// The empty ring, and the borders between slices in the colour of the card behind the donut, switched
+// with the theme.
 const RING_COLOURS = {
   light: { empty: '#e2e8f0', border: '#ffffff' },
-  dark: { empty: '#1e293b', border: '#020617' },
+  dark: { empty: '#1e293b', border: '#0f172a' },
 }
 
 // Shared by the Spending ring and the empty ring.
-const RING = { innerRadius: 76, outerRadius: 116, isAnimationActive: false } as const
+const RING = { innerRadius: 84, outerRadius: 118, isAnimationActive: false } as const
 
 // The Budget left figures in green above zero, red below and neutral grey at zero, in Light and Dark.
 const BUDGET_LEFT_TONE = {
@@ -237,166 +246,178 @@ export function Dashboard({
 
   return (
     <>
-      <section aria-labelledby={headingId} className="mt-6 w-full max-w-3xl">
-        <h2 id={headingId} className="text-lg font-semibold text-slate-900 dark:text-slate-100">
-          Spending
-        </h2>
+      <section aria-labelledby={headingId} className={`w-full max-w-4xl ${panelClass}`}>
+        <div className={cardHeaderClass}>
+          <h2 id={headingId} className={cardTitleClass}>
+            Spending
+          </h2>
 
-        {selected && (
-          <div className="mt-4 flex flex-wrap gap-4">
-            <GranularitySelect
-              value={selected.granularity}
-              onChange={(granularity) => choosePeriod(switchGranularity(selected, granularity, months))}
-            />
-            <label className="flex w-fit flex-col gap-1 text-sm font-medium text-slate-700 dark:text-slate-300">
-              Period
-              <select
-                value={periodValue(selected)}
-                onChange={(event) =>
-                  choosePeriod(periodOptions.find((option) => periodValue(option) === event.target.value)!)
-                }
-                className="rounded-lg border border-slate-300 dark:border-slate-700 px-3 py-2 font-normal"
-              >
-                {periodOptions.map((option) => (
-                  <option key={periodValue(option)} value={periodValue(option)}>
-                    {periodLabel(option)}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-        )}
-
-        <div className="mt-3 flex items-center justify-between gap-4">
-          <label className="flex w-fit items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-300">
-            <input
-              type="checkbox"
-              checked={includeSavings}
-              onChange={(event) => chooseIncludeSavings(event.target.checked)}
-              className="size-4 rounded border-slate-300 dark:border-slate-700"
-            />
-            Include savings
-          </label>
-          {/* At the right, above the legend. Waits for the Categories, which the dialog lists. */}
-          <button
-            type="button"
-            disabled={!categories}
-            onClick={() => setIsSettingBudget(true)}
-            className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-1 text-sm font-medium text-slate-700 dark:text-slate-200 shadow-sm hover:bg-slate-50 dark:hover:bg-slate-800 disabled:cursor-not-allowed disabled:text-slate-400 dark:disabled:text-slate-500"
-          >
-            Set Budget
-          </button>
-        </div>
-
-        {errorMessage && <ErrorMessage className="mt-3">{errorMessage}</ErrorMessage>}
-
-        <div className="mt-6 flex flex-col items-center gap-8 sm:flex-row sm:items-start">
-          <div className="relative shrink-0" style={{ width: CHART_SIZE, height: CHART_SIZE }}>
-            <PieChart width={CHART_SIZE} height={CHART_SIZE}>
-              {ringSlices.length > 0 ? (
-                <Pie
-                  data={ringSlices}
-                  dataKey="amount"
-                  nameKey="name"
-                  {...RING}
-                  stroke={ringColours.border}
-                  strokeWidth={2}
-                  onClick={(_sector, index) => openSlice(ringSlices[index])}
-                  style={targetPeriod ? { cursor: 'pointer' } : undefined}
+          {selected && (
+            <div className="flex flex-wrap gap-3">
+              <GranularitySelect
+                value={selected.granularity}
+                onChange={(granularity) => choosePeriod(switchGranularity(selected, granularity, months))}
+              />
+              <label className={fieldLabelClass}>
+                Period
+                <select
+                  value={periodValue(selected)}
+                  onChange={(event) =>
+                    choosePeriod(periodOptions.find((option) => periodValue(option) === event.target.value)!)
+                  }
+                  className={fieldSelectClass}
                 >
-                  {ringSlices.map((slice) => (
-                    <Cell key={slice.key} fill={slice.colour} />
+                  {periodOptions.map((option) => (
+                    <option key={periodValue(option)} value={periodValue(option)}>
+                      {periodLabel(option)}
+                    </option>
                   ))}
-                </Pie>
-              ) : (
-                <Pie
-                  data={[{ amount: 1 }]}
-                  dataKey="amount"
-                  {...RING}
-                  fill={ringColours.empty}
-                  stroke="none"
-                />
-              )}
-              {ringSlices.length > 0 && (
-                <Tooltip
-                  content={({ active, payload }) => {
-                    const slice = active ? (payload?.[0]?.payload as RingSliceView | undefined) : undefined
-                    if (!slice) return null
-                    return (
-                      <div className="rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3 py-2 text-sm shadow-sm">
-                        <p className="font-medium text-slate-900 dark:text-slate-100">{slice.name}</p>
-                        <p className="text-slate-600 dark:text-slate-400 tabular-nums">
-                          {formatAmount(slice.amount)} · {percent.format(slice.share)}
-                        </p>
-                      </div>
-                    )
-                  }}
-                />
-              )}
-            </PieChart>
-            {spending && (
-              <p className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-                <span className="text-xs text-slate-500 dark:text-slate-400">Total</span>{' '}
-                <span className="text-lg font-semibold text-slate-900 dark:text-slate-100">{formatAmount(spending.total)}</span>
-              </p>
-            )}
-          </div>
-
-          {/* On a phone the table scrolls sideways on its own, so the page never runs wider than the screen. */}
-          {slices.length > 0 && (
-            <div className="w-full min-w-0 max-sm:overflow-x-auto">
-              <table className="w-full text-sm">
-                {showsBudgets && (
-                  <thead className="text-slate-500 dark:text-slate-400">
-                    <tr>
-                      <th className="py-2 pr-3 text-left font-medium">Category</th>
-                      <th className="py-2 pr-3 text-right font-medium">Spending</th>
-                      <th className="py-2 text-right font-medium">Share</th>
-                      <th className="py-2 pl-3 text-right font-medium">Budget left</th>
-                    </tr>
-                  </thead>
-                )}
-                <tbody className="divide-y divide-slate-200 dark:divide-slate-800 text-slate-900 dark:text-slate-100">
-                  {slices.map((slice) => (
-                    <tr key={slice.key}>
-                      <td className="py-2 pr-3">
-                        {targetPeriod ? (
-                          <button
-                            type="button"
-                            onClick={() => openSlice(slice)}
-                            className="flex cursor-pointer items-center gap-2 text-left"
-                          >
-                            <LegendLabel slice={slice} />
-                          </button>
-                        ) : (
-                          <span className="flex items-center gap-2">
-                            <LegendLabel slice={slice} />
-                          </span>
-                        )}
-                      </td>
-                      <td className="py-2 pr-3 text-right whitespace-nowrap tabular-nums">
-                        {formatAmount(slice.amount)}
-                      </td>
-                      <td className="py-2 text-right whitespace-nowrap text-slate-500 dark:text-slate-400 tabular-nums">
-                        {slice.inRing ? percent.format(slice.share) : '–'}
-                      </td>
-                      {showsBudgets && <BudgetLeftCell budgetLeft={slice.budgetLeft} />}
-                    </tr>
-                  ))}
-                </tbody>
-                {showsBudgets && spending && categories && (
-                  <tfoot className="border-t border-slate-300 dark:border-slate-700 font-semibold text-slate-900 dark:text-slate-100">
-                    <tr>
-                      <td className="py-2 pr-3">Total</td>
-                      <td className="py-2 pr-3 text-right whitespace-nowrap tabular-nums">{formatAmount(spending.total)}</td>
-                      <td />
-                      <BudgetLeftCell budgetLeft={overallBudgetLeft(spending.slices, categories, monthsInPeriod)} />
-                    </tr>
-                  </tfoot>
-                )}
-              </table>
+                </select>
+              </label>
             </div>
           )}
+        </div>
+
+        <div className={cardBodyClass}>
+          <div className="flex items-center justify-between gap-4">
+            <label className="flex w-fit cursor-pointer items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-300">
+              <input
+                type="checkbox"
+                checked={includeSavings}
+                onChange={(event) => chooseIncludeSavings(event.target.checked)}
+                className="size-4 rounded border-slate-300 dark:border-slate-700"
+              />
+              Include savings
+            </label>
+            {/* At the right, above the legend. Waits for the Categories, which the dialog lists. */}
+            <button
+              type="button"
+              disabled={!categories}
+              onClick={() => setIsSettingBudget(true)}
+              className="flex items-center gap-1 rounded-md bg-white dark:bg-slate-900 px-2 py-1 text-sm text-slate-700 dark:text-slate-300 shadow-sm ring-1 ring-slate-900/5 dark:ring-white/10 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:cursor-not-allowed disabled:text-slate-400 dark:disabled:text-slate-500"
+            >
+              <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" className="size-3.5 text-slate-500 dark:text-slate-400">
+                <path d="M11.013 2.513a1.75 1.75 0 0 1 2.475 2.474L6.226 12.25a2.751 2.751 0 0 1-.892.596l-2.047.848a.75.75 0 0 1-.98-.98l.848-2.047a2.75 2.75 0 0 1 .596-.892l7.262-7.261Z" />
+              </svg>
+              Set Budget
+            </button>
+          </div>
+
+          {errorMessage && <ErrorMessage className="mt-3">{errorMessage}</ErrorMessage>}
+
+          <div className="mt-5 flex flex-col items-center gap-8 sm:flex-row sm:items-start">
+            <div className="relative shrink-0" style={{ width: CHART_SIZE, height: CHART_SIZE }}>
+              <PieChart width={CHART_SIZE} height={CHART_SIZE}>
+                {ringSlices.length > 0 ? (
+                  <Pie
+                    data={ringSlices}
+                    dataKey="amount"
+                    nameKey="name"
+                    {...RING}
+                    stroke={ringColours.border}
+                    strokeWidth={2}
+                    onClick={(_sector, index) => openSlice(ringSlices[index])}
+                    style={targetPeriod ? { cursor: 'pointer' } : undefined}
+                  >
+                    {ringSlices.map((slice) => (
+                      <Cell key={slice.key} fill={slice.colour} />
+                    ))}
+                  </Pie>
+                ) : (
+                  <Pie
+                    data={[{ amount: 1 }]}
+                    dataKey="amount"
+                    {...RING}
+                    fill={ringColours.empty}
+                    stroke="none"
+                  />
+                )}
+                {ringSlices.length > 0 && (
+                  <Tooltip
+                    content={({ active, payload }) => {
+                      const slice = active ? (payload?.[0]?.payload as RingSliceView | undefined) : undefined
+                      if (!slice) return null
+                      return (
+                        <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm shadow-md">
+                          <p className="flex items-center gap-2 font-medium text-slate-900 dark:text-slate-100">
+                            <span aria-hidden="true" className="size-2.5 shrink-0 rounded-full" style={{ backgroundColor: slice.colour }} />
+                            {slice.name}
+                          </p>
+                          <p className="mt-0.5 text-slate-600 dark:text-slate-400 tabular-nums">
+                            {formatAmount(slice.amount)} · {percent.format(slice.share)}
+                          </p>
+                        </div>
+                      )
+                    }}
+                  />
+                )}
+              </PieChart>
+              {spending && (
+                <p className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-0.5">
+                  <span className="text-xs font-medium tracking-wide text-slate-500 uppercase dark:text-slate-400">Total</span>{' '}
+                  <span className="text-xl font-semibold tracking-tight text-slate-900 dark:text-slate-100 tabular-nums">
+                    {formatAmount(spending.total)}
+                  </span>
+                </p>
+              )}
+            </div>
+
+            {/* On a phone the table scrolls sideways on its own, so the page never runs wider than the screen. */}
+            {slices.length > 0 && (
+              <div className="w-full min-w-0 max-sm:-mx-4 max-sm:w-auto max-sm:self-stretch max-sm:overflow-x-auto max-sm:px-4">
+                <table className="w-full text-sm">
+                  {showsBudgets && (
+                    <thead className={`border-b border-slate-200 dark:border-slate-800 ${cardTableHeadClass}`}>
+                      <tr>
+                        <th className="pt-1 pr-3 pb-2 text-left">Category</th>
+                        <th className="pt-1 pr-3 pb-2 text-right">Spending</th>
+                        <th className="pt-1 pb-2 text-right">Share</th>
+                        <th className="pt-1 pb-2 pl-3 text-right">Budget left</th>
+                      </tr>
+                    </thead>
+                  )}
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-slate-900 dark:text-slate-100">
+                    {slices.map((slice) => (
+                      <tr key={slice.key}>
+                        <td className="py-2.5 pr-3">
+                          {targetPeriod ? (
+                            <button
+                              type="button"
+                              onClick={() => openSlice(slice)}
+                              className="group flex cursor-pointer items-center gap-2.5 rounded text-left"
+                            >
+                              <LegendLabel slice={slice} />
+                            </button>
+                          ) : (
+                            <span className="flex items-center gap-2.5">
+                              <LegendLabel slice={slice} />
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-2.5 pr-3 text-right font-medium whitespace-nowrap tabular-nums">
+                          {formatAmount(slice.amount)}
+                        </td>
+                        <td className="py-2.5 text-right whitespace-nowrap text-slate-500 dark:text-slate-400 tabular-nums">
+                          {slice.inRing ? percent.format(slice.share) : '–'}
+                        </td>
+                        {showsBudgets && <BudgetLeftCell budgetLeft={slice.budgetLeft} />}
+                      </tr>
+                    ))}
+                  </tbody>
+                  {showsBudgets && spending && categories && (
+                    <tfoot className="border-t-2 border-slate-200 dark:border-slate-700 font-semibold text-slate-900 dark:text-slate-100">
+                      <tr>
+                        <td className="pt-3 pb-1 pr-3">Total</td>
+                        <td className="pt-3 pb-1 pr-3 text-right whitespace-nowrap tabular-nums">{formatAmount(spending.total)}</td>
+                        <td />
+                        <BudgetLeftCell budgetLeft={overallBudgetLeft(spending.slices, categories, monthsInPeriod)} footer />
+                      </tr>
+                    </tfoot>
+                  )}
+                </table>
+              </div>
+            )}
+          </div>
         </div>
       </section>
 
@@ -420,10 +441,11 @@ export function Dashboard({
 }
 
 // A legend row's Budget left: always with its sign, and green, red or grey by it, or "–" for none.
-function BudgetLeftCell({ budgetLeft }: { budgetLeft: number | null }) {
+// In the Total row it is spaced as the rest of that row.
+function BudgetLeftCell({ budgetLeft, footer = false }: { budgetLeft: number | null; footer?: boolean }) {
   const tone = budgetLeft === null ? BUDGET_LEFT_TONE[0] : BUDGET_LEFT_TONE[signOf(budgetLeft)]
   return (
-    <td className={`py-2 pl-3 text-right whitespace-nowrap tabular-nums ${tone}`}>
+    <td className={`${footer ? 'pt-3 pb-1' : 'py-2.5'} pl-3 text-right whitespace-nowrap tabular-nums ${tone}`}>
       {budgetLeft === null ? '–' : formatSignedAmount(budgetLeft)}
     </td>
   )
@@ -437,14 +459,16 @@ function LegendLabel({ slice }: { slice: SliceView }) {
     <>
       <span
         aria-hidden="true"
-        className={slice.inRing ? 'size-3 shrink-0 rounded-sm' : 'size-3 shrink-0 rounded-sm border-2'}
+        className={slice.inRing ? 'size-3 shrink-0 rounded-full' : 'size-3 shrink-0 rounded-full border-2'}
         style={
           slice.inRing
             ? { backgroundColor: slice.colour }
             : { borderColor: slice.colour, backgroundColor: 'transparent' }
         }
       />
-      {slice.name}
+      <span className="group-hover:underline group-hover:decoration-slate-300 group-hover:underline-offset-4 dark:group-hover:decoration-slate-600">
+        {slice.name}
+      </span>
     </>
   )
 }

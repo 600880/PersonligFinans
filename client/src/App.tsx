@@ -40,9 +40,10 @@ const NAV_ITEMS: { page: Page; label: string }[] = [
 ]
 
 // The look of each way to add Transactions: a button of its own on a wide screen, an item in the
-// Add transactions menu on a narrow one.
+// Add transactions menu on a narrow one. Each has an icon before its label, muted beside it.
 const ADD_ACTION_CLASS =
-  'rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-5 py-2.5 text-sm font-medium text-slate-900 dark:text-slate-100 shadow-sm hover:bg-slate-100 dark:hover:bg-slate-800 max-sm:w-full max-sm:border-0 max-sm:text-left max-sm:shadow-none'
+  'flex items-center gap-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-2.5 text-sm font-medium text-slate-900 dark:text-slate-100 shadow-sm hover:bg-slate-100 dark:hover:bg-slate-800 max-sm:w-full max-sm:border-0 max-sm:text-left max-sm:shadow-none'
+const ADD_ACTION_ICON_CLASS = 'size-4 shrink-0 opacity-70'
 
 // Opened at the link in a reset email, shows the page to choose a new password, whoever is signed in,
 // so it never asks who is. Otherwise, or once the page is done, the landing page or the app. The
@@ -231,13 +232,13 @@ function SignedInApp({ user, onSignedOut }: SignedInAppProps) {
   // The page the address bar names, followed as it changes by Back and Forward too.
   const page = useShownPage(handlePageChange)
 
-  // The tab title names the page shown, such as "Rules · PersonligFinans", so tabs and the browser's
+  // The tab title names the page shown, such as "Rules - PersonligFinans", so tabs and the browser's
   // history list tell the pages apart. The Dashboard's is plain PersonligFinans, as index.html names
   // the landing page and the reset-password page, and being signed out, by Sign out or a 401, puts
   // the plain title back as the app unmounts, so the landing page never names a page it doesn't show.
   useEffect(() => {
     const label = NAV_ITEMS.find((item) => item.page === page)?.label
-    document.title = label ? `${label} · ${APP_NAME}` : APP_NAME
+    document.title = label ? `${label} - ${APP_NAME}` : APP_NAME
     return () => {
       document.title = APP_NAME
     }
@@ -497,9 +498,16 @@ function SignedInApp({ user, onSignedOut }: SignedInAppProps) {
               }}
               disabled={isUploading}
               aria-busy={isUploading}
-              className={`flex items-center gap-2 disabled:cursor-not-allowed disabled:opacity-60 ${ADD_ACTION_CLASS}`}
+              className={`disabled:cursor-not-allowed disabled:opacity-60 ${ADD_ACTION_CLASS}`}
             >
-              {isUploading && <Spinner />}
+              {isUploading ? (
+                <Spinner />
+              ) : (
+                <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" className={ADD_ACTION_ICON_CLASS}>
+                  <path d="M8.75 10.25a.75.75 0 0 1-1.5 0V4.56L5.53 6.28a.75.75 0 0 1-1.06-1.06l3-3a.75.75 0 0 1 1.06 0l3 3a.75.75 0 1 1-1.06 1.06L8.75 4.56v5.69Z" />
+                  <path d="M2.75 9.5a.75.75 0 0 1 .75.75v1.5c0 .414.336.75.75.75h7.5a.75.75 0 0 0 .75-.75v-1.5a.75.75 0 0 1 1.5 0v1.5A2.25 2.25 0 0 1 11.75 14h-7.5A2.25 2.25 0 0 1 2 11.75v-1.5a.75.75 0 0 1 .75-.75Z" />
+                </svg>
+              )}
               {uploadProgress ? uploadProgressLabel(uploadProgress) : 'Upload transactions'}
             </button>
             <input
@@ -522,6 +530,9 @@ function SignedInApp({ user, onSignedOut }: SignedInAppProps) {
               }}
               className={ADD_ACTION_CLASS}
             >
+              <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" className={ADD_ACTION_ICON_CLASS}>
+                <path d="M8.75 3.75a.75.75 0 0 0-1.5 0v3.5h-3.5a.75.75 0 0 0 0 1.5h3.5v3.5a.75.75 0 0 0 1.5 0v-3.5h3.5a.75.75 0 0 0 0-1.5h-3.5v-3.5Z" />
+              </svg>
               Add transaction
             </button>
             <button
@@ -532,6 +543,18 @@ function SignedInApp({ user, onSignedOut }: SignedInAppProps) {
               }}
               className={ADD_ACTION_CLASS}
             >
+              <svg
+                viewBox="0 0 16 16"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinejoin="round"
+                aria-hidden="true"
+                className={ADD_ACTION_ICON_CLASS}
+              >
+                <path d="M2 5.75c0-.69.56-1.25 1.25-1.25h1.5l1-1.75h4.5l1 1.75h1.5c.69 0 1.25.56 1.25 1.25v6c0 .69-.56 1.25-1.25 1.25h-9.5C2.56 13 2 12.44 2 11.75v-6Z" />
+                <circle cx="8" cy="8.5" r="2.25" />
+              </svg>
               Scan receipts
             </button>
             <input
@@ -589,7 +612,7 @@ function Spinner() {
   return (
     <span
       aria-hidden="true"
-      className="size-4 animate-spin rounded-full border-2 border-slate-300 dark:border-slate-700 border-t-slate-900 dark:border-t-slate-100"
+      className="size-4 shrink-0 animate-spin rounded-full border-2 border-current/25 border-t-current"
     />
   )
 }
