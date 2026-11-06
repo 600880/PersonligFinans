@@ -40,6 +40,19 @@ export function Dialog({ title, onCancel, width = 'md', children }: DialogProps)
     }
   }, [opener])
 
+  // The page under the dialog stays still while it is open. Its scrollbar's room is kept, so the page
+  // doesn't shift sideways as the scrollbar goes. A dialog opened from another gives back what it found.
+  useEffect(() => {
+    const page = document.documentElement
+    const { overflow, scrollbarGutter } = page.style
+    if (window.innerWidth > page.clientWidth) page.style.scrollbarGutter = 'stable'
+    page.style.overflow = 'hidden'
+    return () => {
+      page.style.overflow = overflow
+      page.style.scrollbarGutter = scrollbarGutter
+    }
+  }, [])
+
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === 'Escape') onCancel()

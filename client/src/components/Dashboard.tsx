@@ -10,13 +10,12 @@ import {
 } from '../lib/api'
 import { formatAmount, formatSignedAmount, signOf } from '../lib/amount'
 import { useIsDark } from '../lib/appearance'
-import { MONTHS_IN_PERIOD, overallBudgetLeft } from '../lib/budget'
+import { canHaveBudget, MONTHS_IN_PERIOD, overallBudgetLeft } from '../lib/budget'
 import { categoryColour } from '../lib/categoryColours'
 import { categoryName } from '../lib/categoryName'
 import { percent } from '../lib/percent'
 import { currentMonth } from '../lib/month'
 import { BudgetDialog } from './BudgetDialog'
-import { secondaryButtonClass } from './buttons'
 import { GranularitySelect } from './GranularitySelect'
 import { ErrorMessage } from './Messages'
 import { SpendingTrend } from './SpendingTrend'
@@ -54,8 +53,8 @@ const BUDGET_LEFT_TONE = {
 // One row of the legend: a slice of the Spending, or a Category with a Budget but no Spending in the
 // Period, shown at 0. A slice whose Spending is above zero is in the ring, with its share of the sum
 // of those slices; one below zero, like a Category without Spending, has no part of the ring, and no
-// share. budgetLeft is null for a row without a Budget: Uncategorized, Savings, and a Category whose
-// Budget is 0.
+// share. budgetLeft is null for Savings and Income, which never have a Budget. A Category whose Budget
+// is 0, and Uncategorized, have one of minus their Spending, so the column adds up to the Total row.
 interface SliceViewBase {
   key: string
   categoryId: number | null
@@ -79,14 +78,15 @@ interface LoadedSpending {
 function toSliceViews(spending: Spending, categories: Category[], months: number, dark: boolean): SliceView[] {
   const ringTotal = spending.slices.reduce((sum, { amount }) => (amount > 0 ? sum + amount : sum), 0)
   return spending.slices.map(({ categoryId, amount }) => {
-    const budget = categories.find((c) => c.id === categoryId)?.budget ?? 0
+    const category = categories.find((c) => c.id === categoryId)
+    const budget = category?.budget ?? 0
     const base = {
       key: String(categoryId),
       categoryId,
       name: categoryName(categoryId, categories),
       amount,
       colour: categoryColour(categoryId, categories, dark),
-      budgetLeft: budget > 0 ? budget * months - amount : null,
+      budgetLeft: !category || canHaveBudget(category) ? budget * months - amount : null,
     }
     return amount > 0 ? { ...base, inRing: true, share: amount / ringTotal } : { ...base, inRing: false }
   })
@@ -242,51 +242,51 @@ export function Dashboard({
           Spending
         </h2>
 
-        <div className="mt-4 flex flex-wrap items-end gap-4">
-          {selected && (
-            <>
-              <GranularitySelect
-                value={selected.granularity}
-                onChange={(granularity) => choosePeriod(switchGranularity(selected, granularity, months))}
-              />
-              <label className="flex w-fit flex-col gap-1 text-sm font-medium text-slate-700 dark:text-slate-300">
-                Period
-                <select
-                  value={periodValue(selected)}
-                  onChange={(event) =>
-                    choosePeriod(periodOptions.find((option) => periodValue(option) === event.target.value)!)
-                  }
-                  className="rounded-lg border border-slate-300 dark:border-slate-700 px-3 py-2 font-normal"
-                >
-                  {periodOptions.map((option) => (
-                    <option key={periodValue(option)} value={periodValue(option)}>
-                      {periodLabel(option)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </>
-          )}
-          {/* Waits for the Categories, which the dialog lists. */}
+        {selected && (
+          <div className="mt-4 flex flex-wrap gap-4">
+            <GranularitySelect
+              value={selected.granularity}
+              onChange={(granularity) => choosePeriod(switchGranularity(selected, granularity, months))}
+            />
+            <label className="flex w-fit flex-col gap-1 text-sm font-medium text-slate-700 dark:text-slate-300">
+              Period
+              <select
+                value={periodValue(selected)}
+                onChange={(event) =>
+                  choosePeriod(periodOptions.find((option) => periodValue(option) === event.target.value)!)
+                }
+                className="rounded-lg border border-slate-300 dark:border-slate-700 px-3 py-2 font-normal"
+              >
+                {periodOptions.map((option) => (
+                  <option key={periodValue(option)} value={periodValue(option)}>
+                    {periodLabel(option)}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+        )}
+
+        <div className="mt-3 flex items-center justify-between gap-4">
+          <label className="flex w-fit items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-300">
+            <input
+              type="checkbox"
+              checked={includeSavings}
+              onChange={(event) => chooseIncludeSavings(event.target.checked)}
+              className="size-4 rounded border-slate-300 dark:border-slate-700"
+            />
+            Include savings
+          </label>
+          {/* At the right, above the legend. Waits for the Categories, which the dialog lists. */}
           <button
             type="button"
             disabled={!categories}
             onClick={() => setIsSettingBudget(true)}
-            className={secondaryButtonClass}
+            className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-1 text-sm font-medium text-slate-700 dark:text-slate-200 shadow-sm hover:bg-slate-50 dark:hover:bg-slate-800 disabled:cursor-not-allowed disabled:text-slate-400 dark:disabled:text-slate-500"
           >
             Set Budget
           </button>
         </div>
-
-        <label className="mt-3 flex w-fit items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-300">
-          <input
-            type="checkbox"
-            checked={includeSavings}
-            onChange={(event) => chooseIncludeSavings(event.target.checked)}
-            className="size-4 rounded border-slate-300 dark:border-slate-700"
-          />
-          Include savings
-        </label>
 
         {errorMessage && <ErrorMessage className="mt-3">{errorMessage}</ErrorMessage>}
 

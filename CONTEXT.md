@@ -133,7 +133,7 @@ How much a User means to spend in a Category per month, which can be set for eve
 _Avoid_: Limit, target, allowance
 
 **Budget left**:
-How much of a Category's Budget its Spending in a Period has not used: the Budget times the months in the Period, minus the Spending. Above zero means spent less than the Budget, below zero means spent more. A Period still under way counts its full Budget, so it says what is left to spend, not whether spending is on pace. The Period's overall Budget left is the sum of every Budget minus the Spending of every Category and Uncategorized, Savings never included, so Spending in a Category without a Budget uses it up too.
+How much of a Category's Budget its Spending in a Period has not used: the Budget times the months in the Period, minus the Spending. Above zero means spent less than the Budget, below zero means spent more. A Period still under way counts its full Budget, so it says what is left to spend, not whether spending is on pace. The Period's overall Budget left is the sum of every Budget minus the Spending of every Category and Uncategorized, Savings never included, so Spending in a Category without a Budget uses it up too. A Category without a Budget, and Uncategorized, have a Budget left of minus their Spending, so every Category's Budget left adds up to the overall one.
 _Avoid_: Remaining, over/under, variance
 
 **Period**:

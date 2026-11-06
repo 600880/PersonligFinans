@@ -9073,7 +9073,7 @@ describe('Dashboard', () => {
       return user
     }
 
-    it('sits at the end of the controls, after the Period, and is disabled until the Categories are loaded', async () => {
+    it('sits above the legend, after the Period, and is disabled until the Categories are loaded', async () => {
       let serveCategories!: (response: Response) => void
       categoriesServed = new Promise((resolve) => (serveCategories = resolve))
       await renderApp()
@@ -9087,6 +9087,18 @@ describe('Dashboard', () => {
       serveCategories(Response.json(budgetCategories))
 
       await waitFor(() => expect(setBudgetButton()).toBeEnabled())
+      const legend = await within(dashboard()).findByRole('table')
+      expect(setBudgetButton().compareDocumentPosition(legend)).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+    })
+
+    it('keeps the page from scrolling while the dialog is open', async () => {
+      const user = await openBudgetDialog()
+
+      expect(document.documentElement.style.overflow).toBe('hidden')
+
+      await user.click(within(budgetDialog()).getByRole('button', { name: 'Cancel' }))
+
+      expect(document.documentElement.style.overflow).toBe('')
     })
 
     it('lists every Category but Income and Savings, in the usual order, each with its swatch and current Budget', async () => {
@@ -9298,7 +9310,7 @@ describe('Dashboard', () => {
       expect(within(dashboard()).queryByRole('columnheader')).toBeNull()
     })
 
-    it("shows each Category's Budget left in a Month, and the overall one in a Total row", async () => {
+    it("shows each Category's Budget left in a Month, all its Spending below zero without a Budget, and the overall one in a Total row", async () => {
       handleSpending = () =>
         Response.json(spendingOf([{ categoryId: 1, amount: 3500 }, { categoryId: 13, amount: 1000 }, { categoryId: null, amount: 450.5 }]))
       await renderApp()
@@ -9307,11 +9319,13 @@ describe('Dashboard', () => {
       expect(legend()).toEqual([
         ['Category', 'Spending', 'Share', 'Budget left'],
         ['Groceries', '3 500,00 kr', '70,7 %', '+500,00 kr'],
-        ['Other', '1 000,00 kr', '20,2 %', '–'],
-        ['Uncategorized', '450,50 kr', '9,1 %', '–'],
+        ['Other', '1 000,00 kr', '20,2 %', '−1 000,00 kr'],
+        ['Uncategorized', '450,50 kr', '9,1 %', '−450,50 kr'],
         ['Total', '4 950,50 kr', '', '−950,50 kr'],
       ])
       expect(tone('Groceries')).toBe('green')
+      expect(tone('Other')).toBe('red')
+      expect(tone('Uncategorized')).toBe('red')
       expect(tone('Total')).toBe('red')
     })
 
@@ -9492,9 +9506,9 @@ describe('Dashboard', () => {
         expect(legend()).toEqual([
           ['Category', 'Spending', 'Share', 'Budget left'],
           ['Groceries', '3 500,00 kr', '70,7 %', '+500,00 kr'],
-          ['Other', '1 000,00 kr', '20,2 %', '–'],
-          ['Uncategorized', '450,50 kr', '9,1 %', '–'],
-          ['Transport', '-100,00 kr', '–', '–'],
+          ['Other', '1 000,00 kr', '20,2 %', '−1 000,00 kr'],
+          ['Uncategorized', '450,50 kr', '9,1 %', '−450,50 kr'],
+          ['Transport', '-100,00 kr', '–', '+100,00 kr'],
           ['Housing', '0,00 kr', '–', '+9 000,00 kr'],
           ['Clothing', '0,00 kr', '–', '+500,00 kr'],
           ['Entertainment', '0,00 kr', '–', '+250,00 kr'],
@@ -9514,16 +9528,16 @@ describe('Dashboard', () => {
         expect(legend().slice(1, 4).map((row) => row[2])).toEqual(['70,7 %', '20,2 %', '9,1 %'])
       })
 
-      it('adds up, with the Spending of the unbudgeted rows, to the overall Budget left of the Total row', async () => {
+      it('adds up, with every other row, to the overall Budget left of the Total row', async () => {
         handleSpending = () => Response.json(mixedSpending)
         await renderApp()
         await waitFor(() => expect(legend()).toHaveLength(9))
 
-        const rows = legend().slice(1, -1)
-        const budgetedLeft = rows.filter((row) => row[3] !== '–').reduce((sum, row) => sum + figure(row[3]), 0)
-        const unbudgetedSpending = rows.filter((row) => row[3] === '–').reduce((sum, row) => sum + figure(row[1]), 0)
+        const rowsLeft = legend()
+          .slice(1, -1)
+          .reduce((sum, row) => sum + figure(row[3]), 0)
 
-        expect(budgetedLeft - unbudgetedSpending).toBeCloseTo(figure(legend().at(-1)![3]), 2)
+        expect(rowsLeft).toBeCloseTo(figure(legend().at(-1)![3]), 2)
       })
 
       it("opens its Transactions in the Period when clicked, as any row's does", async () => {
