@@ -51,10 +51,11 @@ const BUDGET_LEFT_TONE = {
   0: 'text-slate-500 dark:text-slate-400',
 }
 
-// One slice of the Spending as the legend shows it. A slice whose Spending is above zero is in the
-// ring, with its share of the sum of those slices; one below zero has no part of the ring, and no
-// share. budgetLeft is null for a slice without a Budget: Uncategorized, Savings, and a Category
-// whose Budget is 0.
+// One row of the legend: a slice of the Spending, or a Category with a Budget but no Spending in the
+// Period, shown at 0. A slice whose Spending is above zero is in the ring, with its share of the sum
+// of those slices; one below zero, like a Category without Spending, has no part of the ring, and no
+// share. budgetLeft is null for a row without a Budget: Uncategorized, Savings, and a Category whose
+// Budget is 0.
 interface SliceViewBase {
   key: string
   categoryId: number | null
@@ -91,6 +92,24 @@ function toSliceViews(spending: Spending, categories: Category[], months: number
   })
 }
 
+// The Categories with a Budget but no slice in the Period, in the order the Categories come in, each
+// with no Spending and its whole Budget for the months in the Period left. Listed after the slices,
+// so the Budget left column always adds up to the Total row.
+function toUnspentBudgetViews(spending: Spending, categories: Category[], months: number, dark: boolean): SliceView[] {
+  const withSlice = new Set(spending.slices.map(({ categoryId }) => categoryId))
+  return categories
+    .filter((c) => c.budget > 0 && !withSlice.has(c.id))
+    .map((c) => ({
+      key: String(c.id),
+      categoryId: c.id,
+      name: c.name,
+      amount: 0,
+      colour: categoryColour(c.id, categories, dark),
+      budgetLeft: c.budget * months,
+      inRing: false,
+    }))
+}
+
 // Spending by Category for one Period, with the Spending trend over a Span below it. Opens on the
 // latest month with Transactions and the Savings Category left out. A new version, after
 // Transactions are saved or on coming back to home, reloads it in place, keeping the chosen Period
@@ -104,7 +123,8 @@ function toSliceViews(spending: Spending, categories: Category[], months: number
 //
 // Once any Category has a Budget, the legend gets a header, a Budget left column and a Total row,
 // each Budget counting for the months in the Period, the whole of it even while the Period is under
-// way. See Budget left in CONTEXT.md.
+// way. It also lists every Category with a Budget but no Spending in the Period, after the others,
+// so a Period without Spending still shows them and the Total row. See Budget left in CONTEXT.md.
 export function Dashboard({
   version,
   onOpenTransactions,
@@ -187,7 +207,13 @@ export function Dashboard({
       ? loaded.spending
       : null
   const monthsInPeriod = selected ? MONTHS_IN_PERIOD[selected.granularity] : 1
-  const slices = spending && categories ? toSliceViews(spending, categories, monthsInPeriod, dark) : []
+  const slices =
+    spending && categories
+      ? [
+          ...toSliceViews(spending, categories, monthsInPeriod, dark),
+          ...toUnspentBudgetViews(spending, categories, monthsInPeriod, dark),
+        ]
+      : []
   const showsBudgets = categories?.some((c) => c.budget > 0) ?? false
   const ringSlices = slices.filter((slice): slice is RingSliceView => slice.inRing)
   const periodOptions = selected ? periodsOfMonths(months, selected.granularity) : []
@@ -404,7 +430,8 @@ function BudgetLeftCell({ budgetLeft }: { budgetLeft: number | null }) {
 }
 
 // A legend row's swatch and Category name. The swatch is filled for a slice in the ring, and hollow,
-// an outline in the Category's colour, for one below zero, which has no part of the ring.
+// an outline in the Category's colour, for a row with no part of the ring: one below zero, or a
+// Category with a Budget but no Spending.
 function LegendLabel({ slice }: { slice: SliceView }) {
   return (
     <>

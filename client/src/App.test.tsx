@@ -9446,6 +9446,156 @@ describe('Dashboard', () => {
       await waitFor(() => expect(legend()).toHaveLength(3))
       expect(within(dashboard()).getByRole('table').parentElement).toHaveClass('max-sm:overflow-x-auto', 'min-w-0')
     })
+
+    describe('a budgeted Category without Spending', () => {
+      // As the API lists them. Housing, Clothing and Entertainment have Budgets but, in the Spending
+      // below, no Spending; Transport has neither.
+      const housing = { id: 3, name: 'Housing', description: 'Mortgage.', colour: '#eda100', builtIn: true, budget: 9000, transactionCount: 0, ruleCount: 0 }
+      const transport = { id: 4, name: 'Transport', description: 'Transport.', colour: '#1baf7a', builtIn: true, budget: 0, transactionCount: 0, ruleCount: 0 }
+      const entertainment = { id: 20, name: 'Entertainment', description: 'Fun.', colour: '#104281', builtIn: false, budget: 250, transactionCount: 0, ruleCount: 0 }
+
+      beforeEach(() => {
+        categoriesServed = [housing, groceries, { ...clothing, budget: 500 }, transport, other, savings, entertainment]
+      })
+
+      // Groceries over and under nothing, an unbudgeted Other, Uncategorized, and Transport below zero.
+      const mixedSpending = spendingOf([
+        { categoryId: 1, amount: 3500 },
+        { categoryId: 13, amount: 1000 },
+        { categoryId: null, amount: 450.5 },
+        { categoryId: 4, amount: -100 },
+      ])
+
+      // The legend swatch of the named row: its fill and its outline, as CSS colours.
+      function swatch(name: string) {
+        const row = within(dashboard()).getByRole('row', { name: new RegExp(`^${name}`) })
+        const { backgroundColor, borderColor } = (row.querySelector('[aria-hidden="true"]') as HTMLElement).style
+        return { fill: backgroundColor, outline: borderColor }
+      }
+
+      // The fill of each part of the ring: its slices, or the empty ring.
+      function ringFills() {
+        return [...dashboard().querySelectorAll('.recharts-pie-sector path')].map((sector) => sector.getAttribute('fill'))
+      }
+
+      // A figure as the legend shows it, back as a number: "+8 899,50 kr" → 8899.5, "–" → 0.
+      function figure(text: string) {
+        if (text === '–') return 0
+        return Number(text.replace(/ kr$/, '').replace(/ /g, '').replace('−', '-').replace(',', '.'))
+      }
+
+      it('is listed after every row with Spending, in the usual Category order, with 0 kr and its whole Budget left in green', async () => {
+        handleSpending = () => Response.json(mixedSpending)
+        await renderApp()
+
+        await waitFor(() => expect(legend()).toHaveLength(9))
+        expect(legend()).toEqual([
+          ['Category', 'Spending', 'Share', 'Budget left'],
+          ['Groceries', '3 500,00 kr', '70,7 %', '+500,00 kr'],
+          ['Other', '1 000,00 kr', '20,2 %', '–'],
+          ['Uncategorized', '450,50 kr', '9,1 %', '–'],
+          ['Transport', '-100,00 kr', '–', '–'],
+          ['Housing', '0,00 kr', '–', '+9 000,00 kr'],
+          ['Clothing', '0,00 kr', '–', '+500,00 kr'],
+          ['Entertainment', '0,00 kr', '–', '+250,00 kr'],
+          ['Total', '4 850,50 kr', '', '+8 899,50 kr'],
+        ])
+        expect(['Housing', 'Clothing', 'Entertainment'].map(tone)).toEqual(['green', 'green', 'green'])
+      })
+
+      it('has a hollow swatch and no slice of the ring, and leaves the shares as they were', async () => {
+        handleSpending = () => Response.json(mixedSpending)
+        await renderApp()
+
+        await waitFor(() => expect(legend()).toHaveLength(9))
+        expect(swatch('Housing')).toEqual({ fill: 'transparent', outline: 'rgb(237, 161, 0)' })
+        expect(swatch('Entertainment')).toEqual({ fill: 'transparent', outline: 'rgb(16, 66, 129)' })
+        expect(ringFills()).toEqual(['#2a78d6', '#9085e9', '#94a3b8'])
+        expect(legend().slice(1, 4).map((row) => row[2])).toEqual(['70,7 %', '20,2 %', '9,1 %'])
+      })
+
+      it('adds up, with the Spending of the unbudgeted rows, to the overall Budget left of the Total row', async () => {
+        handleSpending = () => Response.json(mixedSpending)
+        await renderApp()
+        await waitFor(() => expect(legend()).toHaveLength(9))
+
+        const rows = legend().slice(1, -1)
+        const budgetedLeft = rows.filter((row) => row[3] !== '–').reduce((sum, row) => sum + figure(row[3]), 0)
+        const unbudgetedSpending = rows.filter((row) => row[3] === '–').reduce((sum, row) => sum + figure(row[1]), 0)
+
+        expect(budgetedLeft - unbudgetedSpending).toBeCloseTo(figure(legend().at(-1)![3]), 2)
+      })
+
+      it("opens its Transactions in the Period when clicked, as any row's does", async () => {
+        handleSpending = () => Response.json(mixedSpending)
+        handleListPeriod = () =>
+          Response.json([
+            { id: 9, date: '2026-09-02', description: 'Husleie', amount: 9000, note: null, categoryId: 3, locked: true, imported: false, bookmarked: false },
+          ])
+        const user = userEvent.setup()
+        await renderApp()
+        await waitFor(() => expect(legend()).toHaveLength(9))
+
+        await user.click(within(dashboard()).getByRole('button', { name: 'Housing' }))
+
+        expect(await screen.findByRole('cell', { name: 'Husleie' })).toBeInTheDocument()
+        expect(chosenFilters()).toEqual(['2026', 'September', 'Housing'])
+        expect(requestedPeriods()).toEqual(['/api/transactions?year=2026&month=9'])
+      })
+
+      it('shows the empty ring, the budgeted rows and the Total row when the Period has no Spending', async () => {
+        handleSpending = () => Response.json(spendingOf([]))
+        await renderApp()
+
+        await waitFor(() => expect(legend()).toHaveLength(6))
+        expect(legend()).toEqual([
+          ['Category', 'Spending', 'Share', 'Budget left'],
+          ['Housing', '0,00 kr', '–', '+9 000,00 kr'],
+          ['Groceries', '0,00 kr', '–', '+4 000,00 kr'],
+          ['Clothing', '0,00 kr', '–', '+500,00 kr'],
+          ['Entertainment', '0,00 kr', '–', '+250,00 kr'],
+          ['Total', '0,00 kr', '', '+13 750,00 kr'],
+        ])
+        expect(ringFills()).toEqual(['#e2e8f0'])
+      })
+
+      it('counts the whole Budget for the months in the Period', async () => {
+        handleSpending = (_year, month) =>
+          Response.json(month === undefined ? spendingOf([{ categoryId: 1, amount: 45000 }]) : mixedSpending)
+        const user = userEvent.setup()
+        await renderApp()
+        await waitFor(() => expect(legend()).toHaveLength(9))
+
+        await user.selectOptions(within(dashboard()).getByLabelText('Granularity'), 'Year')
+
+        await waitFor(() =>
+          expect(legend().slice(1)).toEqual([
+            ['Groceries', '45 000,00 kr', '100,0 %', '+3 000,00 kr'],
+            ['Housing', '0,00 kr', '–', '+108 000,00 kr'],
+            ['Clothing', '0,00 kr', '–', '+6 000,00 kr'],
+            ['Entertainment', '0,00 kr', '–', '+3 000,00 kr'],
+            ['Total', '45 000,00 kr', '', '+120 000,00 kr'],
+          ]),
+        )
+      })
+
+      it('lists nothing extra while every Budget is 0', async () => {
+        categoriesServed = [housing, groceries, clothing, transport, other, savings, entertainment].map((c) => ({ ...c, budget: 0 }))
+        handleSpending = () => Response.json(spendingOf([{ categoryId: 1, amount: 3500 }]))
+        await renderApp()
+
+        await waitFor(() => expect(legend()).toEqual([['Groceries', '3 500,00 kr', '100,0 %']]))
+      })
+
+      it('lists nothing at all for a Period with no Spending while every Budget is 0', async () => {
+        categoriesServed = [housing, groceries, clothing, transport, other, savings, entertainment].map((c) => ({ ...c, budget: 0 }))
+        await renderApp()
+
+        await waitFor(() => expect(centreTotal()?.replace(/\s/g, ' ')).toBe('Total 0,00 kr'))
+        expect(legend()).toEqual([])
+        expect(within(dashboard()).queryByRole('table')).toBeNull()
+      })
+    })
   })
 })
 
