@@ -1,14 +1,12 @@
 import { useId, useState, type FormEvent } from 'react'
 import { saveBudgets, type Category } from '../lib/api'
 import { useIsDark } from '../lib/appearance'
+import { canHaveBudget } from '../lib/budget'
 import { categoryColour } from '../lib/categoryColours'
 import { CategorySwatch } from './CategorySwatch'
 import { Dialog } from './Dialog'
 import { ErrorMessage } from './Messages'
 import { inputClassName } from './TransactionForm'
-
-// The Built-in Categories that never have a Budget: money received, and money put aside.
-const NEVER_BUDGETED = ['Income', 'Savings']
 
 // The largest Budget the server accepts, in whole kroner.
 const MAX_BUDGET = 10_000_000
@@ -41,7 +39,7 @@ interface BudgetDialogProps {
 export function BudgetDialog({ categories, onCancel, onSaved }: BudgetDialogProps) {
   const id = useId()
   const dark = useIsDark()
-  const listed = categories.filter((c) => !(c.builtIn && NEVER_BUDGETED.includes(c.name)))
+  const listed = categories.filter(canHaveBudget)
   // What is typed in each input, by Category id.
   const [typed, setTyped] = useState(() => new Map(listed.map((c) => [c.id, String(c.budget)])))
   // The Categories whose input was refused at the last Save.

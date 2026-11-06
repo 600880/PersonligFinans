@@ -9241,6 +9241,212 @@ describe('Dashboard', () => {
       expect(budgetDialog()).toBeInTheDocument()
     })
   })
+
+  describe('Budget left', () => {
+    // Groceries has a Budget; Other and Savings have none, nor Clothing unless a test gives it one.
+    const groceries = { ...categories[0], budget: 4000 }
+    const other = categories[1]
+    const savings = { id: 12, name: 'Savings', description: 'Savings.', colour: '#0f766e', builtIn: true, budget: 0, transactionCount: 0, ruleCount: 0 }
+    const clothing = { id: 14, name: 'Clothing', description: 'Clothing.', colour: '#eb6834', builtIn: true, budget: 0, transactionCount: 0, ruleCount: 0 }
+
+    beforeEach(() => {
+      categoriesServed = [groceries, other, savings, clothing]
+      months = [{ year: 2026, month: 9 }]
+    })
+
+    // Every row of the legend as shown, its header and Total rows included, with every space plain.
+    function legend() {
+      return within(dashboard())
+        .queryAllByRole('row')
+        .map((row) =>
+          [...row.querySelectorAll('th, td')].map((cell) => cell.textContent!.replace(/[  ]/g, ' ')),
+        )
+    }
+
+    // The Budget left cell of the legend row whose first cell is the name.
+    function budgetLeftCell(name: string) {
+      const row = within(dashboard())
+        .getAllByRole('row')
+        .find((r) => r.querySelector('th, td')?.textContent === name)!
+      return [...row.querySelectorAll('th, td')].at(-1)!
+    }
+
+    // The colour a Budget left figure shows in, by its Light and Dark classes.
+    function tone(name: string) {
+      const cell = budgetLeftCell(name)
+      if (cell.matches('.text-emerald-700.dark\\:text-emerald-400')) return 'green'
+      if (cell.matches('.text-red-700.dark\\:text-red-400')) return 'red'
+      if (cell.matches('.text-slate-500.dark\\:text-slate-400')) return 'neutral'
+      return 'none'
+    }
+
+    function spendingOf(slices: { categoryId: number | null; amount: number }[]) {
+      return { total: slices.reduce((sum, s) => sum + s.amount, 0), slices }
+    }
+
+    it('shows the legend as it always has, with no header, column or Total row, while every Budget is 0', async () => {
+      categoriesServed = categories
+      handleSpending = () => Response.json(septemberSpending)
+      await renderApp()
+
+      await waitFor(() => expect(legend()).toHaveLength(3))
+      expect(legend()).toEqual([
+        ['Other', '1 000,00 kr', '63,7 %'],
+        ['Uncategorized', '450,50 kr', '28,7 %'],
+        ['Groceries', '120,00 kr', '7,6 %'],
+      ])
+      expect(within(dashboard()).queryByRole('columnheader')).toBeNull()
+    })
+
+    it("shows each Category's Budget left in a Month, and the overall one in a Total row", async () => {
+      handleSpending = () =>
+        Response.json(spendingOf([{ categoryId: 1, amount: 3500 }, { categoryId: 13, amount: 1000 }, { categoryId: null, amount: 450.5 }]))
+      await renderApp()
+
+      await waitFor(() => expect(legend()).toHaveLength(5))
+      expect(legend()).toEqual([
+        ['Category', 'Spending', 'Share', 'Budget left'],
+        ['Groceries', '3 500,00 kr', '70,7 %', '+500,00 kr'],
+        ['Other', '1 000,00 kr', '20,2 %', '–'],
+        ['Uncategorized', '450,50 kr', '9,1 %', '–'],
+        ['Total', '4 950,50 kr', '', '−950,50 kr'],
+      ])
+      expect(tone('Groceries')).toBe('green')
+      expect(tone('Total')).toBe('red')
+    })
+
+    it('shows a Budget left of exactly zero without a sign, in neutral grey', async () => {
+      categoriesServed = [groceries, other, savings, { ...clothing, budget: 500 }]
+      handleSpending = () => Response.json(spendingOf([{ categoryId: 1, amount: 3500 }, { categoryId: 14, amount: 500 }]))
+      await renderApp()
+
+      await waitFor(() => expect(legend()).toHaveLength(4))
+      expect(legend().slice(1)).toEqual([
+        ['Groceries', '3 500,00 kr', '87,5 %', '+500,00 kr'],
+        ['Clothing', '500,00 kr', '12,5 %', '0,00 kr'],
+        ['Total', '4 000,00 kr', '', '+500,00 kr'],
+      ])
+      expect(tone('Clothing')).toBe('neutral')
+    })
+
+    it('counts three months of Budget in a Quarter', async () => {
+      months = [
+        { year: 2026, month: 9 },
+        { year: 2026, month: 8 },
+        { year: 2026, month: 7 },
+      ]
+      handleSpending = (_year, _month, quarter) =>
+        Response.json(spendingOf([{ categoryId: 1, amount: quarter === 3 ? 13000 : 3500 }]))
+      const user = userEvent.setup()
+      await renderApp()
+      await waitFor(() => expect(legend()).toHaveLength(3))
+
+      await user.selectOptions(within(dashboard()).getByLabelText('Granularity'), 'Quarter')
+
+      await waitFor(() => expect(legend()[1]).toEqual(['Groceries', '13 000,00 kr', '100,0 %', '−1 000,00 kr']))
+      expect(tone('Groceries')).toBe('red')
+      expect(legend()[2]).toEqual(['Total', '13 000,00 kr', '', '−1 000,00 kr'])
+    })
+
+    it('counts twelve months of Budget in a Year', async () => {
+      handleSpending = (_year, month) =>
+        Response.json(spendingOf([{ categoryId: 1, amount: month === undefined ? 45000 : 3500 }]))
+      const user = userEvent.setup()
+      await renderApp()
+      await waitFor(() => expect(legend()).toHaveLength(3))
+
+      await user.selectOptions(within(dashboard()).getByLabelText('Granularity'), 'Year')
+
+      await waitFor(() => expect(legend()[1]).toEqual(['Groceries', '45 000,00 kr', '100,0 %', '+3 000,00 kr']))
+      expect(tone('Groceries')).toBe('green')
+      expect(legend()[2]).toEqual(['Total', '45 000,00 kr', '', '+3 000,00 kr'])
+    })
+
+    it('gives a Category whose refunds outweigh its purchases a Budget left larger than its Budget', async () => {
+      categoriesServed = [groceries, other, savings, { ...clothing, budget: 500 }]
+      handleSpending = () => Response.json(spendingOf([{ categoryId: 1, amount: 3500 }, { categoryId: 14, amount: -200 }]))
+      await renderApp()
+
+      await waitFor(() => expect(legend()).toHaveLength(4))
+      expect(legend().slice(1)).toEqual([
+        ['Groceries', '3 500,00 kr', '100,0 %', '+500,00 kr'],
+        ['Clothing', '-200,00 kr', '–', '+700,00 kr'],
+        ['Total', '3 300,00 kr', '', '+1 200,00 kr'],
+      ])
+      expect(tone('Clothing')).toBe('green')
+    })
+
+    it('shows "–" for an included Savings, and never takes Savings off the overall Budget left', async () => {
+      handleSpending = (_year, _month, _quarter, includeSavings) =>
+        Response.json(
+          spendingOf(
+            includeSavings
+              ? [{ categoryId: 12, amount: 1500 }, { categoryId: 1, amount: 3500 }]
+              : [{ categoryId: 1, amount: 3500 }],
+          ),
+        )
+      const user = userEvent.setup()
+      await renderApp()
+      await waitFor(() => expect(legend()).toHaveLength(3))
+      expect(legend()[2]).toEqual(['Total', '3 500,00 kr', '', '+500,00 kr'])
+
+      await user.click(within(dashboard()).getByRole('checkbox', { name: 'Include savings' }))
+
+      await waitFor(() => expect(legend()).toHaveLength(4))
+      expect(legend().slice(1)).toEqual([
+        ['Savings', '1 500,00 kr', '30,0 %', '–'],
+        ['Groceries', '3 500,00 kr', '70,0 %', '+500,00 kr'],
+        ['Total', '5 000,00 kr', '', '+500,00 kr'],
+      ])
+    })
+
+    it('shows the overall Budget left of the Total row in green above zero', async () => {
+      handleSpending = () => Response.json(spendingOf([{ categoryId: 1, amount: 100 }]))
+      await renderApp()
+
+      await waitFor(() => expect(legend()).toHaveLength(3))
+      expect(legend()[2]).toEqual(['Total', '100,00 kr', '', '+3 900,00 kr'])
+      expect(tone('Total')).toBe('green')
+    })
+
+    it('updates straight after saving Budgets, and goes once they are all reset to 0', async () => {
+      categoriesServed = [{ ...groceries, budget: 0 }, other, savings, clothing]
+      handleSpending = () => Response.json(spendingOf([{ categoryId: 1, amount: 3500 }]))
+      const user = userEvent.setup()
+      await renderApp()
+      await waitFor(() => expect(legend()).toEqual([['Groceries', '3 500,00 kr', '100,0 %']]))
+      const setBudget = within(dashboard()).getByRole('button', { name: 'Set Budget' })
+
+      await user.click(setBudget)
+      const dialog = screen.getByRole('dialog', { name: 'Set Budget' })
+      await user.clear(within(dialog).getByRole('textbox', { name: 'Groceries' }))
+      await user.type(within(dialog).getByRole('textbox', { name: 'Groceries' }), '4000')
+      await user.click(within(dialog).getByRole('button', { name: 'Save' }))
+
+      await waitFor(() =>
+        expect(legend()).toEqual([
+          ['Category', 'Spending', 'Share', 'Budget left'],
+          ['Groceries', '3 500,00 kr', '100,0 %', '+500,00 kr'],
+          ['Total', '3 500,00 kr', '', '+500,00 kr'],
+        ]),
+      )
+
+      await user.click(setBudget)
+      await user.click(within(screen.getByRole('dialog', { name: 'Set Budget' })).getByRole('button', { name: 'Reset' }))
+      await user.click(within(screen.getByRole('dialog', { name: 'Set Budget' })).getByRole('button', { name: 'Save' }))
+
+      await waitFor(() => expect(legend()).toEqual([['Groceries', '3 500,00 kr', '100,0 %']]))
+      expect(screen.getAllByRole('button', { name: 'Set Budget' })).toHaveLength(1)
+    })
+
+    it('scrolls the legend sideways on its own on a phone, so the page never runs wider than the screen', async () => {
+      handleSpending = () => Response.json(spendingOf([{ categoryId: 1, amount: 3500 }]))
+      await renderApp()
+
+      await waitFor(() => expect(legend()).toHaveLength(3))
+      expect(within(dashboard()).getByRole('table').parentElement).toHaveClass('max-sm:overflow-x-auto', 'min-w-0')
+    })
+  })
 })
 
 describe('Scan receipts', () => {

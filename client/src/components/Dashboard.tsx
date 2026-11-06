@@ -8,8 +8,9 @@ import {
   type Spending,
   type TransactionMonth,
 } from '../lib/api'
-import { formatAmount } from '../lib/amount'
+import { formatAmount, formatSignedAmount, signOf } from '../lib/amount'
 import { useIsDark } from '../lib/appearance'
+import { MONTHS_IN_PERIOD, overallBudgetLeft } from '../lib/budget'
 import { categoryColour } from '../lib/categoryColours'
 import { categoryName } from '../lib/categoryName'
 import { percent } from '../lib/percent'
@@ -43,15 +44,24 @@ const RING_COLOURS = {
 // Shared by the Spending ring and the empty ring.
 const RING = { innerRadius: 76, outerRadius: 116, isAnimationActive: false } as const
 
+// The Budget left figures in green above zero, red below and neutral grey at zero, in Light and Dark.
+const BUDGET_LEFT_TONE = {
+  1: 'text-emerald-700 dark:text-emerald-400',
+  [-1]: 'text-red-700 dark:text-red-400',
+  0: 'text-slate-500 dark:text-slate-400',
+}
+
 // One slice of the Spending as the legend shows it. A slice whose Spending is above zero is in the
 // ring, with its share of the sum of those slices; one below zero has no part of the ring, and no
-// share.
+// share. budgetLeft is null for a slice without a Budget: Uncategorized, Savings, and a Category
+// whose Budget is 0.
 interface SliceViewBase {
   key: string
   categoryId: number | null
   name: string
   amount: number
   colour: string
+  budgetLeft: number | null
 }
 type RingSliceView = SliceViewBase & { inRing: true; share: number }
 type SliceView = RingSliceView | (SliceViewBase & { inRing: false })
@@ -63,16 +73,19 @@ interface LoadedSpending {
   spending: Spending
 }
 
-// The slices in the order the API gives them, largest first, so those below zero come last.
-function toSliceViews(spending: Spending, categories: Category[], dark: boolean): SliceView[] {
+// The slices in the order the API gives them, largest first, so those below zero come last. Each
+// Budget counts for the months in the Period.
+function toSliceViews(spending: Spending, categories: Category[], months: number, dark: boolean): SliceView[] {
   const ringTotal = spending.slices.reduce((sum, { amount }) => (amount > 0 ? sum + amount : sum), 0)
   return spending.slices.map(({ categoryId, amount }) => {
+    const budget = categories.find((c) => c.id === categoryId)?.budget ?? 0
     const base = {
       key: String(categoryId),
       categoryId,
       name: categoryName(categoryId, categories),
       amount,
       colour: categoryColour(categoryId, categories, dark),
+      budgetLeft: budget > 0 ? budget * months - amount : null,
     }
     return amount > 0 ? { ...base, inRing: true, share: amount / ringTotal } : { ...base, inRing: false }
   })
@@ -88,6 +101,10 @@ function toSliceViews(spending: Spending, categories: Category[], dark: boolean)
 // the Period, those below zero last with a hollow swatch and no share, and the centre shows the
 // Period's total, the net of them all, which can be zero or below. Clicking a slice or a legend row
 // opens that Category's Transactions in the Period, as a trend dot does for its point.
+//
+// Once any Category has a Budget, the legend gets a header, a Budget left column and a Total row,
+// each Budget counting for the months in the Period, the whole of it even while the Period is under
+// way. See Budget left in CONTEXT.md.
 export function Dashboard({
   version,
   onOpenTransactions,
@@ -169,7 +186,9 @@ export function Dashboard({
     categories && loaded && selected && loaded.period === selected && loaded.includeSavings === includeSavings
       ? loaded.spending
       : null
-  const slices = spending && categories ? toSliceViews(spending, categories, dark) : []
+  const monthsInPeriod = selected ? MONTHS_IN_PERIOD[selected.granularity] : 1
+  const slices = spending && categories ? toSliceViews(spending, categories, monthsInPeriod, dark) : []
+  const showsBudgets = categories?.some((c) => c.budget > 0) ?? false
   const ringSlices = slices.filter((slice): slice is RingSliceView => slice.inRing)
   const periodOptions = selected ? periodsOfMonths(months, selected.granularity) : []
   // The Period the slices lead to, once its Spending shows. The Transactions page finds a quarter's
@@ -297,36 +316,60 @@ export function Dashboard({
             )}
           </div>
 
+          {/* On a phone the table scrolls sideways on its own, so the page never runs wider than the screen. */}
           {slices.length > 0 && (
-            <table className="w-full text-sm">
-              <tbody className="divide-y divide-slate-200 dark:divide-slate-800 text-slate-900 dark:text-slate-100">
-                {slices.map((slice) => (
-                  <tr key={slice.key}>
-                    <td className="py-2 pr-3">
-                      {targetPeriod ? (
-                        <button
-                          type="button"
-                          onClick={() => openSlice(slice)}
-                          className="flex cursor-pointer items-center gap-2 text-left"
-                        >
-                          <LegendLabel slice={slice} />
-                        </button>
-                      ) : (
-                        <span className="flex items-center gap-2">
-                          <LegendLabel slice={slice} />
-                        </span>
-                      )}
-                    </td>
-                    <td className="py-2 pr-3 text-right whitespace-nowrap tabular-nums">
-                      {formatAmount(slice.amount)}
-                    </td>
-                    <td className="py-2 text-right whitespace-nowrap text-slate-500 dark:text-slate-400 tabular-nums">
-                      {slice.inRing ? percent.format(slice.share) : '–'}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <div className="w-full min-w-0 max-sm:overflow-x-auto">
+              <table className="w-full text-sm">
+                {showsBudgets && (
+                  <thead className="text-slate-500 dark:text-slate-400">
+                    <tr>
+                      <th className="py-2 pr-3 text-left font-medium">Category</th>
+                      <th className="py-2 pr-3 text-right font-medium">Spending</th>
+                      <th className="py-2 text-right font-medium">Share</th>
+                      <th className="py-2 pl-3 text-right font-medium">Budget left</th>
+                    </tr>
+                  </thead>
+                )}
+                <tbody className="divide-y divide-slate-200 dark:divide-slate-800 text-slate-900 dark:text-slate-100">
+                  {slices.map((slice) => (
+                    <tr key={slice.key}>
+                      <td className="py-2 pr-3">
+                        {targetPeriod ? (
+                          <button
+                            type="button"
+                            onClick={() => openSlice(slice)}
+                            className="flex cursor-pointer items-center gap-2 text-left"
+                          >
+                            <LegendLabel slice={slice} />
+                          </button>
+                        ) : (
+                          <span className="flex items-center gap-2">
+                            <LegendLabel slice={slice} />
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-2 pr-3 text-right whitespace-nowrap tabular-nums">
+                        {formatAmount(slice.amount)}
+                      </td>
+                      <td className="py-2 text-right whitespace-nowrap text-slate-500 dark:text-slate-400 tabular-nums">
+                        {slice.inRing ? percent.format(slice.share) : '–'}
+                      </td>
+                      {showsBudgets && <BudgetLeftCell budgetLeft={slice.budgetLeft} />}
+                    </tr>
+                  ))}
+                </tbody>
+                {showsBudgets && spending && categories && (
+                  <tfoot className="border-t border-slate-300 dark:border-slate-700 font-semibold text-slate-900 dark:text-slate-100">
+                    <tr>
+                      <td className="py-2 pr-3">Total</td>
+                      <td className="py-2 pr-3 text-right whitespace-nowrap tabular-nums">{formatAmount(spending.total)}</td>
+                      <td />
+                      <BudgetLeftCell budgetLeft={overallBudgetLeft(spending.slices, categories, monthsInPeriod)} />
+                    </tr>
+                  </tfoot>
+                )}
+              </table>
+            </div>
           )}
         </div>
       </section>
@@ -347,6 +390,16 @@ export function Dashboard({
         <SpendingTrend months={months} categories={categories} onOpenTransactions={onOpenTransactions} />
       )}
     </>
+  )
+}
+
+// A legend row's Budget left: always with its sign, and green, red or grey by it, or "–" for none.
+function BudgetLeftCell({ budgetLeft }: { budgetLeft: number | null }) {
+  const tone = budgetLeft === null ? BUDGET_LEFT_TONE[0] : BUDGET_LEFT_TONE[signOf(budgetLeft)]
+  return (
+    <td className={`py-2 pl-3 text-right whitespace-nowrap tabular-nums ${tone}`}>
+      {budgetLeft === null ? '–' : formatSignedAmount(budgetLeft)}
+    </td>
   )
 }
 
