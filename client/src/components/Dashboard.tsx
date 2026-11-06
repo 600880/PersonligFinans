@@ -14,6 +14,8 @@ import { categoryColour } from '../lib/categoryColours'
 import { categoryName } from '../lib/categoryName'
 import { percent } from '../lib/percent'
 import { currentMonth } from '../lib/month'
+import { BudgetDialog } from './BudgetDialog'
+import { secondaryButtonClass } from './buttons'
 import { GranularitySelect } from './GranularitySelect'
 import { ErrorMessage } from './Messages'
 import { SpendingTrend } from './SpendingTrend'
@@ -105,6 +107,7 @@ export function Dashboard({
   // month with Transactions.
   const [selected, setSelected] = useState<Period | null>(null)
   const [includeSavings, setIncludeSavings] = useState(false)
+  const [isSettingBudget, setIsSettingBudget] = useState(false)
   const [loaded, setLoaded] = useState<LoadedSpending | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   // The version last loaded. A new one starts afresh, so an error from an earlier load doesn't
@@ -194,30 +197,41 @@ export function Dashboard({
           Spending
         </h2>
 
-        {selected && (
-          <div className="mt-4 flex flex-wrap gap-4">
-            <GranularitySelect
-              value={selected.granularity}
-              onChange={(granularity) => choosePeriod(switchGranularity(selected, granularity, months))}
-            />
-            <label className="flex w-fit flex-col gap-1 text-sm font-medium text-slate-700 dark:text-slate-300">
-              Period
-              <select
-                value={periodValue(selected)}
-                onChange={(event) =>
-                  choosePeriod(periodOptions.find((option) => periodValue(option) === event.target.value)!)
-                }
-                className="rounded-lg border border-slate-300 dark:border-slate-700 px-3 py-2 font-normal"
-              >
-                {periodOptions.map((option) => (
-                  <option key={periodValue(option)} value={periodValue(option)}>
-                    {periodLabel(option)}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-        )}
+        <div className="mt-4 flex flex-wrap items-end gap-4">
+          {selected && (
+            <>
+              <GranularitySelect
+                value={selected.granularity}
+                onChange={(granularity) => choosePeriod(switchGranularity(selected, granularity, months))}
+              />
+              <label className="flex w-fit flex-col gap-1 text-sm font-medium text-slate-700 dark:text-slate-300">
+                Period
+                <select
+                  value={periodValue(selected)}
+                  onChange={(event) =>
+                    choosePeriod(periodOptions.find((option) => periodValue(option) === event.target.value)!)
+                  }
+                  className="rounded-lg border border-slate-300 dark:border-slate-700 px-3 py-2 font-normal"
+                >
+                  {periodOptions.map((option) => (
+                    <option key={periodValue(option)} value={periodValue(option)}>
+                      {periodLabel(option)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </>
+          )}
+          {/* Waits for the Categories, which the dialog lists. */}
+          <button
+            type="button"
+            disabled={!categories}
+            onClick={() => setIsSettingBudget(true)}
+            className={secondaryButtonClass}
+          >
+            Set Budget
+          </button>
+        </div>
 
         <label className="mt-3 flex w-fit items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-300">
           <input
@@ -316,6 +330,17 @@ export function Dashboard({
           )}
         </div>
       </section>
+
+      {isSettingBudget && categories && (
+        <BudgetDialog
+          categories={categories}
+          onCancel={() => setIsSettingBudget(false)}
+          onSaved={(saved) => {
+            setCategories(saved)
+            setIsSettingBudget(false)
+          }}
+        />
+      )}
 
       {/* Waits for the months, which decide the Spans it offers. */}
       {selected && (

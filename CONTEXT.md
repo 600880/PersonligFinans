@@ -128,6 +128,14 @@ _Avoid_: Pinned, frozen, edited, manual
 What each Category cost during a Period (Uncategorized Transactions count as their own group): its Amounts netted over the whole Period, below zero when refunds outweigh what was bought, and nothing when they net to zero. A refund therefore lowers the Spending of the Category it lands in for any Period containing the month it is posted, even when what it refunds was bought in an earlier Period, and a quarter's or year's Spending is the sum of its months'. A Period's total is the sum of its Categories' Spending, so a refund in one Category lowers it, and it can fall below zero. The Income Category is never Spending, and the Savings Category is left out unless the user chooses to include it, since moving money between the user's own accounts is not spending.
 _Avoid_: Outgoing, expenses, costs
 
+**Budget**:
+How much a User means to spend in a Category per month, which can be set for every Category except Income and Savings, in whole kroner. Zero means the Category has no Budget, and it is never below zero. It belongs to its Category, so it goes when the Category is deleted and never moves to a replacement. Uncategorized can never have one.
+_Avoid_: Limit, target, allowance
+
+**Budget left**:
+How much of a Category's Budget its Spending in a Period has not used: the Budget times the months in the Period, minus the Spending. Above zero means spent less than the Budget, below zero means spent more. A Period still under way counts its full Budget, so it says what is left to spend, not whether spending is on pace. The Period's overall Budget left is the sum of every Budget minus the Spending of every Category and Uncategorized, Savings never included, so Spending in a Category without a Budget uses it up too.
+_Avoid_: Remaining, over/under, variance
+
 **Period**:
 A specific calendar year, quarter (Q1–Q4) or month that Spending is summarized over, such as 2026, Q3 2026 or September 2026. Each Period has a Granularity.
 _Avoid_: Range, interval, timeframe
@@ -141,5 +149,5 @@ A run of consecutive whole months, from a start month to an end month, both incl
 _Avoid_: Interval, range, Period
 
 **Dashboard**:
-The view summarizing Spending by Category over a chosen Period, and how Spending, Savings and Income changed over a chosen Span. Savings and Income are shown beside Spending, never as part of it: each is its Category's Amounts netted over a Period, what was put aside or received, below zero when it nets the other way. The trend's total is the total of each Period's Spending, never including Savings, so it matches the Period's total whenever Savings is left out. Each Category's Spending in a Period leads to that Category's Transactions in the Period; since Transactions are listed by month or year, a quarter leads to its first month where the Category has Transactions.
+The view summarizing Spending by Category over a chosen Period, and how Spending, Savings and Income changed over a chosen Span. Savings and Income are shown beside Spending, never as part of it: each is its Category's Amounts netted over a Period, what was put aside or received, below zero when it nets the other way. The trend's total is the total of each Period's Spending, never including Savings, so it matches the Period's total whenever Savings is left out. Each Category's Spending in a Period leads to that Category's Transactions in the Period; since Transactions are listed by month or year, a quarter leads to its first month where the Category has Transactions. Once any Category has a Budget, the Period's summary also shows each Category's Budget left and the overall one, and lists every Category with a Budget even when it has no Spending in the Period.
 _Avoid_: Report, overview

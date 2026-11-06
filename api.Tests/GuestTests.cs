@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Text.Json;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
@@ -114,6 +115,36 @@ public class GuestTests
         await AssertHoldsTheGuestSnapshot(_factory);
     }
 
+    [Fact]
+    public async Task ContinuingAsTheGuest_PutsTheGuestsBudgetsBackToTheSnapshots()
+    {
+        var earlier = await _factory.CreateGuestClientAsync();
+        var groceries = (await earlier.GetFromJsonAsync<List<CategoryResponse>>("/api/categories"))!.Single(c => c.Name == "Groceries");
+        var saved = await earlier.PutAsJsonAsync(
+            "/api/categories/budgets", new[] { new { categoryId = groceries.Id, budget = groceries.Budget + 1234 } });
+        Assert.Equal(HttpStatusCode.OK, saved.StatusCode);
+
+        await _factory.CreateGuestClientAsync();
+
+        await AssertHoldsTheGuestSnapshot(_factory);
+    }
+
+    // So the snapshot as it stands, with no Budgets in it, needs no change.
+    [Fact]
+    public void ASnapshotCategory_WithoutABudget_HasNone_AndOneWithABudgetHasIt()
+    {
+        var categories = JsonSerializer.Deserialize<List<GuestSnapshot.SnapshotCategory>>(
+            """
+            [
+              { "name": "Groceries", "description": "All groceries.", "colour": "#2a78d6", "builtIn": true },
+              { "name": "Transport", "description": "All transport.", "colour": "#1baf7a", "builtIn": true, "budget": 1500 }
+            ]
+            """,
+            JsonSerializerOptions.Web)!;
+
+        Assert.Equal([0, 1500], categories.Select(c => c.Budget));
+    }
+
     // Whoever was already using the Guest stays signed in, and sees the restored data.
     [Fact]
     public async Task AVisitorAlreadyUsingTheGuest_SeesWhatAnotherVisitorsContinuingRestored()
@@ -211,8 +242,8 @@ public class GuestTests
         var db = guest.Db;
 
         Assert.Equal(
-            snapshot.Categories.Select(c => (c.Name, c.Description, c.Colour, c.BuiltIn)).Order(),
-            (await db.Categories.ToListAsync()).Select(c => (c.Name, c.Description, c.Colour, c.BuiltIn)).Order());
+            snapshot.Categories.Select(c => (c.Name, c.Description, c.Colour, c.BuiltIn, c.Budget)).Order(),
+            (await db.Categories.ToListAsync()).Select(c => (c.Name, c.Description, c.Colour, c.BuiltIn, c.Budget)).Order());
         Assert.Equal(
             snapshot.Rules.Select(r => (r.Keyword, r.Category, r.AiGenerated, r.UploadId)).Order(),
             (await db.CategorizationRules.Include(r => r.Category).ToListAsync())

@@ -19,4 +19,8 @@ public class Category
     // A Built-in Category, which the app depends on: the user may change its description, but
     // never rename or delete it.
     public bool BuiltIn { get; set; }
+
+    // How much the User means to spend in the Category per month, in whole kroner, from 0 to
+    // AppDbContext.CategoryBudgetMax. 0 means none, and Income and Savings never have one.
+    public int Budget { get; set; }
 }

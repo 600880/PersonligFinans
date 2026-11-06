@@ -18,6 +18,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, CurrentUser cu
     public const int CategoryNameMaxLength = 50;
     public const int CategoryDescriptionMaxLength = 200;
     public const int CategoryColourMaxLength = 7;
+    public const int CategoryBudgetMax = 10_000_000;
     public const int FolderNameMaxLength = 50;
 
     public DbSet<Category> Categories => Set<Category>();
@@ -77,6 +78,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, CurrentUser cu
         modelBuilder.Entity<Category>(category =>
         {
             OwnedByAUser(category);
+            category.ToTable(c => c.HasCheckConstraint(
+                "ck_categories_budget_range", $"budget BETWEEN 0 AND {CategoryBudgetMax}"));
             category.Property(c => c.Name).HasMaxLength(CategoryNameMaxLength);
             category.Property(c => c.Description).HasMaxLength(CategoryDescriptionMaxLength);
             category.Property(c => c.Colour).HasMaxLength(CategoryColourMaxLength);

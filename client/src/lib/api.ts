@@ -327,14 +327,16 @@ export async function signOut(): Promise<boolean> {
   }
 }
 
-// colour is what the Dashboard draws the Category in, as #rrggbb. transactionCount and ruleCount are
-// how many Transactions and Categorization Rules have the Category.
+// colour is what the Dashboard draws the Category in, as #rrggbb. budget is its Budget, in whole
+// kroner per month, 0 for none. transactionCount and ruleCount are how many Transactions and
+// Categorization Rules have the Category.
 export interface Category {
   id: number
   name: string
   description: string
   colour: string
   builtIn: boolean
+  budget: number
   transactionCount: number
   ruleCount: number
 }
@@ -461,6 +463,42 @@ async function saveCategory(
   }
 
   return { ok: false, fieldErrors: {}, message: `Saving failed (${response.status}).` }
+}
+
+// A Category's new Budget, in whole kroner per month, 0 for none.
+export interface BudgetRequest {
+  categoryId: number
+  budget: number
+}
+
+// Every Category once the Budgets are saved, or why they weren't.
+export type SaveBudgetsResult = { ok: true; categories: Category[] } | { ok: false; message: string }
+
+// Sets the Budgets of the Categories given, all or none, and gives back every Category as the
+// categories endpoint lists them. Categories left out keep their Budget. The server refuses Income,
+// Savings, a Category that doesn't exist, the same Category twice, or a Budget outside 0 to
+// 10 000 000, and the message says why.
+export async function saveBudgets(budgets: BudgetRequest[]): Promise<SaveBudgetsResult> {
+  let response: Response
+  try {
+    response = await apiFetch('/api/categories/budgets', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(budgets),
+    })
+  } catch {
+    return { ok: false, message: 'Could not reach the server.' }
+  }
+
+  if (response.ok) return { ok: true, categories: (await response.json()) as Category[] }
+
+  if (response.status === 400) {
+    const { fieldErrors } = await readProblem<Record<string, unknown>>(response)
+    const message = Object.values(fieldErrors)[0]
+    if (message) return { ok: false, message }
+  }
+
+  return { ok: false, message: `Saving failed (${response.status}).` }
 }
 
 // A named group the User files Bookmarks in, such as "Tax deductible".

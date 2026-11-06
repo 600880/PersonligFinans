@@ -365,6 +365,10 @@ namespace PersonligFinans.Api.Data.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
+                    b.Property<int>("Budget")
+                        .HasColumnType("integer")
+                        .HasColumnName("budget");
+
                     b.Property<bool>("BuiltIn")
                         .HasColumnType("boolean")
                         .HasColumnName("built_in");
@@ -398,7 +402,10 @@ namespace PersonligFinans.Api.Data.Migrations
                     b.HasIndex("UserId")
                         .HasDatabaseName("ix_categories_user_id");
 
-                    b.ToTable("categories", (string)null);
+                    b.ToTable("categories", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_categories_budget_range", "budget BETWEEN 0 AND 10000000");
+                        });
                 });
 
             modelBuilder.Entity("PersonligFinans.Api.Data.Folder", b =>

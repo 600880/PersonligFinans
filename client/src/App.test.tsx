@@ -16,6 +16,7 @@ const categories = [
     description: 'All groceries.',
     colour: '#2a78d6',
     builtIn: true,
+    budget: 0,
     transactionCount: 12,
     ruleCount: 3,
   },
@@ -25,6 +26,7 @@ const categories = [
     description: "Costs that don't belong in any other category.",
     colour: '#9085e9',
     builtIn: true,
+    budget: 0,
     transactionCount: 1,
     ruleCount: 0,
   },
@@ -113,8 +115,11 @@ let folders: { id: number; name: string }[] | Response | Promise<Response>
 let handleAddFolder: PostHandler
 let handleRenameFolder: (id: number, body: unknown) => Response | Promise<Response>
 let handleDeleteFolder: (id: number) => Response | Promise<Response>
-// What the categories endpoint returns: `categories` unless a test adds to it or makes it fail.
-let categoriesServed: ServedCategory[] | Response
+// What the categories endpoint returns: `categories` unless a test adds to it, makes it fail or keeps
+// it waiting.
+let categoriesServed: ServedCategory[] | Response | Promise<Response>
+// Saving the Budgets. Unless a test says otherwise, it serves the Categories with the Budgets sent.
+let handleSaveBudgets: (body: { categoryId: number; budget: number }[]) => Response | Promise<Response>
 // The colours a Category can be given, as the palette endpoint serves them: a few of the real ones.
 let palette: string[] | Response
 // How many Transactions the Uncategorized count endpoint says are Uncategorized.
@@ -231,8 +236,13 @@ const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
   if (url === '/api/categories' && init?.method === 'POST') {
     return handleAddCategory(JSON.parse(init.body as string))
   }
+  if (url === '/api/categories/budgets' && init?.method === 'PUT') {
+    return handleSaveBudgets(JSON.parse(init.body as string))
+  }
   if (url === '/api/categories') {
-    return categoriesServed instanceof Response ? categoriesServed : Response.json(categoriesServed)
+    return categoriesServed instanceof Response || categoriesServed instanceof Promise
+      ? categoriesServed
+      : Response.json(categoriesServed)
   }
   if (url === '/api/transactions' && init?.method === 'POST') {
     return handlePost(JSON.parse(init.body as string))
@@ -303,6 +313,12 @@ beforeEach(() => {
   handleSpending = () => Response.json({ total: 0, slices: [] })
   handleMonthlySpending = (from, to) => Response.json(monthlySpending(from, to))
   categoriesServed = categories
+  handleSaveBudgets = (body) => {
+    const served = Array.isArray(categoriesServed) ? categoriesServed : categories
+    return Response.json(
+      served.map((c) => ({ ...c, budget: body.find((b) => b.categoryId === c.id)?.budget ?? c.budget })),
+    )
+  }
   palette = ['#2a78d6', '#eb6834', '#9085e9', '#1baf7a']
   uncategorizedCount = 0
   currentUser = { email: 'me@example.com', isGuest: false }
@@ -9006,6 +9022,223 @@ describe('Dashboard', () => {
         expect(await screen.findByRole('cell', { name: 'Meny' })).toBeInTheDocument()
         expect(chosenFilters()).toEqual(['2026', 'March', 'Groceries'])
       })
+    })
+  })
+
+  describe('Set Budget', () => {
+    // As the API lists them: the Built-in Categories first, Income and Savings among them.
+    const budgetCategories = [
+      { id: 3, name: 'Housing', description: 'Mortgage.', colour: '#eda100', builtIn: true, budget: 9000, transactionCount: 0, ruleCount: 0 },
+      { ...categories[0], budget: 4000 },
+      categories[1],
+      { id: 11, name: 'Income', description: 'All income.', colour: '#8a5a1c', builtIn: true, budget: 0, transactionCount: 0, ruleCount: 0 },
+      { id: 12, name: 'Savings', description: 'Savings.', colour: '#0f766e', builtIn: true, budget: 0, transactionCount: 0, ruleCount: 0 },
+      { id: 20, name: 'Entertainment', description: 'Fun.', colour: '#104281', builtIn: false, budget: 250, transactionCount: 0, ruleCount: 0 },
+    ]
+
+    beforeEach(() => {
+      categoriesServed = budgetCategories
+    })
+
+    function setBudgetButton() {
+      return within(dashboard()).getByRole('button', { name: 'Set Budget' })
+    }
+
+    function budgetDialog() {
+      return screen.getByRole('dialog', { name: 'Set Budget' })
+    }
+
+    function budgetInput(name: string) {
+      return within(budgetDialog()).getByRole('textbox', { name })
+    }
+
+    // Each input in the dialog, in order, as its Category's name and the Budget it shows.
+    function budgetFields() {
+      return within(budgetDialog())
+        .getAllByRole('textbox')
+        .map((input) => [input.closest('label')?.textContent, (input as HTMLInputElement).value])
+    }
+
+    function savedBudgets() {
+      return fetchMock.mock.calls
+        .filter(([url, init]) => url === '/api/categories/budgets' && init?.method === 'PUT')
+        .map(([, init]) => JSON.parse(init!.body as string))
+    }
+
+    async function openBudgetDialog() {
+      const user = userEvent.setup()
+      await renderApp()
+      await waitFor(() => expect(setBudgetButton()).toBeEnabled())
+      await user.click(setBudgetButton())
+      return user
+    }
+
+    it('sits at the end of the controls, after the Period, and is disabled until the Categories are loaded', async () => {
+      let serveCategories!: (response: Response) => void
+      categoriesServed = new Promise((resolve) => (serveCategories = resolve))
+      await renderApp()
+
+      expect(setBudgetButton()).toBeDisabled()
+      await waitFor(() => expect(screen.getByLabelText('Period')).toBeInTheDocument())
+      expect(screen.getByLabelText('Period').compareDocumentPosition(setBudgetButton())).toBe(
+        Node.DOCUMENT_POSITION_FOLLOWING,
+      )
+
+      serveCategories(Response.json(budgetCategories))
+
+      await waitFor(() => expect(setBudgetButton()).toBeEnabled())
+    })
+
+    it('lists every Category but Income and Savings, in the usual order, each with its swatch and current Budget', async () => {
+      await openBudgetDialog()
+
+      expect(budgetFields()).toEqual([
+        ['Housing', '9000'],
+        ['Groceries', '4000'],
+        ['Other', '0'],
+        ['Entertainment', '250'],
+      ])
+      const swatch = budgetInput('Groceries').closest('label')!.querySelector('[aria-hidden="true"]') as HTMLElement
+      expect(swatch.style.backgroundColor).toBe('rgb(42, 120, 214)')
+    })
+
+    it('saves every listed Budget at once, an emptied one as 0, and closes', async () => {
+      const user = await openBudgetDialog()
+
+      await user.clear(budgetInput('Housing'))
+      await user.clear(budgetInput('Groceries'))
+      await user.type(budgetInput('Groceries'), ' 3500 ')
+      await user.click(within(budgetDialog()).getByRole('button', { name: 'Save' }))
+
+      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+      expect(savedBudgets()).toEqual([
+        [
+          { categoryId: 3, budget: 0 },
+          { categoryId: 1, budget: 3500 },
+          { categoryId: 13, budget: 0 },
+          { categoryId: 20, budget: 250 },
+        ],
+      ])
+    })
+
+    it('keeps the Categories the save returns, without loading them again', async () => {
+      handleSaveBudgets = () =>
+        Response.json(budgetCategories.map((c) => (c.id === 1 ? { ...c, budget: 3500 } : c)))
+      const user = await openBudgetDialog()
+      await user.clear(budgetInput('Groceries'))
+      await user.type(budgetInput('Groceries'), '3500')
+      await user.click(within(budgetDialog()).getByRole('button', { name: 'Save' }))
+      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+
+      await user.click(setBudgetButton())
+
+      expect(budgetInput('Groceries')).toHaveValue('3500')
+      expect(fetchMock.mock.calls.filter(([url, init]) => url === '/api/categories' && !init?.method)).toHaveLength(1)
+    })
+
+    it('shows that it is saving until the save is done', async () => {
+      let finishSaving!: (response: Response) => void
+      handleSaveBudgets = () => new Promise((resolve) => (finishSaving = resolve))
+      const user = await openBudgetDialog()
+
+      await user.click(within(budgetDialog()).getByRole('button', { name: 'Save' }))
+
+      expect(within(budgetDialog()).getByRole('button', { name: 'Saving…' })).toBeDisabled()
+      finishSaving(Response.json(budgetCategories))
+      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    })
+
+    it('Reset sets every input to 0 without saving, so Cancel still keeps the Budgets', async () => {
+      const user = await openBudgetDialog()
+
+      await user.click(within(budgetDialog()).getByRole('button', { name: 'Reset' }))
+
+      expect(budgetFields()).toEqual([
+        ['Housing', '0'],
+        ['Groceries', '0'],
+        ['Other', '0'],
+        ['Entertainment', '0'],
+      ])
+      expect(savedBudgets()).toEqual([])
+
+      await user.click(within(budgetDialog()).getByRole('button', { name: 'Cancel' }))
+      await user.click(setBudgetButton())
+
+      expect(budgetFields()).toEqual([
+        ['Housing', '9000'],
+        ['Groceries', '4000'],
+        ['Other', '0'],
+        ['Entertainment', '250'],
+      ])
+    })
+
+    it('Cancel and Escape close it without saving what was typed', async () => {
+      const user = await openBudgetDialog()
+      await user.type(budgetInput('Other'), '5')
+
+      await user.click(within(budgetDialog()).getByRole('button', { name: 'Cancel' }))
+
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+
+      await user.click(setBudgetButton())
+      expect(budgetInput('Other')).toHaveValue('0')
+      await user.type(budgetInput('Other'), '5')
+      await user.keyboard('{Escape}')
+
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+      expect(savedBudgets()).toEqual([])
+    })
+
+    it.each(['-5', '12,5', '12.5', 'abc', '10000001'])(
+      'refuses %s with a message by its input, and sends nothing',
+      async (typed) => {
+        const user = await openBudgetDialog()
+        await user.clear(budgetInput('Groceries'))
+        await user.type(budgetInput('Groceries'), typed)
+
+        await user.click(within(budgetDialog()).getByRole('button', { name: 'Save' }))
+
+        expect(budgetInput('Groceries')).toHaveAccessibleDescription('Enter a whole number from 0 to 10 000 000.')
+        expect(budgetInput('Groceries')).toBeInvalid()
+        expect(budgetInput('Housing')).toBeValid()
+        expect(budgetDialog()).toBeInTheDocument()
+        expect(savedBudgets()).toEqual([])
+      },
+    )
+
+    it('accepts a Budget of 10 000 000', async () => {
+      const user = await openBudgetDialog()
+      await user.clear(budgetInput('Groceries'))
+      await user.type(budgetInput('Groceries'), '10000000')
+
+      await user.click(within(budgetDialog()).getByRole('button', { name: 'Save' }))
+
+      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+      expect(savedBudgets()[0][1]).toEqual({ categoryId: 1, budget: 10_000_000 })
+    })
+
+    it('shows an error and stays open with the inputs kept when saving fails', async () => {
+      handleSaveBudgets = () => new Response(null, { status: 500 })
+      const user = await openBudgetDialog()
+      await user.clear(budgetInput('Groceries'))
+      await user.type(budgetInput('Groceries'), '3500')
+
+      await user.click(within(budgetDialog()).getByRole('button', { name: 'Save' }))
+
+      expect(await within(budgetDialog()).findByRole('alert')).toHaveTextContent('Saving failed (500).')
+      expect(budgetInput('Groceries')).toHaveValue('3500')
+      expect(within(budgetDialog()).getByRole('button', { name: 'Save' })).toBeEnabled()
+    })
+
+    it("shows the server's reason when it refuses the Budgets", async () => {
+      handleSaveBudgets = () =>
+        Response.json({ errors: { '[2].categoryId': ['Category does not exist.'] } }, { status: 400 })
+      const user = await openBudgetDialog()
+
+      await user.click(within(budgetDialog()).getByRole('button', { name: 'Save' }))
+
+      expect(await within(budgetDialog()).findByRole('alert')).toHaveTextContent('Category does not exist.')
+      expect(budgetDialog()).toBeInTheDocument()
     })
   })
 })

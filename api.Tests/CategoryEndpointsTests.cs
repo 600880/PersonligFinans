@@ -770,7 +770,7 @@ public class CategoryEndpointsTests : IAsyncLifetime
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var expected = new CategoryResponse(
-            id, "Fritid", "Hobbies and sports.", CategoryColours.Fallback, BuiltIn: false, TransactionCount: 0, RuleCount: 1);
+            id, "Fritid", "Hobbies and sports.", CategoryColours.Fallback, BuiltIn: false, Budget: 0, TransactionCount: 0, RuleCount: 1);
         Assert.Equal(expected, await response.Content.ReadFromJsonAsync<CategoryResponse>());
         Assert.Contains(expected, await ListCategories());
     }
@@ -810,7 +810,7 @@ public class CategoryEndpointsTests : IAsyncLifetime
         Assert.Equal(["Name must be at most 50 characters."], errors["name"]);
         Assert.Equal(["Description must be at most 200 characters."], errors["description"]);
         Assert.Contains(
-            new CategoryResponse(id, "Hobby", "Hobbies.", CategoryColours.Fallback, BuiltIn: false, 0, 0),
+            new CategoryResponse(id, "Hobby", "Hobbies.", CategoryColours.Fallback, BuiltIn: false, Budget: 0, 0, 0),
             await ListCategories());
     }
 
@@ -903,7 +903,7 @@ public class CategoryEndpointsTests : IAsyncLifetime
         var added = await response.Content.ReadFromJsonAsync<CategoryResponse>();
         Assert.Equal($"/api/categories/{added!.Id}", response.Headers.Location?.ToString());
         Assert.Equal((Name: "Hobby", Description: "Hobby supplies.", BuiltIn: false), (added.Name, added.Description, added.BuiltIn));
-        Assert.Equal((0, 0), (added.TransactionCount, added.RuleCount));
+        Assert.Equal((0, 0, 0), (added.Budget, added.TransactionCount, added.RuleCount));
         Assert.Equivalent(added, (await ListCategories()).Single(c => c.Id == added.Id));
     }
 
@@ -1017,7 +1017,7 @@ public class CategoryEndpointsTests : IAsyncLifetime
         var response = await EditCategory(id, "Hobby", "Hobbies.", CategoryColours.Palette[4]);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var expected = new CategoryResponse(id, "Hobby", "Hobbies.", CategoryColours.Palette[4], BuiltIn: false, 0, 0);
+        var expected = new CategoryResponse(id, "Hobby", "Hobbies.", CategoryColours.Palette[4], BuiltIn: false, Budget: 0, 0, 0);
         Assert.Equal(expected, await response.Content.ReadFromJsonAsync<CategoryResponse>());
         Assert.Contains(expected, await ListCategories());
     }
@@ -1057,7 +1057,136 @@ public class CategoryEndpointsTests : IAsyncLifetime
 
         Assert.Equal(["Colour must be one of the palette's colours."], errors["colour"]);
         Assert.Contains(
-            new CategoryResponse(id, "Hobby", "Hobbies.", CategoryColours.Fallback, BuiltIn: false, 0, 0),
+            new CategoryResponse(id, "Hobby", "Hobbies.", CategoryColours.Fallback, BuiltIn: false, Budget: 0, 0, 0),
             await ListCategories());
+    }
+
+    // Sends the Budgets, each a Category's id and its Budget, as the Set Budget dialog does.
+    private Task<HttpResponseMessage> PutBudgets(params (int CategoryId, int Budget)[] budgets) =>
+        _client.PutAsJsonAsync("/api/categories/budgets", budgets.Select(b => new { categoryId = b.CategoryId, budget = b.Budget }));
+
+    // Every Category's Budget, by its id.
+    private async Task<Dictionary<int, int>> Budgets() =>
+        (await ListCategories()).ToDictionary(c => c.Id, c => c.Budget);
+
+    // Sends the Budgets, which must be saved.
+    private async Task SetBudgets(params (int CategoryId, int Budget)[] budgets) =>
+        Assert.Equal(HttpStatusCode.OK, (await PutBudgets(budgets)).StatusCode);
+
+    [Fact]
+    public async Task Get_FreshDatabase_GivesNoCategoryABudget()
+    {
+        Assert.All(await ListCategoriesOfANewUser(), c => Assert.Equal(0, c.Budget));
+    }
+
+    [Fact]
+    public async Task PutBudgets_SetsTheBudgetsAndReturnsTheCategoriesAsListed()
+    {
+        var hobby = await CreateCategory("Hobby");
+
+        var response = await PutBudgets((_categories.Groceries, 4000), (hobby, 10_000_000), (_categories.Transport, 0));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var returned = await response.Content.ReadFromJsonAsync<List<CategoryResponse>>();
+        var listed = await ListCategories();
+        Assert.Equal(listed, returned);
+        var budgets = listed.ToDictionary(c => c.Id, c => c.Budget);
+        Assert.Equal((4000, 10_000_000, 0), (budgets[_categories.Groceries], budgets[hobby], budgets[_categories.Transport]));
+    }
+
+    [Fact]
+    public async Task PutBudgets_CategoriesLeftOut_KeepTheirBudget()
+    {
+        await SetBudgets((_categories.Groceries, 4000), (_categories.Transport, 1500));
+
+        await SetBudgets((_categories.Groceries, 3000));
+
+        var budgets = await Budgets();
+        Assert.Equal((3000, 1500), (budgets[_categories.Groceries], budgets[_categories.Transport]));
+    }
+
+    [Fact]
+    public async Task PutBudgets_AllZero_RemovesEveryBudget()
+    {
+        await SetBudgets((_categories.Groceries, 4000), (_categories.Transport, 1500));
+
+        await SetBudgets((_categories.Groceries, 0), (_categories.Transport, 0));
+
+        Assert.All(await ListCategories(), c => Assert.Equal(0, c.Budget));
+    }
+
+    // Each refusal refuses the whole request, so the valid Budget beside it isn't saved either.
+    private async Task AssertBudgetsRefused(
+        (int CategoryId, int Budget) invalid, string key, string message)
+    {
+        await SetBudgets((_categories.Groceries, 4000));
+        var before = await Budgets();
+
+        var response = await PutBudgets((_categories.Groceries, 2000), invalid);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var problem = await response.Content.ReadFromJsonAsync<ValidationProblemDetails>();
+        Assert.Equal([message], problem!.Errors[key]);
+        Assert.Equal(before, await Budgets());
+    }
+
+    [Fact]
+    public Task PutBudgets_BelowZero_IsRefusedAndChangesNothing() =>
+        AssertBudgetsRefused((_categories.Transport, -1), "[1].budget", "Budget must be a whole number from 0 to 10000000.");
+
+    [Fact]
+    public Task PutBudgets_AboveTenMillion_IsRefusedAndChangesNothing() =>
+        AssertBudgetsRefused((_categories.Transport, 10_000_001), "[1].budget", "Budget must be a whole number from 0 to 10000000.");
+
+    [Fact]
+    public Task PutBudgets_Income_IsRefusedAndChangesNothing() =>
+        AssertBudgetsRefused((_categories.Income, 0), "[1].categoryId", "Income can't have a Budget.");
+
+    [Fact]
+    public Task PutBudgets_Savings_IsRefusedAndChangesNothing() =>
+        AssertBudgetsRefused((_categories.Savings, 0), "[1].categoryId", "Savings can't have a Budget.");
+
+    [Fact]
+    public Task PutBudgets_UnknownCategory_IsRefusedAndChangesNothing() =>
+        AssertBudgetsRefused((int.MaxValue, 100), "[1].categoryId", "Category does not exist.");
+
+    [Fact]
+    public Task PutBudgets_TheSameCategoryTwice_IsRefusedAndChangesNothing() =>
+        AssertBudgetsRefused((_categories.Groceries, 100), "[1].categoryId", "The same Category is given more than once.");
+
+    [Fact]
+    public async Task PutBudgets_SignedOut_IsUnauthorized()
+    {
+        var response = await _factory.CreateClient().PutAsJsonAsync(
+            "/api/categories/budgets", new[] { new { categoryId = _categories.Groceries, budget = 100 } });
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Put_EditingACategory_KeepsItsBudget()
+    {
+        var id = await CreateCategory("Hobby", "Hobbies.");
+        await SetBudgets((id, 750));
+
+        var response = await EditCategory(id, "Fritid", "Hobbies and sports.", CategoryColours.Palette[2]);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(750, (await response.Content.ReadFromJsonAsync<CategoryResponse>())!.Budget);
+        Assert.Equal(750, (await Budgets())[id]);
+    }
+
+    [Fact]
+    public async Task Delete_WithReplacement_TheReplacementKeepsItsOwnBudget()
+    {
+        var id = await CreateCategory("Hobby");
+        await ManuallyEntered("Hobbybutikken", id);
+        await SetBudgets((id, 750), (_categories.Other, 300));
+
+        await TransactionsChangedByDeleting(id, _categories.Other);
+
+        var budgets = await Budgets();
+        Assert.False(budgets.ContainsKey(id));
+        Assert.Equal(300, budgets[_categories.Other]);
     }
 }

@@ -11,7 +11,8 @@ namespace PersonligFinans.Api.Users;
 // file of its own beside it. See docs/adr/0005-guest-is-one-shared-user.md.
 public static class GuestSnapshot
 {
-    public record SnapshotCategory(string Name, string Description, string Colour, bool BuiltIn);
+    // Budget is 0, none, when the snapshot leaves it out, as it does for every Category today.
+    public record SnapshotCategory(string Name, string Description, string Colour, bool BuiltIn, int Budget = 0);
 
     public record SnapshotRule(string Keyword, string Category, DateTimeOffset CreatedAt, bool AiGenerated, Guid? UploadId);
 
@@ -79,7 +80,12 @@ public static class GuestSnapshot
             c => c.Name,
             c => new Category
             {
-                UserId = owner, Name = c.Name, Description = c.Description, Colour = c.Colour, BuiltIn = c.BuiltIn,
+                UserId = owner,
+                Name = c.Name,
+                Description = c.Description,
+                Colour = c.Colour,
+                BuiltIn = c.BuiltIn,
+                Budget = c.Budget,
             });
         var rules = snapshot.Rules.ToDictionary(
             r => r.Keyword,

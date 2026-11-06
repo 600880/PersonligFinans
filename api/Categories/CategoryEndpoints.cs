@@ -9,15 +9,20 @@ namespace PersonligFinans.Api.Categories;
 // one keeps its own.
 public record CategoryRequest(string? Name, string? Description, string? Colour);
 
-// TransactionCount and RuleCount are how many Transactions and Categorization Rules have the Category.
+// Budget is in whole kroner per month, 0 for none. TransactionCount and RuleCount are how many
+// Transactions and Categorization Rules have the Category.
 public record CategoryResponse(
     int Id,
     string Name,
     string Description,
     string Colour,
     bool BuiltIn,
+    int Budget,
     int TransactionCount,
     int RuleCount);
+
+// A Category's new Budget, in whole kroner per month, 0 for none.
+public record BudgetRequest(int CategoryId, int Budget);
 
 // How a Category in use is deleted, from the query string: its Categorization Rules and
 // Transactions move to a replacement Category, or its rules are deleted. Giving both is refused.
@@ -30,26 +35,14 @@ public record UncategorizedCountResponse(int Count);
 
 public static class CategoryEndpoints
 {
+    // The Built-in Categories that never have a Budget: money received, and money put aside.
+    private static readonly string[] NeverBudgeted = ["Income", "Savings"];
+
     public static void MapCategoryEndpoints(this IEndpointRouteBuilder app)
     {
         var api = app.MapGroup("/api/categories");
 
-        // The Built-in Categories first, in their own order, then the rest by name in the Norwegian
-        // alphabet, ignoring case. The client sorts an added or renamed Category the same way.
-        api.MapGet("/", async (AppDbContext db) =>
-            (await db.Categories
-                .Select(c => new CategoryResponse(
-                    c.Id,
-                    c.Name,
-                    c.Description,
-                    c.Colour,
-                    c.BuiltIn,
-                    db.Transactions.Count(t => t.CategoryId == c.Id),
-                    db.CategorizationRules.Count(r => r.CategoryId == c.Id)))
-                .ToListAsync())
-            .OrderBy(c => c.BuiltIn ? Array.IndexOf(Seeds.BuiltInOrder, c.Name) : Seeds.BuiltInOrder.Length)
-            .ThenBy(c => c.Name, NorwegianAlphabet.IgnoringCase)
-            .ToList());
+        api.MapGet("/", ListCategories);
 
         // The colours a Category can be given, in palette order, so the client never copies them.
         // Neither the fallback nor Uncategorized's grey is one of them.
@@ -59,12 +52,70 @@ public static class CategoryEndpoints
         api.MapGet("/uncategorized-count", async (AppDbContext db) =>
             new UncategorizedCountResponse(await db.Transactions.CountAsync(t => t.CategoryId == null)));
 
+        api.MapPut("/budgets", SetBudgets);
         api.MapPost("/", AddCategory);
         api.MapPut("/{id:int}", EditCategory);
         api.MapDelete("/{id:int}", DeleteCategory);
     }
 
-    // A new Category is never built-in, and nothing uses it yet.
+    // The Built-in Categories first, in their own order, then the rest by name in the Norwegian
+    // alphabet, ignoring case. The client sorts an added or renamed Category the same way.
+    private static async Task<List<CategoryResponse>> ListCategories(AppDbContext db) =>
+        (await db.Categories
+            .Select(c => new CategoryResponse(
+                c.Id,
+                c.Name,
+                c.Description,
+                c.Colour,
+                c.BuiltIn,
+                c.Budget,
+                db.Transactions.Count(t => t.CategoryId == c.Id),
+                db.CategorizationRules.Count(r => r.CategoryId == c.Id)))
+            .ToListAsync())
+        .OrderBy(c => c.BuiltIn ? Array.IndexOf(Seeds.BuiltInOrder, c.Name) : Seeds.BuiltInOrder.Length)
+        .ThenBy(c => c.Name, NorwegianAlphabet.IgnoringCase)
+        .ToList();
+
+    // Sets the Budgets of the Categories listed, all or none: one invalid entry refuses the whole
+    // request, its errors keyed on the entry's index. Categories left out keep their Budget. Returns
+    // every Category, as listed.
+    private static async Task<IResult> SetBudgets(List<BudgetRequest?> budgets, AppDbContext db)
+    {
+        var ids = budgets.OfType<BudgetRequest>().Select(b => b.CategoryId).ToList();
+        var categories = await db.Categories.Where(c => ids.Contains(c.Id)).ToDictionaryAsync(c => c.Id);
+
+        var errors = new Dictionary<string, string[]>();
+        var given = new HashSet<int>();
+        for (var i = 0; i < budgets.Count; i++)
+        {
+            if (budgets[i] is not { } entry)
+            {
+                errors[$"[{i}]"] = ["A Category and its Budget are required."];
+                continue;
+            }
+            var (categoryId, budget) = entry;
+
+            if (!categories.TryGetValue(categoryId, out var category))
+                errors[$"[{i}].categoryId"] = ["Category does not exist."];
+            else if (category.BuiltIn && NeverBudgeted.Contains(category.Name))
+                errors[$"[{i}].categoryId"] = [$"{category.Name} can't have a Budget."];
+            else if (!given.Add(categoryId))
+                errors[$"[{i}].categoryId"] = ["The same Category is given more than once."];
+
+            if (budget is < 0 or > AppDbContext.CategoryBudgetMax)
+                errors[$"[{i}].budget"] = [$"Budget must be a whole number from 0 to {AppDbContext.CategoryBudgetMax}."];
+        }
+        if (errors.Count > 0)
+            return Results.ValidationProblem(errors);
+
+        foreach (var (categoryId, budget) in budgets.OfType<BudgetRequest>())
+            categories[categoryId].Budget = budget;
+
+        await db.SaveChangesAsync();
+        return Results.Ok(await ListCategories(db));
+    }
+
+    // A new Category is never built-in, has no Budget, and nothing uses it yet.
     private static async Task<IResult> AddCategory(CategoryRequest request, AppDbContext db)
     {
         var (name, description, colour, errors) = await Validate(request, db, editedCategory: null);
@@ -85,7 +136,8 @@ public static class CategoryEndpoints
 
         return Results.Created(
             $"/api/categories/{category.Id}",
-            new CategoryResponse(category.Id, category.Name, category.Description, category.Colour, category.BuiltIn, 0, 0));
+            new CategoryResponse(
+                category.Id, category.Name, category.Description, category.Colour, category.BuiltIn, category.Budget, 0, 0));
     }
 
     private static async Task<IResult> EditCategory(int id, CategoryRequest request, AppDbContext db)
@@ -111,6 +163,7 @@ public static class CategoryEndpoints
             category.Description,
             category.Colour,
             category.BuiltIn,
+            category.Budget,
             await db.Transactions.CountAsync(t => t.CategoryId == id),
             await db.CategorizationRules.CountAsync(r => r.CategoryId == id)));
     }

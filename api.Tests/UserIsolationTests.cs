@@ -405,6 +405,21 @@ public class UserIsolationTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task AnotherUsersBudgets_CantBeSeenOrSet()
+    {
+        var own = await _a.PutAsJsonAsync(
+            "/api/categories/budgets", new[] { new { categoryId = _categoriesA.Groceries, budget = 4000 } });
+        Assert.Equal(HttpStatusCode.OK, own.StatusCode);
+
+        var others = await _b.PutAsJsonAsync(
+            "/api/categories/budgets", new[] { new { categoryId = _categoriesA.Groceries, budget = 100 } });
+
+        Assert.Equal(["Category does not exist."], (await ValidationErrors(others))["[0].categoryId"]);
+        Assert.Equal(4000, (await Categories(_a)).Single(c => c.Id == _categoriesA.Groceries).Budget);
+        Assert.All(await Categories(_b), c => Assert.Equal(0, c.Budget));
+    }
+
+    [Fact]
     public async Task BothUsers_CanImportTheSameBankStatement_ButNeitherTwice()
     {
         var pdf = Statement(AccountNumber());
