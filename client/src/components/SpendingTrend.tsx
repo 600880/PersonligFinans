@@ -296,7 +296,7 @@ export function SpendingTrend({
                 <LineChart
                   responsive
                   data={points}
-                  margin={{ top: 12, right: 12, bottom: 4, left: 8 }}
+                  margin={{ top: 12, right: 12, bottom: 4, left: 0 }}
                   style={{ width: '100%', height: CHART_HEIGHT, cursor: drawn.length > 0 ? 'pointer' : undefined }}
                   onClick={openNearestLine}
                 >
@@ -310,19 +310,12 @@ export function SpendingTrend({
                     tickMargin={8}
                   />
                   <YAxis
-                    tickFormatter={(value: number) => wholeKroner.format(value)}
+                    tickFormatter={(value: number) => `${wholeKroner.format(value)} kr`}
                     stroke={colours.axis}
                     tick={{ fontSize: 12, fill: colours.label }}
                     tickLine={false}
                     tickMargin={6}
                     width={72}
-                    label={{
-                      value: 'NOK per month',
-                      angle: -90,
-                      position: 'insideLeft',
-                      fontSize: 12,
-                      fill: colours.label,
-                    }}
                   />
                   {drawnBelowZero && <ReferenceLine y={0} stroke={colours.axis} />}
                   <Tooltip

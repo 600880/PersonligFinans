@@ -9041,11 +9041,11 @@ describe('Dashboard', () => {
     })
 
     function setBudgetButton() {
-      return within(dashboard()).getByRole('button', { name: 'Set Budget' })
+      return within(dashboard()).getByRole('button', { name: 'Set budget' })
     }
 
     function budgetDialog() {
-      return screen.getByRole('dialog', { name: 'Set Budget' })
+      return screen.getByRole('dialog', { name: 'Set monthly budget' })
     }
 
     function budgetInput(name: string) {
@@ -9429,10 +9429,10 @@ describe('Dashboard', () => {
       const user = userEvent.setup()
       await renderApp()
       await waitFor(() => expect(legend()).toEqual([['Groceries', '3 500,00 kr', '100,0 %']]))
-      const setBudget = within(dashboard()).getByRole('button', { name: 'Set Budget' })
+      const setBudget = within(dashboard()).getByRole('button', { name: 'Set budget' })
 
       await user.click(setBudget)
-      const dialog = screen.getByRole('dialog', { name: 'Set Budget' })
+      const dialog = screen.getByRole('dialog', { name: 'Set monthly budget' })
       await user.clear(within(dialog).getByRole('textbox', { name: 'Groceries' }))
       await user.type(within(dialog).getByRole('textbox', { name: 'Groceries' }), '4000')
       await user.click(within(dialog).getByRole('button', { name: 'Save' }))
@@ -9446,11 +9446,11 @@ describe('Dashboard', () => {
       )
 
       await user.click(setBudget)
-      await user.click(within(screen.getByRole('dialog', { name: 'Set Budget' })).getByRole('button', { name: 'Reset' }))
-      await user.click(within(screen.getByRole('dialog', { name: 'Set Budget' })).getByRole('button', { name: 'Save' }))
+      await user.click(within(screen.getByRole('dialog', { name: 'Set monthly budget' })).getByRole('button', { name: 'Reset' }))
+      await user.click(within(screen.getByRole('dialog', { name: 'Set monthly budget' })).getByRole('button', { name: 'Save' }))
 
       await waitFor(() => expect(legend()).toEqual([['Groceries', '3 500,00 kr', '100,0 %']]))
-      expect(screen.getAllByRole('button', { name: 'Set Budget' })).toHaveLength(1)
+      expect(screen.getAllByRole('button', { name: 'Set budget' })).toHaveLength(1)
     })
 
     it('scrolls the legend sideways on its own on a phone, so the page never runs wider than the screen', async () => {

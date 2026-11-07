@@ -78,7 +78,7 @@ export function BudgetDialog({ categories, onCancel, onSaved }: BudgetDialogProp
   }
 
   return (
-    <Dialog title="Set Budget" onCancel={onCancel}>
+    <Dialog title="Set monthly budget" onCancel={onCancel}>
       {errorMessage && <ErrorMessage className="mt-3">{errorMessage}</ErrorMessage>}
 
       <form className="mt-4 flex flex-col gap-3" onSubmit={handleSubmit} noValidate>
